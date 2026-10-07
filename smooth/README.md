@@ -1,8 +1,8 @@
 # Smooth
 
-Smooth is a lightweight web-based messaging application. Phase 1 provides the
-project structure, a running API, and a simple landing screen. Authentication,
-profiles, messaging, database models, and WebSockets are reserved for later phases.
+Smooth is a lightweight web-based messaging application. Phase 3 adds user
+registration to the existing SQLite-backed API and landing screen. Login,
+profiles, messaging, and WebSockets are reserved for later phases.
 
 ## Technology stack
 
@@ -11,8 +11,8 @@ profiles, messaging, database models, and WebSockets are reserved for later phas
   [Tailwind CSS](https://tailwindcss.com/docs/installation/using-vite).
 - Development: Git, environment files, and npm. Use Node.js 22.12+.
 
-SQLAlchemy and python-dotenv are installed for future phases; no database or
-environment configuration logic is implemented yet.
+The backend uses the existing SQLAlchemy and python-dotenv dependencies for
+database setup and environment configuration.
 
 ## Project structure
 
@@ -22,11 +22,16 @@ smooth/
 │   ├── app/
 │   │   ├── main.py
 │   │   ├── api/
+│   │   │   └── auth.py
 │   │   ├── models/
+│   │   │   └── user.py
 │   │   ├── schemas/
+│   │   │   └── auth.py
 │   │   ├── services/
 │   │   ├── database/
+│   │   │   └── database.py
 │   │   └── core/
+│   │       └── security.py
 │   ├── requirements.txt
 │   ├── .env.example
 │   └── .gitignore
@@ -76,8 +81,29 @@ Open http://127.0.0.1:8000/ to see:
 {"message": "Smooth API is running"}
 ```
 
-The `.env` file contains development placeholders only and is ignored by Git.
-It is not loaded by the Phase 1 entry point.
+The backend loads `backend/.env`; existing environment variables take precedence.
+Set `DATABASE_URL` using the value in `.env.example`. With the example SQLite URL,
+starting from `backend/` creates `backend/smooth.db`. Both `.env` and `*.db` are
+ignored by Git.
+
+Startup creates missing tables through SQLAlchemy metadata. The `users` table has
+an automatically generated integer `id`, a required unique indexed `username`
+(1–50 characters), a required `password_hash` (`String(255)`), and a `created_at`
+datetime set automatically by the database in UTC. No users are seeded.
+
+## Registration API
+
+`POST /api/auth/register` accepts JSON:
+
+```json
+{"username": "john", "password": "mypassword123"}
+```
+
+Usernames are trimmed, converted to lowercase, and validated as 3–30 characters
+using only `a-z`, `0-9`, and `_`. Passwords must be 8–128 characters and are stored
+as Argon2id hashes using argon2-cffi. Success returns HTTP 201 with only `id`,
+`username`, and `created_at`. Duplicate usernames return HTTP 409; invalid input
+returns HTTP 422. Registration does not create a token or session.
 
 ## Run the frontend
 
