@@ -1,0 +1,23 @@
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Frontend
+node_modules/
+dist/
+
+# Local database files
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Operating system files
+.DS_Store
