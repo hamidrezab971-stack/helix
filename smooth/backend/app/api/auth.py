@@ -6,10 +6,21 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.security import hash_password
+from app.core.auth import get_current_user
+from app.core.security import (
+    DUMMY_PASSWORD_HASH,
+    create_access_token,
+    hash_password,
+    verify_password,
+)
 from app.database.database import get_db
 from app.models.user import User
-from app.schemas.auth import RegistrationRequest, UserResponse
+from app.schemas.auth import (
+    LoginRequest,
+    RegistrationRequest,
+    TokenResponse,
+    UserResponse,
+)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -39,4 +50,25 @@ def register_user(
         raise
 
     db.refresh(user)
+    return user
+
+
+@router.post("/login", response_model=TokenResponse)
+def login(
+    data: LoginRequest, db: Annotated[Session, Depends(get_db)]
+) -> TokenResponse:
+    user = db.scalar(select(User).where(User.username == data.username))
+    password_hash = user.password_hash if user is not None else DUMMY_PASSWORD_HASH
+    password_valid = verify_password(data.password.get_secret_value(), password_hash)
+    if user is None or not password_valid:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return TokenResponse(access_token=create_access_token(user.id, user.username))
+
+
+@router.get("/me", response_model=UserResponse)
+def me(user: Annotated[User, Depends(get_current_user)]) -> User:
     return user

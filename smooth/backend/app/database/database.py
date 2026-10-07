@@ -1,18 +1,11 @@
-import os
 from collections.abc import Iterator
-from pathlib import Path
 
-from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+from app.core.config import DATABASE_URL
 
-database_url = os.getenv("DATABASE_URL")
-if not database_url:
-    raise RuntimeError("Set DATABASE_URL in the environment or backend/.env.")
-
-engine = create_engine(database_url, connect_args={"check_same_thread": False})
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine)
 
 

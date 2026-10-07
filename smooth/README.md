@@ -1,8 +1,8 @@
 # Smooth
 
-Smooth is a lightweight web-based messaging application. Phase 3 adds user
-registration to the existing SQLite-backed API and landing screen. Login,
-profiles, messaging, and WebSockets are reserved for later phases.
+Smooth is a lightweight web-based messaging application. Phase 4 adds login and
+JWT access tokens to the existing registration API. The frontend remains a
+landing screen; profiles, messaging, and WebSockets belong to later phases.
 
 ## Technology stack
 
@@ -31,6 +31,8 @@ smooth/
 │   │   ├── database/
 │   │   │   └── database.py
 │   │   └── core/
+│   │       ├── auth.py
+│   │       ├── config.py
 │   │       └── security.py
 │   ├── requirements.txt
 │   ├── .env.example
@@ -67,6 +69,7 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 cp .env.example .env
+python -c 'import secrets; from dotenv import set_key; set_key(".env", "SECRET_KEY", secrets.token_urlsafe(48))'
 python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
@@ -85,13 +88,17 @@ The backend loads `backend/.env`; existing environment variables take precedence
 Set `DATABASE_URL` using the value in `.env.example`. With the example SQLite URL,
 starting from `backend/` creates `backend/smooth.db`. Both `.env` and `*.db` are
 ignored by Git.
+For a fresh checkout, the setup command writes a random signing secret directly
+to `.env` without displaying it. Preserve existing `.env` values on later runs.
+`SECRET_KEY` must be at least 32 bytes. `ACCESS_TOKEN_EXPIRE_MINUTES` configures
+token lifetime; the example uses 1440 minutes (24 hours).
 
 Startup creates missing tables through SQLAlchemy metadata. The `users` table has
 an automatically generated integer `id`, a required unique indexed `username`
 (1–50 characters), a required `password_hash` (`String(255)`), and a `created_at`
 datetime set automatically by the database in UTC. No users are seeded.
 
-## Registration API
+## Authentication API
 
 `POST /api/auth/register` accepts JSON:
 
@@ -104,6 +111,16 @@ using only `a-z`, `0-9`, and `_`. Passwords must be 8–128 characters and are s
 as Argon2id hashes using argon2-cffi. Success returns HTTP 201 with only `id`,
 `username`, and `created_at`. Duplicate usernames return HTTP 409; invalid input
 returns HTTP 422. Registration does not create a token or session.
+
+`POST /api/auth/login` accepts the same JSON fields and normalizes the username.
+Correct credentials return `access_token` and `token_type: "bearer"`. Unknown
+usernames and wrong passwords both return HTTP 401 with
+`"Invalid username or password"`. Tokens use HS256 and contain only `sub`,
+`username`, `iat`, and `exp`.
+
+`GET /api/auth/me` requires `Authorization: Bearer <token>` and returns only
+`id`, `username`, and `created_at`. Missing, invalid, expired tokens and tokens
+for deleted users return HTTP 401. No refresh tokens or logout are implemented.
 
 ## Run the frontend
 
