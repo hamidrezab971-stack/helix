@@ -1,4 +1,4 @@
-const API_URL = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '')
+export const API_URL = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '')
 const GENERIC_ERROR = 'Something went wrong. Please try again.'
 
 function apiError(message, status) {
@@ -94,8 +94,8 @@ export async function getUsers(token, search = '', signal) {
   return data.map(safeUser)
 }
 
-function safeMessage(data) {
-  if (!Number.isInteger(data?.id) || !Number.isInteger(data.conversation_id) || !Number.isInteger(data.sender_id) || typeof data.content !== 'string' || typeof data.created_at !== 'string') {
+export function safeMessage(data) {
+  if (![data?.id, data?.conversation_id, data?.sender_id].every((id) => Number.isSafeInteger(id) && id > 0) || typeof data.content !== 'string' || !data.content.trim() || Array.from(data.content).length > 2000 || typeof data.created_at !== 'string' || !Number.isFinite(Date.parse(data.created_at))) {
     throw apiError(GENERIC_ERROR)
   }
   return { id: data.id, conversation_id: data.conversation_id, sender_id: data.sender_id, content: data.content, created_at: data.created_at }

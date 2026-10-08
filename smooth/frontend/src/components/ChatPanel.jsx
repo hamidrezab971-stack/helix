@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { getMessages, getOrCreateConversation, sendMessage } from '../services/api.js'
 
-export default function ChatPanel({ user, selectedUser, token, onUnauthorized }) {
+function mergeMessages(current, incoming) {
+  const messages = new Map([...current, ...incoming].map((message) => [message.id, message]))
+  return [...messages.values()].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id)
+}
+
+export default function ChatPanel({ user, selectedUser, token, onUnauthorized, subscribeToMessages }) {
   const [conversation, setConversation] = useState(null)
   const [messages, setMessages] = useState([])
   const [stage, setStage] = useState('opening')
@@ -13,6 +18,13 @@ export default function ChatPanel({ user, selectedUser, token, onUnauthorized })
   const pending = useRef(false)
   const sendController = useRef(null)
   const history = useRef(null)
+  const conversationId = useRef(null)
+
+  useEffect(() => subscribeToMessages((message) => {
+    if (message.conversation_id !== conversationId.current) return
+    if (message.sender_id !== user.id && message.sender_id !== selectedUser.id) return
+    setMessages((previous) => mergeMessages(previous, [message]))
+  }), [subscribeToMessages, user.id, selectedUser.id])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -20,6 +32,7 @@ export default function ChatPanel({ user, selectedUser, token, onUnauthorized })
     setStage('opening')
     setLoadError('')
     setConversation(null)
+    conversationId.current = null
     setMessages([])
 
     async function openConversation() {
@@ -27,12 +40,14 @@ export default function ChatPanel({ user, selectedUser, token, onUnauthorized })
       try {
         const resolved = await getOrCreateConversation(token, selectedUser.id, controller.signal)
         if (!active) return
+        conversationId.current = resolved.id
         setConversation(resolved)
         setStage('loading')
         fallback = 'Unable to load messages. Please try again.'
         const loaded = await getMessages(token, resolved.id, controller.signal)
         if (!active) return
-        setMessages(loaded)
+        // Preserve events received while the HTTP history request was in flight.
+        setMessages((previous) => mergeMessages(loaded, previous))
         setStage('ready')
       } catch (error) {
         if (!active || error.name === 'AbortError') return
@@ -75,7 +90,7 @@ export default function ChatPanel({ user, selectedUser, token, onUnauthorized })
     try {
       const message = await sendMessage(token, conversation.id, trimmed, controller.signal)
       if (controller.signal.aborted) return
-      setMessages((previous) => [...previous, message])
+      setMessages((previous) => mergeMessages(previous, [message]))
       setContent('')
     } catch (error) {
       if (controller.signal.aborted || error.name === 'AbortError') return
@@ -94,7 +109,7 @@ export default function ChatPanel({ user, selectedUser, token, onUnauthorized })
     <section aria-labelledby="chat-title" className="flex min-w-0 flex-col p-6 sm:p-8">
       <header className="border-b border-stone-200/80 pb-5">
         <h2 id="chat-title" className="break-all text-xl font-semibold tracking-tight text-stone-900">@{selectedUser.username}</h2>
-        <p className="mt-1 text-xs text-stone-500">Updates when you open this conversation or send a message.</p>
+        <p className="mt-1 text-xs text-stone-500">New messages appear while you’re connected.</p>
       </header>
       {stage === 'opening' || stage === 'loading' ? (
         <p role="status" className="min-h-64 py-8 text-sm text-stone-500">{stage === 'opening' ? 'Opening conversation...' : 'Loading messages...'}</p>

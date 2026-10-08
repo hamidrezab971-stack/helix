@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.auth import router as auth_router
 from app.api.conversations import router as conversations_router
+from app.api.realtime import router as realtime_router
 from app.api.users import router as users_router
 from app.core.config import FRONTEND_ORIGIN
 from app.database.database import Base, engine
@@ -32,6 +33,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(conversations_router)
+app.include_router(realtime_router)
 
 
 @app.exception_handler(RequestValidationError)

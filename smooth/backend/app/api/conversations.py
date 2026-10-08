@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Response, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -11,6 +11,7 @@ from app.models.conversation import Conversation
 from app.models.conversation_member import ConversationMember
 from app.models.message import Message
 from app.models.user import User
+from app.realtime.manager import manager
 from app.schemas.auth import UserResponse
 from app.schemas.conversations import (
     ConversationResponse,
@@ -103,9 +104,10 @@ def get_messages(
 def send_message(
     conversation_id: Annotated[int, Path(gt=0, lt=2**63)],
     data: MessageRequest,
+    background_tasks: BackgroundTasks,
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
-) -> Message:
+) -> MessageResponse:
     require_membership(conversation_id, user.id, db)
     message = Message(
         conversation_id=conversation_id, sender_id=user.id, content=data.content
@@ -113,4 +115,16 @@ def send_message(
     db.add(message)
     db.commit()
     db.refresh(message)
-    return message
+    saved = MessageResponse.model_validate(message)
+    member_ids = list(
+        db.scalars(
+            select(ConversationMember.user_id).where(
+                ConversationMember.conversation_id == conversation_id
+            )
+        )
+    )
+    background_tasks.add_task(
+        manager.broadcast, member_ids,
+        {"type": "message:new", "data": saved.model_dump(mode="json")},
+    )
+    return saved

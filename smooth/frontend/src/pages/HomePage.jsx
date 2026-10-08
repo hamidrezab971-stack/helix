@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import ChatPanel from '../components/ChatPanel.jsx'
 import { getUsers } from '../services/api.js'
+import { connectRealtime } from '../services/realtime.js'
 
 export default function HomePage({ user, token, error, onLogout, onUnauthorized }) {
   const [search, setSearch] = useState('')
@@ -11,6 +12,22 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
   const [selectedUser, setSelectedUser] = useState(null)
   const [conversationAttempt, setConversationAttempt] = useState(0)
   const normalizedSearch = search.trim().toLowerCase()
+  const messageListeners = useRef(new Set())
+
+  const subscribeToMessages = useCallback((listener) => {
+    messageListeners.current.add(listener)
+    return () => messageListeners.current.delete(listener)
+  }, [])
+
+  useEffect(() => {
+    if (!token) return
+    return connectRealtime(token, {
+      onMessage: (message) => {
+        for (const listener of messageListeners.current) listener(message)
+      },
+      onUnauthorized,
+    })
+  }, [token, onUnauthorized])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -97,7 +114,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
         </section>
         <aside aria-label="Conversation" className="min-w-0 border-t border-stone-200/80 bg-[#fcfbf9] md:border-t-0 md:border-l">
           {selectedUser ? (
-            <ChatPanel key={`${selectedUser.id}:${conversationAttempt}`} user={user} selectedUser={selectedUser} token={token} onUnauthorized={onUnauthorized} />
+            <ChatPanel key={`${selectedUser.id}:${conversationAttempt}`} user={user} selectedUser={selectedUser} token={token} onUnauthorized={onUnauthorized} subscribeToMessages={subscribeToMessages} />
           ) : (
             <div className="flex h-full flex-col justify-center p-6 sm:p-8">
               <p className="text-xs font-semibold uppercase tracking-widest text-stone-500">A little more connection</p>

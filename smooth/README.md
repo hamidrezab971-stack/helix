@@ -1,8 +1,8 @@
 # Smooth
 
-Smooth is a lightweight web-based messaging application. Phase 7 adds persistent
-one-to-one conversations and text messaging through HTTP. Real-time updates and
-WebSockets are not implemented yet.
+Smooth is a lightweight web-based messaging application. Phase 8 adds real-time
+delivery of persisted text messages through native FastAPI/browser WebSockets.
+HTTP remains responsible for creating messages.
 
 ## Technology stack
 
@@ -24,7 +24,8 @@ smooth/
 │   │   ├── api/
 │   │   │   ├── auth.py
 │   │   │   ├── users.py
-│   │   │   └── conversations.py
+│   │   │   ├── conversations.py
+│   │   │   └── realtime.py
 │   │   ├── models/
 │   │   │   ├── user.py
 │   │   │   ├── conversation.py
@@ -34,6 +35,8 @@ smooth/
 │   │   │   ├── auth.py
 │   │   │   └── conversations.py
 │   │   ├── services/
+│   │   ├── realtime/
+│   │   │   └── manager.py
 │   │   ├── database/
 │   │   │   └── database.py
 │   │   └── core/
@@ -53,7 +56,8 @@ smooth/
 │   │   │   ├── RegisterPage.jsx
 │   │   │   └── HomePage.jsx
 │   │   ├── services/
-│   │   │   └── api.js
+│   │   │   ├── api.js
+│   │   │   └── realtime.js
 │   │   ├── hooks/
 │   │   ├── utils/
 │   │   ├── App.jsx
@@ -166,9 +170,26 @@ All endpoints require `Authorization: Bearer <token>`:
 History and sending require membership; inaccessible or nonexistent conversations
 return 404. Missing, invalid, or expired tokens return 401. Startup creates the
 new tables in the existing SQLite database and enables foreign-key enforcement.
-There are no seeded messages, polling, or WebSockets. History loads when a user
-is selected (including reselecting the same user); sending appends the returned
-message. Reopen the conversation to see another user's new messages.
+History loads when a user is selected (including reselecting the same user).
+
+## Real-time delivery
+
+Connect to `/ws` and send `{"type":"auth","token":"<access_token>"}` within five
+seconds. Successful authentication returns `{"type":"auth:ok"}`; invalid or
+expired credentials return a generic `auth:error` and close code 4401. Browser
+origins must match `FRONTEND_ORIGIN`. Authentication uses a short-lived database
+session; the socket closes when its access token expires. Tokens are not logged
+or echoed.
+
+After the HTTP send endpoint commits a message, both conversation members receive
+`{"type":"message:new","data":{...}}` with the same safe fields as the HTTP response.
+The in-memory manager supports multiple tabs and is for a single server process.
+The pinned `wsproto` dependency supplies WebSocket transport for bare Uvicorn.
+The frontend deduplicates by message ID, orders by timestamp then ID, closes its
+socket on logout, and reconnects after two seconds on unexpected disconnection.
+Socket clients cannot create messages. There is no polling or guaranteed event
+delivery: persisted HTTP history remains the source of truth. Reopen a conversation
+or refresh and select it again to recover messages missed while disconnected.
 
 ## Run the frontend
 
@@ -182,7 +203,9 @@ npm run dev -- --host 127.0.0.1
 ```
 
 Set `VITE_API_URL=http://127.0.0.1:8000` in `frontend/.env` (the same value is the
-local fallback). Restart Vite after changing it. Keep existing environment files
+local fallback). `VITE_WS_URL` optionally overrides the WebSocket URL; otherwise
+it is derived from `VITE_API_URL` using `ws`/`wss` and `/ws`. Use `wss` with HTTPS.
+Restart Vite after changing configuration. Keep existing environment files
 when rerunning the setup commands.
 
 Open http://127.0.0.1:5173/ to register or log in. Registration returns to login;
