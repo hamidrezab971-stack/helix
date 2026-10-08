@@ -3,16 +3,19 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.auth import router as auth_router
-from app.database.database import engine
-from app.models.user import User
+from app.api.conversations import router as conversations_router
+from app.api.users import router as users_router
+from app.core.config import FRONTEND_ORIGIN
+from app.database.database import Base, engine
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    User.metadata.create_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
     try:
         yield
     finally:
@@ -20,7 +23,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Smooth API", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[FRONTEND_ORIGIN],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 app.include_router(auth_router)
+app.include_router(users_router)
+app.include_router(conversations_router)
 
 
 @app.exception_handler(RequestValidationError)

@@ -19,3 +19,7 @@ except (KeyError, ValueError):
     raise RuntimeError("Set ACCESS_TOKEN_EXPIRE_MINUTES to a positive integer.") from None
 if ACCESS_TOKEN_EXPIRE_MINUTES <= 0:
     raise RuntimeError("Set ACCESS_TOKEN_EXPIRE_MINUTES to a positive integer.")
+
+FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN")
+if not FRONTEND_ORIGIN:
+    raise RuntimeError("Set FRONTEND_ORIGIN in the environment or backend/.env.")
