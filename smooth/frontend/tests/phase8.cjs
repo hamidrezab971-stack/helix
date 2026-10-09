@@ -94,6 +94,21 @@ function directoryRow(page, name) {
   return page.locator('.user-row').filter({ hasText: `@${name}` })
 }
 
+function recentRow(page, name) {
+  return page.locator('.recent-row').filter({ hasText: `@${name}` })
+}
+
+async function openRecent(page, name) {
+  let creates = 0
+  const observe = request => { if (request.method() === 'POST' && request.url().includes('/api/conversations/with/')) creates++ }
+  page.on('request', observe)
+  await recentRow(page, name).click()
+  await expect(page.locator('#chat-title')).toHaveText(`@${name}`)
+  await expect(page.locator('#message-content')).toBeEnabled()
+  page.off('request', observe)
+  assert.equal(creates, 0, 'Recent rows must load existing history without a create request')
+}
+
 async function send(page, content) {
   await page.locator('#message-content').fill(content)
   const response = page.waitForResponse(r => r.url().endsWith('/messages') && r.request().method() === 'POST')
@@ -121,12 +136,14 @@ async function main() {
   let alice = await newPage(aliceContext)
   const bob = await newPage(bobContext), charlie = await newPage(charlieContext)
   await registerAndLogin(alice, names.alice)
+  await expect(alice.getByText('No conversations yet.')).toBeVisible()
   await registerAndLogin(bob, names.bob)
   await registerAndLogin(charlie, names.charlie)
   await alice.locator('#user-search').fill(names.bob.toUpperCase())
   await expect(directoryRow(alice, names.bob)).toBeVisible()
   await alice.locator('#user-search').fill('')
   await select(alice, names.bob)
+  await expect(recentRow(alice, names.bob).getByLabel('Last message preview')).toHaveText('No messages yet.')
   await select(bob, names.alice)
   const bobTab = await newPage(bobContext)
   await bobTab.waitForFunction(() => window.realtimeTest.authenticated === 1)
@@ -195,6 +212,9 @@ async function main() {
   await alice.unroute('**/api/conversations/*/messages')
   await once(alice, 'hello bob')
   await status(alice, 'hello bob', 'Delivered')
+  await expect(recentRow(alice, names.bob).getByLabel('Last message preview')).toHaveText('You: hello bob')
+  await expect(recentRow(alice, names.bob).locator('time')).toHaveText(/\S/)
+  await expect(recentRow(alice, names.bob)).toContainText('Online')
   await select(bob, names.alice)
   await status(alice, 'hello bob', 'Read')
   await select(bobTab, names.alice)
@@ -205,6 +225,7 @@ async function main() {
   for (const page of [alice, bob, bobTab]) await once(page, 'hello alice')
   await status(bob, 'hello alice', 'Read')
   await status(bobTab, 'hello alice', 'Read')
+  await expect(recentRow(alice, names.bob).getByLabel('Last message preview')).toHaveText('hello alice')
   // A third authenticated user cannot forge receipts, even with identity claims.
   const originalStatus = await alice.evaluate(id => window.realtimeTest.statuses.filter(s => s.message_id === id).at(-1), firstMessage.id)
   await charlie.evaluate(id => {
@@ -223,6 +244,8 @@ async function main() {
   await send(bob, 'other conversation')
   await alice.waitForFunction(() => window.realtimeTest.events.some(m => m.content === 'other conversation'))
   await expect(alice.locator('.message-bubble')).toHaveCount(0)
+  await expect(alice.locator('.recent-row').first()).toContainText(names.bob)
+  await expect(recentRow(alice, names.bob).getByLabel('Last message preview')).toHaveText('other conversation')
   await status(bob, 'other conversation', 'Delivered')
   await select(alice, names.bob)
   await once(alice, 'other conversation')
@@ -268,15 +291,68 @@ async function main() {
   await once(alice, 'after restart')
   await once(bob, 'after restart')
   await status(bob, 'after restart', 'Read')
+  await expect(recentRow(alice, names.bob).getByLabel('Last message preview')).toHaveText('after restart')
+  await expect(recentRow(alice, names.charlie).getByLabel('Last message preview')).toHaveText('No messages yet.')
+  await openRecent(alice, names.bob)
+  await once(alice, 'hello bob')
+  await expect(recentRow(alice, names.bob)).toHaveAttribute('aria-pressed', 'true')
+
+  await select(charlie, names.alice)
+  await openRecent(alice, names.charlie)
+  const longPreview = `A long preview ${'detail '.repeat(80)}\nsecond line`
+  await send(alice, longPreview)
+  await expect(alice.locator('.recent-row').first()).toContainText(names.charlie)
+  const preview = recentRow(alice, names.charlie).getByLabel('Last message preview')
+  await expect(preview).toHaveText(`You: ${longPreview.replace(/\s+/g, ' ')}`)
+  assert.equal(await preview.evaluate(element => getComputedStyle(element).textOverflow), 'ellipsis')
+  await send(bob, 'Bob becomes most recent')
+  await expect(alice.locator('.recent-row').first()).toContainText(names.bob)
+  await expect(recentRow(alice, names.bob).getByLabel('Last message preview')).toHaveText('Bob becomes most recent')
+  await status(bob, 'Bob becomes most recent', 'Delivered')
+  await openRecent(alice, names.bob)
+  await once(alice, 'Bob becomes most recent')
+  await status(bob, 'Bob becomes most recent', 'Read')
+  await alice.reload()
+  await expect(alice.locator('.recent-row').first()).toContainText(names.bob)
+  await expect(recentRow(alice, names.charlie)).toContainText('A long preview')
+  await openRecent(alice, names.bob)
+  await status(alice, 'offline recipient', 'Read')
+
+  // Mobile switches between full-width list and chat; rows remain keyboard buttons.
+  await alice.setViewportSize({ width: 375, height: 812 })
+  await expect(alice.getByLabel('Recent conversations')).toBeHidden()
+  await expect(alice.getByRole('button', { name: 'Back to chats' })).toBeVisible()
+  await alice.getByRole('button', { name: 'Back to chats' }).click()
+  await expect(alice.getByLabel('Recent conversations')).toBeVisible()
+  await expect(alice.locator('#message-content')).toHaveCount(0)
+  await recentRow(alice, names.bob).focus()
+  await alice.keyboard.press('Enter')
+  await expect(alice.locator('#chat-title')).toHaveText(`@${names.bob}`)
+  assert.equal(await alice.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
+  await alice.getByRole('button', { name: 'Back to chats' }).click()
+  await alice.setViewportSize({ width: 1280, height: 800 })
+
+  // Explicit failure and retry; no timer-based polling is used by the app.
+  await alice.route('**/api/conversations', route => route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"test unavailable"}' }))
+  await alice.reload()
+  await expect(alice.getByText('Unable to load conversations.')).toBeVisible()
+  await alice.unroute('**/api/conversations')
+  await alice.getByRole('button', { name: 'Retry conversations' }).click()
+  await expect(recentRow(alice, names.bob)).toBeVisible()
+  await alice.route('**/api/conversations', route => route.fulfill({ status: 401, contentType: 'application/json', body: '{"detail":"test expired"}' }))
+  await alice.reload()
+  await expect(alice.locator('#login-username')).toBeVisible()
+  assert.equal(await alice.evaluate(() => localStorage.getItem('smooth_access_token')), null)
+  console.log('PASS recent empty state, creation, previews/time/presence, Alice/Bob/Charlie ordering, existing-row history, refresh, mobile/keyboard, retry and 401 cleanup')
   // Confirm persisted count directly, including across server restart.
   const { execFileSync } = require('node:child_process')
   const count = execFileSync(path.join(backendDirectory, '.venv/bin/python'), ['-c', 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("SELECT count(*) FROM messages").fetchone()[0])', `${temporary}/test.db`], { encoding: 'utf8' })
-  assert.equal(Number(count.trim()), 5)
+  assert.equal(Number(count.trim()), 7)
   const receipts = execFileSync(path.join(backendDirectory, '.venv/bin/python'), ['-c', 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("SELECT count(*), count(DISTINCT message_id), count(delivered_at), count(read_at) FROM message_receipts").fetchone())', `${temporary}/test.db`], { encoding: 'utf8' })
-  assert.equal(receipts.trim(), '(5, 5, 5, 5)')
+  assert.equal(receipts.trim(), '(7, 7, 7, 7)')
   assert.deepEqual(errors, [])
-  console.log('PASS backend restart/reconnect, exactly five persisted messages, zero uncaught browser errors')
-  console.log('PASS inactive Delivered, active Read, receipt-before-HTTP race, multiple-tab receipts, offline Sent/history Read, refresh persistence, forged acknowledgements, five persisted receipts')
+  console.log('PASS backend restart/reconnect, exactly seven persisted messages, zero uncaught browser errors')
+  console.log('PASS inactive Delivered, active Read, receipt-before-HTTP race, multiple-tab receipts, offline Sent/history Read, refresh persistence, forged acknowledgements, seven persisted receipts')
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1 }).finally(async () => {

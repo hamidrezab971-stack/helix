@@ -32,3 +32,19 @@ class ConversationResponse(BaseModel):
     id: int
     created_at: datetime
     other_user: UserResponse
+
+
+class LastMessageResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    sender_id: int
+    content: str
+    created_at: datetime
+
+
+class RecentConversationResponse(BaseModel):
+    id: int
+    other_user: UserResponse
+    last_message: LastMessageResponse | None
+    updated_at: datetime

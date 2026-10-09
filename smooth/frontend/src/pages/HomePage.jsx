@@ -1,7 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ChatPanel from '../components/ChatPanel.jsx'
-import { getUsers } from '../services/api.js'
+import { getUsers, getConversations } from '../services/api.js'
 import { connectRealtime } from '../services/realtime.js'
+
+function newerMessage(incoming, current) {
+  return incoming && (!current || Date.parse(incoming.created_at) > Date.parse(current.created_at)
+    || (Date.parse(incoming.created_at) === Date.parse(current.created_at) && incoming.id > current.id))
+}
+
+function sortRecent(conversations) {
+  return [...conversations].sort((a, b) => {
+    if (!a.last_message || !b.last_message) return Number(Boolean(b.last_message)) - Number(Boolean(a.last_message)) || b.id - a.id
+    return Date.parse(b.last_message.created_at) - Date.parse(a.last_message.created_at) || b.last_message.id - a.last_message.id || b.id - a.id
+  }).slice(0, 50)
+}
+
+function recentTime(timestamp) {
+  // SQLite stores UTC datetimes without an offset; format in the viewer's zone.
+  const date = new Date(/(Z|[+-]\d\d:\d\d)$/.test(timestamp) ? timestamp : `${timestamp}Z`)
+  const today = new Date()
+  return new Intl.DateTimeFormat(undefined, date.toDateString() === today.toDateString()
+    ? { hour: '2-digit', minute: '2-digit' } : { month: 'short', day: 'numeric' }).format(date)
+}
 
 export default function HomePage({ user, token, error, onLogout, onUnauthorized }) {
   const [search, setSearch] = useState('')
@@ -10,6 +30,10 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
   const [loadError, setLoadError] = useState('')
   const [retryAttempt, setRetryAttempt] = useState(0)
   const [selectedUser, setSelectedUser] = useState(null)
+  const [selectedConversation, setSelectedConversation] = useState(null)
+  const [recent, setRecent] = useState([])
+  const [recentLoading, setRecentLoading] = useState(true)
+  const [recentError, setRecentError] = useState('')
   const [conversationAttempt, setConversationAttempt] = useState(0)
   const [onlineUserIds, setOnlineUserIds] = useState(new Set())
   const normalizedSearch = search.trim().toLowerCase()
@@ -17,6 +41,46 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
   const typingListeners = useRef(new Set())
   const statusListeners = useRef(new Set())
   const realtime = useRef(null)
+  const recentController = useRef(null)
+
+  const refreshRecent = useCallback(async () => {
+    recentController.current?.abort()
+    const controller = new AbortController()
+    recentController.current = controller
+    setRecentLoading(true)
+    setRecentError('')
+    try {
+      const loaded = await getConversations(token, controller.signal)
+      if (controller.signal.aborted) return
+      setRecent((previous) => sortRecent(loaded.map((conversation) => {
+        const current = previous.find((item) => item.id === conversation.id)
+        // Preserve a newer WebSocket preview received during this HTTP request.
+        return newerMessage(current?.last_message, conversation.last_message)
+          ? { ...conversation, last_message: current.last_message, updated_at: current.updated_at } : conversation
+      })))
+    } catch (error) {
+      if (controller.signal.aborted || error.name === 'AbortError') return
+      if (error.status === 401) onUnauthorized()
+      else setRecentError('Unable to load conversations.')
+    } finally {
+      if (!controller.signal.aborted) setRecentLoading(false)
+    }
+  }, [token, onUnauthorized])
+
+  useEffect(() => {
+    refreshRecent()
+    return () => recentController.current?.abort()
+  }, [refreshRecent])
+
+  const updateRecentMessage = useCallback((message) => {
+    setRecent((previous) => sortRecent(previous.map((conversation) => {
+      if (conversation.id !== message.conversation_id || !newerMessage(message, conversation.last_message)) return conversation
+      return { ...conversation, last_message: { id: message.id, sender_id: message.sender_id, content: message.content, created_at: message.created_at }, updated_at: message.created_at }
+    })))
+    refreshRecent()
+  }, [refreshRecent])
+
+  const onConversationOpened = useCallback(() => { refreshRecent() }, [refreshRecent])
 
   const subscribeToStatus = useCallback((listener) => {
     statusListeners.current.add(listener)
@@ -46,11 +110,15 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
       onMessage: (message) => {
         for (const listener of messageListeners.current) listener(message)
         if (message.sender_id !== user.id) acknowledge('message:delivered', message.id)
+        updateRecentMessage(message)
       },
       onStatus: (status) => {
         for (const listener of statusListeners.current) listener(status)
       },
-      onPresenceSnapshot: (ids) => setOnlineUserIds(new Set(ids)),
+      onPresenceSnapshot: (ids) => {
+        setOnlineUserIds(new Set(ids))
+        refreshRecent()
+      },
       onPresenceUpdate: ({ user_id, status }) => setOnlineUserIds((previous) => {
         const next = new Set(previous)
         if (status === 'online') next.add(user_id)
@@ -71,7 +139,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
       connection.stop()
       realtime.current = null
     }
-  }, [token, onUnauthorized, user.id, acknowledge])
+  }, [token, onUnauthorized, user.id, acknowledge, updateRecentMessage, refreshRecent])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -108,8 +176,8 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
     <section aria-labelledby="directory-title" className="w-full max-w-5xl overflow-hidden rounded-3xl border border-stone-200/80 bg-white shadow-[0_16px_64px_-32px_rgba(56,40,25,0.2)]">
       <header className="flex flex-col gap-5 border-b border-stone-200/80 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
         <div className="min-w-0">
-          <h1 id="directory-title" className="text-2xl font-semibold tracking-tight text-stone-900">Find your people.</h1>
-          <p className="mt-2 text-sm text-stone-500">Browse the Smooth directory.</p>
+          <h1 id="directory-title" className="text-2xl font-semibold tracking-tight text-stone-900">Your conversations.</h1>
+          <p className="mt-2 text-sm text-stone-500">Recent chats and people.</p>
         </div>
         <div className="flex min-w-0 items-center justify-between gap-4">
           <span className="min-w-0 break-all text-sm font-medium text-stone-700">@{user.username}</span>
@@ -118,7 +186,43 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
       </header>
       {error && <p role="alert" className="form-error m-6">{error}</p>}
       <div className="grid md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-        <section aria-label="User directory" className="min-w-0 p-6 sm:p-8">
+        <div className={`min-w-0 p-6 sm:p-8 ${selectedUser ? 'hidden md:block' : 'block'}`}>
+          <section aria-labelledby="recent-title" className="mb-8">
+            <h2 id="recent-title" className="text-sm font-semibold text-stone-800">Chats</h2>
+            {recentError && <div className="mt-3 space-y-3">
+              <p role="alert" className="form-error">{recentError}</p>
+              <button type="button" className="secondary-button" onClick={refreshRecent}>Retry conversations</button>
+            </div>}
+            {recentLoading && recent.length === 0 ? <p role="status" className="mt-3 text-sm text-stone-500">Loading conversations...</p>
+              : !recentError && recent.length === 0 ? <p className="mt-3 text-sm leading-6 text-stone-500">No conversations yet.<br />Find someone to start chatting.</p>
+              : <ul aria-label="Recent conversations" className="mt-3 space-y-2">
+                {recent.map((conversation) => (
+                  <li key={conversation.id}>
+                    <button type="button" className="recent-row" aria-pressed={selectedUser?.id === conversation.other_user.id}
+                      onClick={() => {
+                        setSelectedUser(conversation.other_user)
+                        setSelectedConversation(conversation)
+                        setConversationAttempt((attempt) => attempt + 1)
+                      }}>
+                      <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+                        <span className="flex min-w-0 items-center justify-between gap-2">
+                          <span className="truncate font-medium">@{conversation.other_user.username}</span>
+                          {conversation.last_message && <time className="shrink-0 text-[11px] text-stone-500" dateTime={conversation.last_message.created_at} title={conversation.last_message.created_at}>{recentTime(conversation.last_message.created_at)}</time>}
+                        </span>
+                        <span className="block truncate text-xs text-stone-500" aria-label="Last message preview">
+                          {conversation.last_message ? `${conversation.last_message.sender_id === user.id ? 'You: ' : ''}${conversation.last_message.content.replace(/\s+/g, ' ')}` : 'No messages yet.'}
+                        </span>
+                        <span className={`text-[11px] ${onlineUserIds.has(conversation.other_user.id) ? 'text-emerald-700' : 'text-stone-500'}`}>
+                          {onlineUserIds.has(conversation.other_user.id) ? 'Online' : 'Offline'}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>}
+          </section>
+        <section aria-label="User directory">
+          <h2 className="mb-3 text-sm font-semibold text-stone-800">People</h2>
           <label htmlFor="user-search" className="text-sm font-medium text-stone-800">Search by username</label>
           <input
             id="user-search" type="search" className="auth-input" placeholder="Search users..."
@@ -144,6 +248,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
                       aria-pressed={selectedUser?.id === directoryUser.id}
                       onClick={() => {
                         setSelectedUser(directoryUser)
+                        setSelectedConversation(null)
                         setConversationAttempt((attempt) => attempt + 1)
                       }}
                     >
@@ -159,9 +264,13 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
             )}
           </div>
         </section>
-        <aside aria-label="Conversation" className="min-w-0 border-t border-stone-200/80 bg-[#fcfbf9] md:border-t-0 md:border-l">
+        </div>
+        <aside aria-label="Conversation" className={`min-w-0 border-t border-stone-200/80 bg-[#fcfbf9] md:border-t-0 md:border-l ${selectedUser ? 'block' : 'hidden md:block'}`}>
           {selectedUser ? (
-            <ChatPanel key={`${selectedUser.id}:${conversationAttempt}`} user={user} selectedUser={selectedUser} token={token} onUnauthorized={onUnauthorized} subscribeToMessages={subscribeToMessages} subscribeToStatus={subscribeToStatus} acknowledge={acknowledge} subscribeToTyping={subscribeToTyping} sendTyping={sendTyping} isOnline={onlineUserIds.has(selectedUser.id)} />
+            <>
+              <button type="button" className="secondary-button mx-6 mt-5 md:hidden" onClick={() => { setSelectedUser(null); setSelectedConversation(null) }}>Back to chats</button>
+              <ChatPanel key={`${selectedUser.id}:${conversationAttempt}`} user={user} selectedUser={selectedUser} initialConversation={selectedConversation} onConversationOpened={onConversationOpened} onMessageSent={updateRecentMessage} token={token} onUnauthorized={onUnauthorized} subscribeToMessages={subscribeToMessages} subscribeToStatus={subscribeToStatus} acknowledge={acknowledge} subscribeToTyping={subscribeToTyping} sendTyping={sendTyping} isOnline={onlineUserIds.has(selectedUser.id)} />
+            </>
           ) : (
             <div className="flex h-full flex-col justify-center p-6 sm:p-8">
               <p className="text-xs font-semibold uppercase tracking-widest text-stone-500">A little more connection</p>

@@ -106,7 +106,8 @@ button:disabled,
   line-height: 1.5;
 }
 
-.user-row {
+.user-row,
+.recent-row {
   display: flex;
   width: 100%;
   min-height: 3.5rem;
@@ -123,11 +124,13 @@ button:disabled,
   cursor: pointer;
 }
 
-.user-row:hover {
+.user-row:hover,
+.recent-row:hover {
   background: #fcf5ef;
 }
 
-.user-row[aria-pressed="true"] {
+.user-row[aria-pressed="true"],
+.recent-row[aria-pressed="true"] {
   border-color: #b65339;
   background: #fcf0e9;
   color: #9e432c;

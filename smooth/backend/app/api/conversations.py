@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Response, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.core.auth import get_current_user
 from app.database.database import get_db
@@ -18,9 +18,52 @@ from app.schemas.conversations import (
     ConversationResponse,
     MessageRequest,
     MessageResponse,
+    LastMessageResponse,
+    RecentConversationResponse,
 )
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
+
+
+@router.get("", response_model=list[RecentConversationResponse])
+def list_conversations(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[RecentConversationResponse]:
+    other_member = aliased(ConversationMember)
+    latest_message_id = (
+        select(Message.id)
+        .where(Message.conversation_id == Conversation.id)
+        .order_by(Message.created_at.desc(), Message.id.desc())
+        .limit(1)
+        .correlate(Conversation)
+        .scalar_subquery()
+    )
+    rows = db.execute(
+        select(Conversation, User, Message)
+        .select_from(Conversation)
+        .join(ConversationMember, (
+            (ConversationMember.conversation_id == Conversation.id)
+            & (ConversationMember.user_id == user.id)
+        ))
+        .join(other_member, (
+            (other_member.conversation_id == Conversation.id)
+            & (other_member.user_id != user.id)
+        ))
+        .join(User, User.id == other_member.user_id)
+        .outerjoin(Message, Message.id == latest_message_id)
+        .order_by(
+            Message.created_at.is_(None), Message.created_at.desc(),
+            Message.id.desc(), Conversation.id.desc(),
+        )
+        .limit(50)
+    )
+    return [RecentConversationResponse(
+        id=conversation.id,
+        other_user=UserResponse.model_validate(other_user),
+        last_message=LastMessageResponse.model_validate(message) if message else None,
+        updated_at=message.created_at if message else conversation.created_at,
+    ) for conversation, other_user, message in rows]
 
 
 @router.post("/with/{user_id}", response_model=ConversationResponse)

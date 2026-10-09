@@ -7,7 +7,7 @@ function mergeMessages(current, incoming) {
   return [...messages.values()].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id)
 }
 
-export default function ChatPanel({ user, selectedUser, token, onUnauthorized, subscribeToMessages, subscribeToStatus, acknowledge, subscribeToTyping, sendTyping, isOnline }) {
+export default function ChatPanel({ user, selectedUser, initialConversation, onConversationOpened, onMessageSent, token, onUnauthorized, subscribeToMessages, subscribeToStatus, acknowledge, subscribeToTyping, sendTyping, isOnline }) {
   const [conversation, setConversation] = useState(null)
   const [messages, setMessages] = useState([])
   const [stage, setStage] = useState('opening')
@@ -117,10 +117,11 @@ export default function ChatPanel({ user, selectedUser, token, onUnauthorized, s
     async function openConversation() {
       let fallback = 'Unable to open this conversation. Please try again.'
       try {
-        const resolved = await getOrCreateConversation(token, selectedUser.id, controller.signal)
+        const resolved = initialConversation || await getOrCreateConversation(token, selectedUser.id, controller.signal)
         if (!active) return
         conversationId.current = resolved.id
         setConversation(resolved)
+        onConversationOpened(resolved)
         setStage('loading')
         fallback = 'Unable to load messages. Please try again.'
         const loaded = await getMessages(token, resolved.id, controller.signal)
@@ -145,7 +146,7 @@ export default function ChatPanel({ user, selectedUser, token, onUnauthorized, s
       controller.abort()
       sendController.current?.abort()
     }
-  }, [token, selectedUser.id, retryAttempt, onUnauthorized, stopTyping, addMessages])
+  }, [token, selectedUser.id, initialConversation, retryAttempt, onUnauthorized, stopTyping, addMessages, onConversationOpened])
 
   useEffect(() => {
     if (history.current) history.current.scrollTop = history.current.scrollHeight
@@ -171,6 +172,7 @@ export default function ChatPanel({ user, selectedUser, token, onUnauthorized, s
       if (controller.signal.aborted) return
       stopTyping()
       addMessages([message])
+      onMessageSent(message)
       setContent('')
     } catch (error) {
       if (controller.signal.aborted || error.name === 'AbortError') return

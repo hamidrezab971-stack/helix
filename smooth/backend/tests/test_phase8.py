@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from time import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
 from anyio import create_task_group
@@ -27,6 +28,8 @@ from app.core.config import SECRET_KEY
 from app.database.database import Base, SessionLocal, engine
 from app.main import app
 from app.models.message import Message
+from app.models.conversation import Conversation
+from app.models.conversation_member import ConversationMember
 from app.models.message_receipt import MessageReceipt
 from app.models.user import User
 from app.realtime.manager import ConnectionManager, manager
@@ -275,6 +278,58 @@ class Phase8Tests(unittest.TestCase):
         with SessionLocal() as db:
             self.assertEqual(db.scalar(select(func.count(MessageReceipt.id))), 1)
         self.assertIsNotNone(self.client.get(self.path, headers=self.headers("alice")).json()[0]["read_at"])
+
+    def test_recent_conversations_membership_ordering_and_latest_message(self):
+        endpoint = "/api/conversations"
+        self.assertEqual(self.client.get(endpoint).status_code, 401)
+        self.assertEqual(self.client.get(endpoint, headers={"Authorization": "Bearer fake"}).status_code, 401)
+        self.assertEqual(self.client.get(endpoint, headers=self.headers("charlie")).json(), [])
+        bob_id = int(self.path.split('/')[3])
+        empty = self.client.get(endpoint, headers=self.headers("alice")).json()[0]
+        self.assertIsNone(empty["last_message"])
+        self.assertEqual(empty["other_user"]["id"], self.users["bob"])
+        charlie_id = self.client.post(f'/api/conversations/with/{self.users["charlie"]}', headers=self.headers("alice")).json()["id"]
+        unrelated_id = self.client.post(f'/api/conversations/with/{self.users["charlie"]}', headers=self.headers("bob")).json()["id"]
+        first = self.client.post(f'/api/conversations/{charlie_id}/messages', headers=self.headers("alice"), json={"content": "first"}).json()
+        latest = self.client.post(f'/api/conversations/{charlie_id}/messages', headers=self.headers("alice"), json={"content": "same timestamp latest ID"}).json()
+        bob_latest = self.client.post(self.path, headers=self.headers("bob"), json={"content": "newer Bob activity"}).json()
+        older = self.client.post(self.path, headers=self.headers("alice"), json={"content": "higher ID but earlier time"}).json()
+        with SessionLocal() as db:
+            for message_id, day in ((first["id"], 1), (latest["id"], 1), (bob_latest["id"], 2), (older["id"], 1)):
+                db.get(Message, message_id).created_at = datetime(2026, 10, day)
+            db.commit()
+        rows = self.client.get(endpoint, headers=self.headers("alice")).json()
+        self.assertEqual([row["id"] for row in rows], [bob_id, charlie_id])
+        self.assertNotIn(unrelated_id, [row["id"] for row in rows])
+        self.assertEqual(rows[0]["last_message"]["id"], bob_latest["id"])
+        self.assertEqual(rows[1]["last_message"]["id"], latest["id"])
+        self.assertEqual(rows[0]["updated_at"], rows[0]["last_message"]["created_at"])
+        self.assertEqual(set(rows[0]), {"id", "other_user", "last_message", "updated_at"})
+        self.assertEqual(set(rows[0]["other_user"]), {"id", "username", "created_at"})
+        self.assertEqual(set(rows[0]["last_message"]), {"id", "sender_id", "content", "created_at"})
+        with SessionLocal() as db:
+            db.get(Message, latest["id"]).created_at = datetime(2026, 10, 3)
+            db.commit()
+        self.assertEqual(self.client.get(endpoint, headers=self.headers("alice")).json()[0]["id"], charlie_id)
+
+    def test_recent_conversations_limit_and_empty_order(self):
+        with SessionLocal() as db:
+            for index in range(52):
+                other_user = User(username=f"recent_{index}", password_hash="unused-test-hash")
+                db.add(other_user)
+                db.flush()
+                low_id, high_id = sorted((self.users["alice"], other_user.id))
+                conversation = Conversation(user_low_id=low_id, user_high_id=high_id)
+                db.add(conversation)
+                db.flush()
+                db.add_all([ConversationMember(conversation_id=conversation.id, user_id=user_id) for user_id in (low_id, high_id)])
+            db.commit()
+        rows = self.client.get('/api/conversations', headers=self.headers("alice")).json()
+        self.assertEqual(len(rows), 50)
+        self.assertTrue(all(row["last_message"] is None for row in rows))
+        self.assertEqual([row["id"] for row in rows], sorted([row["id"] for row in rows], reverse=True))
+        self.assertTrue(all(row["other_user"]["id"] != self.users["alice"] for row in rows))
+        self.assertEqual(self.client.get('/api/conversations', headers=self.headers("charlie")).json(), [])
 
 
 class ManagerCleanupTests(unittest.IsolatedAsyncioTestCase):

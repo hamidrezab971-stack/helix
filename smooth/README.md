@@ -2,8 +2,8 @@
 
 Smooth is a lightweight web-based messaging application. Native FastAPI/browser
 WebSockets deliver persisted messages, presence, and typing indicators.
-HTTP remains responsible for creating messages. Phase 10 adds persistent
-Delivered/Read receipts; presence and typing remain temporary state.
+HTTP remains responsible for creating messages. Delivered/Read receipts are
+persistent; presence and typing remain temporary state. Phase 11 adds recent chats.
 
 ## Technology stack
 
@@ -157,6 +157,12 @@ or expired tokens return HTTP 401.
 
 All endpoints require `Authorization: Bearer <token>`:
 
+- `GET /api/conversations` returns the authenticated user's direct conversations,
+  with safe `other_user`, `last_message` (or null), and derived `updated_at` fields.
+  Conversations with messages come first, ordered by latest message timestamp
+  then message ID descending; empty conversations follow by conversation ID
+  descending. Latest messages use timestamp then ID descending. Maximum 50
+  results; no pagination or schema change is required.
 - `POST /api/conversations/with/{user_id}` creates a direct conversation (201) or
   returns the existing one (200), with `id`, `created_at`, and safe `other_user`
   fields. Self-conversations return 400; nonexistent users return 404. A unique
@@ -263,7 +269,13 @@ button or Enter; Shift+Enter inserts a new line. Switching users replaces histor
 and clears the draft. Authentication failures clear the session and return to login.
 Build the frontend with `npm run build`.
 
-## Phase 8–10 verification
+Chats shows recent usernames, single-line previews, compact local times, and
+existing presence. People keeps the directory/search flow for starting chats.
+Recent rows open their existing history directly. The list refreshes after opening
+or creating a chat, successful sends, incoming message events, and socket recovery;
+there is no polling. Mobile shows one pane at a time with Back to chats.
+
+## Phase 8–11 verification
 
 From `backend/`, install the test-only transport with
 `.venv/bin/python -m pip install httpx2`, then run
@@ -272,6 +284,8 @@ database and test signing secret, covering HTTP regressions, authenticated
 delivery, presence transitions and snapshots, multiple tabs, typing authorization,
 rejected credentials, failed persistence, receipt transitions and authorization,
 concurrent-tab idempotency, and existing SQLite schema compatibility.
+Recent-chat tests cover membership isolation, ordering, latest-message selection,
+empty conversations, and the 50-result limit.
 
 The browser regression script is `frontend/tests/phase8.cjs`. Start the frontend
 at `http://127.0.0.1:5173` with its default API/WebSocket configuration and leave
@@ -283,4 +297,6 @@ restarts an isolated backend, checks separate Alice/Bob sessions and multiple
 tabs, presence, typing timers and cleanup, offline history, logout, refresh,
 conversation isolation, receipt status and refresh persistence, an acknowledgement
 arriving before its HTTP response, persisted counts, and uncaught browser errors.
+It also checks recent previews, ordering, direct history loading, refresh, mobile
+and keyboard navigation, network retry, and authentication failure cleanup.
 These tools add no application dependencies.
