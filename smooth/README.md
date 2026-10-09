@@ -217,3 +217,21 @@ user opens their real conversation and message history. Send text with the Send
 button or Enter; Shift+Enter inserts a new line. Switching users replaces history
 and clears the draft. Authentication failures clear the session and return to login.
 Build the frontend with `npm run build`.
+
+## Phase 8 verification
+
+From `backend/`, install the test-only transport with
+`.venv/bin/python -m pip install httpx2`, then run
+`.venv/bin/python -m unittest discover -s tests -v`. Tests use a temporary SQLite
+database and test signing secret, covering HTTP regressions, authenticated
+delivery, multiple tabs, rejected credentials, and failed persistence.
+
+The browser regression script is `frontend/tests/phase8.cjs`. Start the frontend
+at `http://127.0.0.1:5173` with its default API/WebSocket configuration and leave
+port 8000 free. Install Playwright separately (for example under
+`/tmp/smooth-browser-check`), install its Chromium browser, and run the script
+with that installation's `node_modules` on `NODE_PATH`. If using a custom browser
+installation directory, also set `PLAYWRIGHT_BROWSERS_PATH`. It starts and
+restarts an isolated backend, checks separate Alice/Bob sessions and multiple
+tabs, offline history, logout, refresh, conversation isolation, persisted message
+count, and uncaught browser errors. These tools add no application dependencies.
