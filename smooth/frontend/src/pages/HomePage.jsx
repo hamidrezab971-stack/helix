@@ -11,8 +11,20 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
   const [retryAttempt, setRetryAttempt] = useState(0)
   const [selectedUser, setSelectedUser] = useState(null)
   const [conversationAttempt, setConversationAttempt] = useState(0)
+  const [onlineUserIds, setOnlineUserIds] = useState(new Set())
   const normalizedSearch = search.trim().toLowerCase()
   const messageListeners = useRef(new Set())
+  const typingListeners = useRef(new Set())
+  const realtime = useRef(null)
+
+  const subscribeToTyping = useCallback((listener) => {
+    typingListeners.current.add(listener)
+    return () => typingListeners.current.delete(listener)
+  }, [])
+
+  const sendTyping = useCallback((type, conversationId) => (
+    realtime.current?.sendTyping(type, conversationId) || false
+  ), [])
 
   const subscribeToMessages = useCallback((listener) => {
     messageListeners.current.add(listener)
@@ -21,12 +33,31 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
 
   useEffect(() => {
     if (!token) return
-    return connectRealtime(token, {
+    const connection = connectRealtime(token, {
       onMessage: (message) => {
         for (const listener of messageListeners.current) listener(message)
       },
+      onPresenceSnapshot: (ids) => setOnlineUserIds(new Set(ids)),
+      onPresenceUpdate: ({ user_id, status }) => setOnlineUserIds((previous) => {
+        const next = new Set(previous)
+        if (status === 'online') next.add(user_id)
+        else next.delete(user_id)
+        return next
+      }),
+      onTyping: (event) => {
+        for (const listener of typingListeners.current) listener(event)
+      },
+      onDisconnect: () => {
+        setOnlineUserIds(new Set())
+        for (const listener of typingListeners.current) listener(null)
+      },
       onUnauthorized,
     })
+    realtime.current = connection
+    return () => {
+      connection.stop()
+      realtime.current = null
+    }
   }, [token, onUnauthorized])
 
   useEffect(() => {
@@ -104,7 +135,10 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
                       }}
                     >
                       <span className="min-w-0 break-all font-medium">@{directoryUser.username}</span>
-                      {selectedUser?.id === directoryUser.id && <span className="shrink-0 text-xs font-semibold">Selected</span>}
+                      <span className={`flex shrink-0 items-center gap-1.5 text-xs ${onlineUserIds.has(directoryUser.id) ? 'text-emerald-700' : 'text-stone-500'}`}>
+                        <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${onlineUserIds.has(directoryUser.id) ? 'bg-emerald-600' : 'bg-stone-300'}`} />
+                        {onlineUserIds.has(directoryUser.id) ? 'Online' : 'Offline'}
+                      </span>
                     </button>
                   </li>
                 ))}
@@ -114,7 +148,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
         </section>
         <aside aria-label="Conversation" className="min-w-0 border-t border-stone-200/80 bg-[#fcfbf9] md:border-t-0 md:border-l">
           {selectedUser ? (
-            <ChatPanel key={`${selectedUser.id}:${conversationAttempt}`} user={user} selectedUser={selectedUser} token={token} onUnauthorized={onUnauthorized} subscribeToMessages={subscribeToMessages} />
+            <ChatPanel key={`${selectedUser.id}:${conversationAttempt}`} user={user} selectedUser={selectedUser} token={token} onUnauthorized={onUnauthorized} subscribeToMessages={subscribeToMessages} subscribeToTyping={subscribeToTyping} sendTyping={sendTyping} isOnline={onlineUserIds.has(selectedUser.id)} />
           ) : (
             <div className="flex h-full flex-col justify-center p-6 sm:p-8">
               <p className="text-xs font-semibold uppercase tracking-widest text-stone-500">A little more connection</p>

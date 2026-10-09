@@ -1,8 +1,12 @@
 """Run with: python -m unittest discover -s tests -v (requires httpx2)."""
 import os
+import asyncio
 import tempfile
 import unittest
-from unittest.mock import patch
+from time import time
+from unittest.mock import AsyncMock, patch
+
+from anyio import create_task_group
 
 # Isolate verification from the application's configured database and secret.
 _database = tempfile.TemporaryDirectory()
@@ -23,7 +27,7 @@ from app.database.database import Base, SessionLocal, engine
 from app.main import app
 from app.models.message import Message
 from app.models.user import User
-from app.realtime.manager import manager
+from app.realtime.manager import ConnectionManager, manager
 
 
 class Phase8Tests(unittest.TestCase):
@@ -49,6 +53,14 @@ class Phase8Tests(unittest.TestCase):
     def authenticate(self, socket, name):
         socket.send_json({"type": "auth", "token": self.tokens[name]})
         self.assertEqual(socket.receive_json(), {"type": "auth:ok"})
+        return self.receive_type(socket, "presence:snapshot")
+
+    def receive_type(self, socket, event_type):
+        while True:
+            event = socket.receive_json()
+            if event["type"] == event_type:
+                return event
+            self.assertIn(event["type"], ("presence:update", "presence:snapshot"))
 
     def test_delivery_multiple_tabs_and_offline_history(self):
         with self.client.websocket_connect("/ws") as alice, self.client.websocket_connect("/ws") as bob, self.client.websocket_connect("/ws") as bob_tab:
@@ -58,7 +70,7 @@ class Phase8Tests(unittest.TestCase):
                 response = self.client.post(self.path, headers=self.headers(sender), json={"content": content})
                 self.assertEqual(response.status_code, 201)
                 for socket in (alice, bob, bob_tab):
-                    self.assertEqual(socket.receive_json(), {"type": "message:new", "data": response.json()})
+                    self.assertEqual(self.receive_type(socket, "message:new"), {"type": "message:new", "data": response.json()})
                 with SessionLocal() as db:
                     self.assertIsNotNone(db.get(Message, response.json()["id"]))
         self.assertEqual(manager.connections, {})
@@ -117,6 +129,106 @@ class Phase8Tests(unittest.TestCase):
                 pass
         with SessionLocal() as db:
             self.assertEqual(db.scalar(select(func.count(Message.id))), 0)
+
+    def test_presence_transitions_snapshot_and_multiple_tabs(self):
+        with self.client.websocket_connect("/ws") as alice:
+            self.assertEqual(self.authenticate(alice, "alice")["data"], {"online_user_ids": [self.users["alice"]]})
+            with self.client.websocket_connect("/ws") as bob:
+                self.assertEqual(self.authenticate(bob, "bob")["data"], {"online_user_ids": [self.users["alice"], self.users["bob"]]})
+                self.assertEqual(alice.receive_json(), {"type": "presence:update", "data": {"user_id": self.users["bob"], "status": "online"}})
+                with self.client.websocket_connect("/ws") as second_tab:
+                    self.authenticate(second_tab, "bob")
+                    response = self.client.post(self.path, headers=self.headers("alice"), json={"content": "two tabs"})
+                    # No duplicate online event was queued for Alice or Bob.
+                    for socket in (alice, bob, second_tab):
+                        self.assertEqual(socket.receive_json(), {"type": "message:new", "data": response.json()})
+                response = self.client.post(self.path, headers=self.headers("alice"), json={"content": "one tab"})
+                for socket in (alice, bob):
+                    self.assertEqual(socket.receive_json(), {"type": "message:new", "data": response.json()})
+            self.assertEqual(alice.receive_json(), {"type": "presence:update", "data": {"user_id": self.users["bob"], "status": "offline"}})
+            with self.client.websocket_connect("/ws") as bob:
+                self.authenticate(bob, "bob")
+                self.assertEqual(alice.receive_json()["data"], {"user_id": self.users["bob"], "status": "online"})
+
+    def test_typing_authorization_safe_events_and_no_writes(self):
+        conversation_id = int(self.path.split("/")[3])
+        with self.client.websocket_connect("/ws") as alice, self.client.websocket_connect("/ws") as bob:
+            self.authenticate(alice, "alice")
+            self.authenticate(bob, "bob")
+            self.assertEqual(alice.receive_json()["type"], "presence:update")
+            with patch("sqlalchemy.orm.Session.commit", side_effect=AssertionError("typing must not commit")):
+                for event_type in ("typing:start", "typing:stop"):
+                    alice.send_json({"type": event_type, "conversation_id": conversation_id, "user_id": self.users["charlie"]})
+                    self.assertEqual(bob.receive_json(), {"type": event_type, "data": {"conversation_id": conversation_id, "user_id": self.users["alice"]}})
+            with self.client.websocket_connect("/ws") as charlie:
+                self.authenticate(charlie, "charlie")
+                for socket in (alice, bob):
+                    self.assertEqual(socket.receive_json()["type"], "presence:update")
+                charlie.send_json({"type": "typing:start", "conversation_id": conversation_id})
+                with self.assertRaises(WebSocketDisconnect) as closed:
+                    charlie.receive_json()
+                self.assertEqual(closed.exception.code, 1008)
+                for socket in (alice, bob):
+                    # The next event is offline presence, never unauthorized typing.
+                    self.assertEqual(socket.receive_json(), {"type": "presence:update", "data": {"user_id": self.users["charlie"], "status": "offline"}})
+            response = self.client.post(self.path, headers=self.headers("alice"), json={"content": "still works"})
+            for socket in (alice, bob):
+                # Also proves typing was not echoed to Alice.
+                self.assertEqual(socket.receive_json(), {"type": "message:new", "data": response.json()})
+
+    def test_unauthenticated_and_malformed_typing(self):
+        with self.client.websocket_connect("/ws") as socket:
+            socket.send_json({"type": "typing:start", "conversation_id": 1})
+            self.assertEqual(socket.receive_json(), {"type": "auth:error"})
+        for conversation_id in (True, 0, -1, "1", 2**63, None, 99999):
+            with self.subTest(conversation_id=conversation_id), self.client.websocket_connect("/ws") as socket:
+                self.authenticate(socket, "alice")
+                socket.send_json({"type": "typing:start", "conversation_id": conversation_id})
+                with self.assertRaises(WebSocketDisconnect) as closed:
+                    socket.receive_json()
+                self.assertEqual(closed.exception.code, 1008)
+
+
+class ManagerCleanupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_failed_send_removes_only_failed_tab_and_expiry_goes_offline(self):
+        connections = ConnectionManager()
+        observer, first_tab, second_tab = AsyncMock(), AsyncMock(), AsyncMock()
+        await connections.register(1, observer, time() + 60)
+        await connections.register(2, first_tab, time() + 60)
+        remaining = await connections.register(2, second_tab, time() + 60)
+        observer.send_json.reset_mock()
+        first_tab.send_json.side_effect = OSError("disconnected")
+        await connections.send_to_user(2, {"type": "message:new"})
+        self.assertEqual(len(connections.connections[2]), 1)
+        observer.send_json.assert_not_called()
+        await connections.expire(remaining)
+        self.assertEqual(connections.online_user_ids(), [1])
+        observer.send_json.assert_awaited_once_with({"type": "presence:update", "data": {"user_id": 2, "status": "offline"}})
+        await connections.disconnect(remaining)
+        self.assertEqual(observer.send_json.await_count, 1)
+
+    async def test_cancelled_registration_is_removed(self):
+        connections = ConnectionManager()
+        socket = AsyncMock()
+        observer = AsyncMock()
+        await connections.register(2, observer, time() + 60)
+        observer.send_json.reset_mock()
+        sending = asyncio.Event()
+
+        async def blocked_send(_event):
+            sending.set()
+            await asyncio.Event().wait()
+
+        socket.send_json.side_effect = blocked_send
+        async with create_task_group() as tasks:
+            tasks.start_soon(connections.register, 1, socket, time() + 60)
+            await sending.wait()
+            tasks.cancel_scope.cancel()
+        self.assertEqual(connections.online_user_ids(), [2])
+        self.assertEqual([call.args[0] for call in observer.send_json.await_args_list], [
+            {"type": "presence:update", "data": {"user_id": 1, "status": "online"}},
+            {"type": "presence:update", "data": {"user_id": 1, "status": "offline"}},
+        ])
 
 
 if __name__ == "__main__":

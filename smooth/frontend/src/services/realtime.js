@@ -7,10 +7,22 @@ function websocketUrl() {
   return url.toString()
 }
 
-export function connectRealtime(token, { onMessage, onUnauthorized }) {
+export function connectRealtime(token, { onMessage, onUnauthorized, onPresenceSnapshot, onPresenceUpdate, onTyping, onDisconnect }) {
   let socket
   let timer
   let stopped = false
+  let authenticated = false
+
+  function sendTyping(type, conversationId) {
+    if (stopped || !authenticated || socket?.readyState !== WebSocket.OPEN) return false
+    if (!['typing:start', 'typing:stop'].includes(type) || !Number.isSafeInteger(conversationId) || conversationId <= 0) return false
+    try {
+      socket.send(JSON.stringify({ type, conversation_id: conversationId }))
+      return true
+    } catch {
+      return false
+    }
+  }
 
   function stop() {
     stopped = true
@@ -30,7 +42,7 @@ export function connectRealtime(token, { onMessage, onUnauthorized }) {
 
   function open() {
     if (stopped) return
-    let authenticated = false
+    authenticated = false
     try {
       socket = new WebSocket(websocketUrl())
     } catch {
@@ -55,6 +67,16 @@ export function connectRealtime(token, { onMessage, onUnauthorized }) {
         authenticated = true
         return
       }
+      if (!authenticated) return
+      const data = payload?.data
+      const validId = (id) => Number.isSafeInteger(id) && id > 0
+      if (payload?.type === 'presence:snapshot' && Array.isArray(data?.online_user_ids) && data.online_user_ids.every(validId)) {
+        onPresenceSnapshot(data.online_user_ids)
+      } else if (payload?.type === 'presence:update' && validId(data?.user_id) && ['online', 'offline'].includes(data?.status)) {
+        onPresenceUpdate({ user_id: data.user_id, status: data.status })
+      } else if (['typing:start', 'typing:stop'].includes(payload?.type) && validId(data?.conversation_id) && validId(data?.user_id)) {
+        onTyping({ type: payload.type, data: { conversation_id: data.conversation_id, user_id: data.user_id } })
+      }
       if (authenticated && payload?.type === 'message:new') {
         let message
         try {
@@ -68,6 +90,8 @@ export function connectRealtime(token, { onMessage, onUnauthorized }) {
     current.onerror = () => {} // The close handler schedules recovery.
     current.onclose = (event) => {
       if (stopped || current !== socket) return
+      authenticated = false
+      onDisconnect()
       if (event.code === 4401) return unauthorized()
       reconnect()
     }
@@ -75,5 +99,5 @@ export function connectRealtime(token, { onMessage, onUnauthorized }) {
 
   // Deferring startup also avoids a throwaway connection in React StrictMode.
   timer = setTimeout(open, 0)
-  return stop
+  return { stop, sendTyping }
 }

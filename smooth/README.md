@@ -1,8 +1,8 @@
 # Smooth
 
-Smooth is a lightweight web-based messaging application. Phase 8 adds real-time
-delivery of persisted text messages through native FastAPI/browser WebSockets.
-HTTP remains responsible for creating messages.
+Smooth is a lightweight web-based messaging application. Native FastAPI/browser
+WebSockets deliver persisted messages, presence, and typing indicators.
+HTTP remains responsible for creating messages. Phase 9 adds presence and typing.
 
 ## Technology stack
 
@@ -191,6 +191,25 @@ Socket clients cannot create messages. There is no polling or guaranteed event
 delivery: persisted HTTP history remains the source of truth. Reopen a conversation
 or refresh and select it again to recover messages missed while disconnected.
 
+Presence and typing use the same authenticated `/ws` connection:
+
+- `presence:snapshot`: `{"data":{"online_user_ids":[1,2]}}` after each socket
+  authenticates, including reconnects.
+- `presence:update`: `{"data":{"user_id":2,"status":"online"}}` (or `offline`)
+  to authenticated clients when a user's connection count changes from zero to
+  one or from one to zero. Closing one of several tabs keeps the user online.
+- Clients send `{"type":"typing:start","conversation_id":3}` or `typing:stop`.
+  After verifying conversation membership, the server sends the other member
+  `{"type":"typing:start","data":{"conversation_id":3,"user_id":2}}` (or
+  `typing:stop`), deriving the user ID from authentication.
+
+Every event includes its `type`. The directory and chat header show Online/Offline;
+the open chat shows typing only for its other member. Input renews typing at most
+every two seconds, stops after two seconds of inactivity, and stops on clearing,
+successful sending, or switching chats. Received typing expires after four seconds
+without an update. Presence and typing are in-memory, single-process state and are
+not persisted; there are no presence/typing tables or last-seen timestamps.
+
 ## Run the frontend
 
 In a separate terminal, from `smooth/`:
@@ -218,13 +237,14 @@ button or Enter; Shift+Enter inserts a new line. Switching users replaces histor
 and clears the draft. Authentication failures clear the session and return to login.
 Build the frontend with `npm run build`.
 
-## Phase 8 verification
+## Phase 8–9 verification
 
 From `backend/`, install the test-only transport with
 `.venv/bin/python -m pip install httpx2`, then run
 `.venv/bin/python -m unittest discover -s tests -v`. Tests use a temporary SQLite
 database and test signing secret, covering HTTP regressions, authenticated
-delivery, multiple tabs, rejected credentials, and failed persistence.
+delivery, presence transitions and snapshots, multiple tabs, typing authorization,
+rejected credentials, and failed persistence.
 
 The browser regression script is `frontend/tests/phase8.cjs`. Start the frontend
 at `http://127.0.0.1:5173` with its default API/WebSocket configuration and leave
@@ -233,5 +253,6 @@ port 8000 free. Install Playwright separately (for example under
 with that installation's `node_modules` on `NODE_PATH`. If using a custom browser
 installation directory, also set `PLAYWRIGHT_BROWSERS_PATH`. It starts and
 restarts an isolated backend, checks separate Alice/Bob sessions and multiple
-tabs, offline history, logout, refresh, conversation isolation, persisted message
-count, and uncaught browser errors. These tools add no application dependencies.
+tabs, presence, typing timers and cleanup, offline history, logout, refresh,
+conversation isolation, persisted message count, and uncaught browser errors.
+These tools add no application dependencies.

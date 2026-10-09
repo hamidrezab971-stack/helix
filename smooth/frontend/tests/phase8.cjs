@@ -38,19 +38,29 @@ async function newPage(context) {
   const page = await context.newPage()
   page.on('pageerror', error => errors.push(error.message))
   await page.addInitScript(() => {
-    window.realtimeTest = { authenticated: 0, closed: 0, events: [] }
+    window.realtimeTest = { authenticated: 0, closed: 0, events: [], received: [], sentTyping: [] }
     const NativeWebSocket = window.WebSocket
     window.WebSocket = class extends NativeWebSocket {
       constructor(...args) {
         super(...args)
+        window.realtimeTest.socket = this
         this.addEventListener('close', () => window.realtimeTest.closed++)
         this.addEventListener('message', event => {
           try {
             const data = JSON.parse(event.data)
             if (data.type === 'auth:ok') window.realtimeTest.authenticated++
             if (data.type === 'message:new') window.realtimeTest.events.push(data.data)
+            if (data.type.startsWith('presence:') || data.type.startsWith('typing:')) window.realtimeTest.received.push(data)
           } catch {}
         })
+      }
+      send(payload) {
+        const data = JSON.parse(payload)
+        if (data.type.startsWith('typing:')) {
+          window.realtimeTest.sentTyping.push(data)
+          if (data.type === 'typing:stop' && window.realtimeTest.dropTypingStop) return
+        }
+        super.send(payload)
       }
     }
   })
@@ -70,8 +80,12 @@ async function registerAndLogin(page, name) {
 }
 
 async function select(page, name) {
-  await page.getByRole('button', { name: `@${name}`, exact: true }).click()
+  await directoryRow(page, name).click()
   await expect(page.locator('#message-content')).toBeEnabled()
+}
+
+function directoryRow(page, name) {
+  return page.locator('.user-row').filter({ hasText: `@${name}` })
 }
 
 async function send(page, content) {
@@ -89,20 +103,69 @@ async function main() {
   await startBackend()
   browser = await chromium.launch({ headless: true })
   const aliceContext = await browser.newContext(), bobContext = await browser.newContext(), charlieContext = await browser.newContext()
-  const alice = await newPage(aliceContext), bob = await newPage(bobContext), charlie = await newPage(charlieContext)
+  let alice = await newPage(aliceContext)
+  const bob = await newPage(bobContext), charlie = await newPage(charlieContext)
   await registerAndLogin(alice, names.alice)
   await registerAndLogin(bob, names.bob)
   await registerAndLogin(charlie, names.charlie)
   await alice.locator('#user-search').fill(names.bob.toUpperCase())
-  await expect(alice.getByRole('button', { name: `@${names.bob}`, exact: true })).toBeVisible()
+  await expect(directoryRow(alice, names.bob)).toBeVisible()
   await alice.locator('#user-search').fill('')
   await select(alice, names.bob)
   await select(bob, names.alice)
   const bobTab = await newPage(bobContext)
   await bobTab.waitForFunction(() => window.realtimeTest.authenticated === 1)
   await select(bobTab, names.alice)
+  await expect(directoryRow(alice, names.bob)).toContainText('Online')
+  await expect(directoryRow(bob, names.alice)).toContainText('Online')
+  for (const page of [alice, bob]) await expect(page.getByLabel('Contact presence')).toHaveText('Online')
+  const aliceId = await bob.evaluate(() => window.realtimeTest.received.find(e => e.type === 'presence:snapshot').data.online_user_ids[0])
+  assert.ok(aliceId > 0)
+  const typing = bob.getByLabel('Typing indicator')
+  await alice.locator('#message-content').fill('draft')
+  await expect(typing).toHaveText(`${names.alice} is typing...`)
+  for (let i = 0; i < 5; i++) await alice.locator('#message-content').fill(`draft ${i}`)
+  assert.equal(await alice.evaluate(() => window.realtimeTest.sentTyping.filter(e => e.type === 'typing:start').length), 1)
+  await expect(alice.getByLabel('Typing indicator')).toHaveText('')
+  await expect(bob.locator('.message-bubble')).toHaveCount(0)
+  await expect(typing).toHaveText('', { timeout: 3500 })
+  await alice.locator('#message-content').fill('cleared draft')
+  await expect(typing).not.toHaveText('')
+  await alice.locator('#message-content').fill('')
+  await expect(typing).toHaveText('')
+
+  // Continued input renews a start at most every two seconds.
+  for (let i = 0; i < 7; i++) {
+    await alice.locator('#message-content').fill(`long draft ${i}`)
+    await new Promise(resolve => setTimeout(resolve, 750))
+  }
+  await expect(typing).not.toHaveText('')
+  await select(alice, names.charlie)
+  await expect(typing).toHaveText('')
+  await alice.locator('#message-content').fill('unrelated draft')
+  await expect(typing).toHaveText('')
+  await select(alice, names.bob)
+
+  // Missed stop events must expire even if the sender remains online.
+  await alice.evaluate(() => { window.realtimeTest.dropTypingStop = true })
+  await alice.locator('#message-content').fill('missed stop')
+  await expect(typing).not.toHaveText('')
+  await expect(typing).toHaveText('', { timeout: 5500 })
+  await alice.evaluate(() => { window.realtimeTest.dropTypingStop = false })
+  await alice.locator('#message-content').fill('closing draft')
+  await expect(typing).not.toHaveText('')
+  await alice.close()
+  await expect(directoryRow(bob, names.alice)).toContainText('Offline')
+  await expect(typing).toHaveText('', { timeout: 5500 })
+  alice = await newPage(aliceContext)
+  await alice.waitForFunction(() => window.realtimeTest.authenticated === 1)
+  await select(alice, names.bob)
+  await expect(directoryRow(bob, names.alice)).toContainText('Online')
+  await expect(alice.getByLabel('Contact presence')).toHaveText('Online')
+  console.log('PASS presence snapshot, typing start/stop, throttling, continued typing, clear input, switching, stale expiry, unexpected tab close/reconnect')
   await send(alice, 'hello bob')
   for (const page of [alice, bob, bobTab]) await once(page, 'hello bob')
+  await expect(typing).toHaveText('')
   await send(bob, 'hello alice')
   for (const page of [alice, bob, bobTab]) await once(page, 'hello alice')
   await bob.reload()
@@ -119,8 +182,11 @@ async function main() {
   await select(alice, names.bob)
   await once(alice, 'other conversation')
   await bobTab.close()
+  await expect(alice.getByLabel('Contact presence')).toHaveText('Online')
+  assert.equal(await alice.evaluate(() => window.realtimeTest.received.filter(e => e.type === 'presence:update' && e.data.status === 'offline').length), 0)
   await bob.getByRole('button', { name: 'Log out' }).click()
   await bob.waitForFunction(() => window.realtimeTest.closed >= 1)
+  await expect(alice.getByLabel('Contact presence')).toHaveText('Offline')
   const logoutEvents = await bob.evaluate(() => window.realtimeTest.events.length)
   await send(alice, 'offline recipient')
   await new Promise(resolve => setTimeout(resolve, 2300))
@@ -130,6 +196,7 @@ async function main() {
   await bob.getByRole('button', { name: 'Log in', exact: true }).click()
   await select(bob, names.alice)
   await once(bob, 'offline recipient')
+  await expect(alice.getByLabel('Contact presence')).toHaveText('Online')
   console.log('PASS conversation isolation, logout socket cleanup, offline recipient history')
 
   await stopBackend()
@@ -139,6 +206,7 @@ async function main() {
   await startBackend()
   await alice.waitForFunction(() => window.realtimeTest.authenticated >= 2)
   await bob.waitForFunction(() => window.realtimeTest.authenticated >= 3)
+  for (const page of [alice, bob]) await expect(page.getByLabel('Contact presence')).toHaveText('Online')
   await send(bob, 'after restart')
   await once(alice, 'after restart')
   await once(bob, 'after restart')

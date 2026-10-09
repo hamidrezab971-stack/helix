@@ -1,12 +1,17 @@
 import asyncio
+import json
 from time import time
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from starlette.concurrency import run_in_threadpool
+from sqlalchemy import select
 
+from app.api.conversations import require_membership
 from app.core.auth import authenticate_access_token
 from app.core.config import FRONTEND_ORIGIN
 from app.database.database import SessionLocal
+from app.models.conversation import Conversation
+from app.models.conversation_member import ConversationMember
 from app.realtime.manager import manager
 
 router = APIRouter()
@@ -18,6 +23,18 @@ def authenticate_socket(token: str) -> tuple[int, float]:
     with SessionLocal() as db:
         user, expires_at = authenticate_access_token(token, db)
         return user.id, expires_at
+
+
+def typing_recipients(conversation_id: int, user_id: int) -> list[int]:
+    # Only reads, with a fresh session per event rather than per socket lifetime.
+    with SessionLocal() as db:
+        if db.get(Conversation, conversation_id) is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        require_membership(conversation_id, user_id, db)
+        return list(db.scalars(select(ConversationMember.user_id).where(
+            ConversationMember.conversation_id == conversation_id,
+            ConversationMember.user_id != user_id,
+        )))
 
 
 @router.websocket("/ws")
@@ -44,7 +61,7 @@ async def websocket_endpoint(socket: WebSocket) -> None:
             return
 
         await socket.send_json({"type": "auth:ok"})
-        connection = manager.register(user_id, socket, expires_at)
+        connection = await manager.register(user_id, socket, expires_at)
         while True:
             try:
                 frame = await asyncio.wait_for(
@@ -55,11 +72,27 @@ async def websocket_endpoint(socket: WebSocket) -> None:
                 return
             if frame["type"] == "websocket.disconnect":
                 return
-            # This socket delivers events only; clients create messages over HTTP.
-            await socket.close(code=1008)
-            return
+            try:
+                event = json.loads(frame.get("text", ""))
+                if not isinstance(event, dict) or event.get("type") not in ("typing:start", "typing:stop"):
+                    raise ValueError
+                conversation_id = event.get("conversation_id")
+                if type(conversation_id) is not int or not 0 < conversation_id < 2**63:
+                    raise ValueError
+                recipients = await run_in_threadpool(typing_recipients, conversation_id, user_id)
+            except (ValueError, TypeError, HTTPException):
+                # Generic policy close for malformed or unauthorized events.
+                await socket.close(code=1008)
+                return
+            if time() >= expires_at:
+                await manager.expire(connection)
+                return
+            await manager.broadcast(recipients, {
+                "type": event["type"],
+                "data": {"conversation_id": conversation_id, "user_id": user_id},
+            })
     except (WebSocketDisconnect, RuntimeError, OSError):
         pass
     finally:
         if connection is not None:
-            manager.disconnect(connection)
+            await manager.disconnect(connection)

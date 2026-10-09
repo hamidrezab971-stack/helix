@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { getMessages, getOrCreateConversation, sendMessage } from '../services/api.js'
 
 function mergeMessages(current, incoming) {
@@ -6,7 +6,7 @@ function mergeMessages(current, incoming) {
   return [...messages.values()].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id)
 }
 
-export default function ChatPanel({ user, selectedUser, token, onUnauthorized, subscribeToMessages }) {
+export default function ChatPanel({ user, selectedUser, token, onUnauthorized, subscribeToMessages, subscribeToTyping, sendTyping, isOnline }) {
   const [conversation, setConversation] = useState(null)
   const [messages, setMessages] = useState([])
   const [stage, setStage] = useState('opening')
@@ -19,6 +19,52 @@ export default function ChatPanel({ user, selectedUser, token, onUnauthorized, s
   const sendController = useRef(null)
   const history = useRef(null)
   const conversationId = useRef(null)
+  const [otherTyping, setOtherTyping] = useState(false)
+  const localTyping = useRef(false)
+  const typingStartedAt = useRef(0)
+  const typingTimer = useRef(null)
+  const remoteTypingTimer = useRef(null)
+
+  const stopTyping = useCallback(() => {
+    clearTimeout(typingTimer.current)
+    if (localTyping.current) sendTyping('typing:stop', conversationId.current)
+    localTyping.current = false
+  }, [sendTyping])
+
+  function handleContentChange(value) {
+    setContent(value)
+    if (!value.trim()) return stopTyping()
+    if (stage !== 'ready') return
+    // Renew at most once every two seconds while input continues, so the
+    // recipient's fallback timer also works for long typing sessions.
+    if (!localTyping.current || Date.now() - typingStartedAt.current >= 2000) {
+      localTyping.current = sendTyping('typing:start', conversationId.current)
+      typingStartedAt.current = Date.now()
+    }
+    clearTimeout(typingTimer.current)
+    typingTimer.current = setTimeout(stopTyping, 2000)
+  }
+
+  useEffect(() => {
+    const unsubscribe = subscribeToTyping((event) => {
+      if (event === null) {
+        clearTimeout(typingTimer.current)
+        localTyping.current = false
+      } else if (event.data.conversation_id !== conversationId.current || event.data.user_id !== selectedUser.id || event.data.user_id === user.id) {
+        return
+      }
+      clearTimeout(remoteTypingTimer.current)
+      setOtherTyping(event?.type === 'typing:start')
+      if (event?.type === 'typing:start') {
+        remoteTypingTimer.current = setTimeout(() => setOtherTyping(false), 4000)
+      }
+    })
+    return () => {
+      unsubscribe()
+      stopTyping()
+      clearTimeout(remoteTypingTimer.current)
+    }
+  }, [subscribeToTyping, stopTyping, selectedUser.id, user.id])
 
   useEffect(() => subscribeToMessages((message) => {
     if (message.conversation_id !== conversationId.current) return
@@ -29,6 +75,9 @@ export default function ChatPanel({ user, selectedUser, token, onUnauthorized, s
   useEffect(() => {
     const controller = new AbortController()
     let active = true
+    stopTyping()
+    clearTimeout(remoteTypingTimer.current)
+    setOtherTyping(false)
     setStage('opening')
     setLoadError('')
     setConversation(null)
@@ -66,7 +115,7 @@ export default function ChatPanel({ user, selectedUser, token, onUnauthorized, s
       controller.abort()
       sendController.current?.abort()
     }
-  }, [token, selectedUser.id, retryAttempt, onUnauthorized])
+  }, [token, selectedUser.id, retryAttempt, onUnauthorized, stopTyping])
 
   useEffect(() => {
     if (history.current) history.current.scrollTop = history.current.scrollHeight
@@ -90,6 +139,7 @@ export default function ChatPanel({ user, selectedUser, token, onUnauthorized, s
     try {
       const message = await sendMessage(token, conversation.id, trimmed, controller.signal)
       if (controller.signal.aborted) return
+      stopTyping()
       setMessages((previous) => mergeMessages(previous, [message]))
       setContent('')
     } catch (error) {
@@ -109,7 +159,8 @@ export default function ChatPanel({ user, selectedUser, token, onUnauthorized, s
     <section aria-labelledby="chat-title" className="flex min-w-0 flex-col p-6 sm:p-8">
       <header className="border-b border-stone-200/80 pb-5">
         <h2 id="chat-title" className="break-all text-xl font-semibold tracking-tight text-stone-900">@{selectedUser.username}</h2>
-        <p className="mt-1 text-xs text-stone-500">New messages appear while you’re connected.</p>
+        <p className={`mt-1 text-xs ${isOnline ? 'text-emerald-700' : 'text-stone-500'}`} aria-label="Contact presence">{isOnline ? 'Online' : 'Offline'}</p>
+        <p role="status" aria-label="Typing indicator" className="mt-1 min-h-4 text-xs text-stone-500">{otherTyping ? `${selectedUser.username} is typing...` : ''}</p>
       </header>
       {stage === 'opening' || stage === 'loading' ? (
         <p role="status" className="min-h-64 py-8 text-sm text-stone-500">{stage === 'opening' ? 'Opening conversation...' : 'Loading messages...'}</p>
@@ -142,7 +193,7 @@ export default function ChatPanel({ user, selectedUser, token, onUnauthorized, s
               id="message-content" className="auth-input min-h-24 resize-y" rows={3}
               placeholder="Write a message..." maxLength={2000} disabled={sending}
               aria-describedby="message-hint" value={content}
-              onChange={(event) => setContent(event.target.value)}
+              onChange={(event) => handleContentChange(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault()
