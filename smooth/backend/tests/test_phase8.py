@@ -38,6 +38,7 @@ from app.models.conversation_member import ConversationMember
 from app.models.message_receipt import MessageReceipt
 from app.models.message_edit import MessageEdit
 from app.models.message_attachment import MessageAttachment
+from app.models.message_reply import MessageReply
 from app.services.images import IMAGE_MESSAGE_SENTINEL, MAX_IMAGE_BYTES, image_path
 from app.models.user import User
 from app.realtime.manager import ConnectionManager, manager
@@ -608,6 +609,99 @@ class Phase8Tests(unittest.TestCase):
         fetched = self.client.get(f"/api/attachments/{first['attachment']['id']}/content", headers=self.headers('bob'))
         self.assertEqual(fetched.content, data)
         self.client.delete(f"/api/messages/{first['id']}", headers=self.headers('alice'))
+
+
+
+    def test_text_replies_effective_preview_edits_deletion_and_persistence(self):
+        target = self.client.post(self.path, headers=self.headers('bob'), json={'content': 'Are you coming tonight?'}).json()
+        reply = self.client.post(self.path, headers=self.headers('alice'), json={'content': 'Yes, at 8', 'reply_to_message_id': target['id']}).json()
+        self.assertEqual(reply['reply_to'], {'id': target['id'], 'sender_id': self.users['bob'], 'content': target['content'], 'attachment_kind': None})
+        own = self.client.post(self.path, headers=self.headers('bob'), json={'content': 'Own reply', 'reply_to_message_id': target['id']}).json()
+        flat = self.client.post(self.path, headers=self.headers('alice'), json={'content': 'Flat reply', 'reply_to_message_id': reply['id']}).json()
+        self.assertEqual(set(flat['reply_to']), {'id', 'sender_id', 'content', 'attachment_kind'})
+        self.assertNotIn('reply_to', flat['reply_to'])
+        with SessionLocal() as db:
+            self.assertEqual(db.scalar(select(func.count(MessageReply.id))), 3)
+        acknowledge_message(reply['id'], self.users['bob'], True)
+        edited = self.client.patch(f"/api/messages/{reply['id']}", headers=self.headers('alice'), json={'content': 'Yes, at 9'}).json()
+        self.assertEqual(edited['reply_to']['id'], target['id'])
+        self.assertIsNotNone(edited['read_at'])
+        self.client.patch(f"/api/messages/{target['id']}", headers=self.headers('bob'), json={'content': 'Edited question'})
+        engine.dispose()
+        history = {message['id']: message for message in self.client.get(self.path, headers=self.headers('alice')).json()}
+        self.assertEqual(history[reply['id']]['reply_to']['content'], 'Edited question')
+        self.assertEqual(history[flat['id']]['reply_to']['content'], 'Yes, at 9')
+        self.assertEqual(self.client.get('/api/conversations', headers=self.headers('alice')).json()[0]['last_message']['content'], 'Flat reply')
+        self.assertEqual(self.client.delete(f"/api/messages/{reply['id']}", headers=self.headers('alice')).status_code, 204)
+        history = {message['id']: message for message in self.client.get(self.path, headers=self.headers('alice')).json()}
+        self.assertNotIn(reply['id'], history)
+        self.assertIsNone(history[flat['id']]['reply_to'])
+        self.assertEqual(self.client.delete(f"/api/messages/{target['id']}", headers=self.headers('bob')).status_code, 204)
+        history = {message['id']: message for message in self.client.get(self.path, headers=self.headers('alice')).json()}
+        self.assertEqual(set(history), {own['id'], flat['id']})
+        self.assertIsNone(history[own['id']]['reply_to'])
+        with SessionLocal() as db:
+            self.assertEqual(db.scalar(select(func.count(MessageReply.id))), 0)
+            self.assertEqual(db.scalar(select(func.count(MessageReceipt.id))), 2)
+
+    def test_reply_validation_cross_conversation_and_atomic_failure(self):
+        target = self.client.post(self.path, headers=self.headers('bob'), json={'content': 'Private AB target'}).json()
+        other = self.client.post(f'/api/conversations/with/{self.users["charlie"]}', headers=self.headers('alice')).json()['id']
+        path = f'/api/conversations/{other}/messages'
+        self.assertEqual(self.client.post(path, headers=self.headers('charlie'), json={'content': 'forged quote', 'reply_to_message_id': target['id']}).status_code, 404)
+        self.assertEqual(self.client.post(self.path, headers=self.headers('charlie'), json={'content': 'not a member', 'reply_to_message_id': target['id']}).status_code, 404)
+        self.assertEqual(self.client.post(self.path, headers=self.headers('alice'), json={'content': 'missing', 'reply_to_message_id': 99999}).status_code, 404)
+        for invalid in (0, -1, 2**63, True, '1', 1.5, []):
+            self.assertEqual(self.client.post(self.path, headers=self.headers('alice'), json={'content': 'invalid', 'reply_to_message_id': invalid}).status_code, 422)
+        with patch('app.api.attachments.store_image') as store:
+            self.assertEqual(self.client.post(path + '/image', headers=self.headers('charlie'), files={'file': ('image.png', self.image_bytes(), 'image/png')}, data={'reply_to_message_id': str(target['id'])}).status_code, 404)
+            store.assert_not_called()
+        for invalid in ('0', '-1', str(2**63), 'true', 'bad'):
+            response = self.client.post(self.path + '/image', headers=self.headers('alice'), files={'file': ('image.png', self.image_bytes(), 'image/png')}, data={'reply_to_message_id': invalid})
+            self.assertEqual(response.status_code, 422)
+        from app.core.config import UPLOAD_DIR
+        before = set((UPLOAD_DIR / 'images').glob('*'))
+        for image in (False, True):
+            with patch('sqlalchemy.orm.Session.commit', side_effect=RuntimeError('commit failed')):
+                with self.assertRaisesRegex(RuntimeError, 'commit failed'):
+                    if image:
+                        self.client.post(self.path + '/image', headers=self.headers('alice'), files={'file': ('image.png', self.image_bytes(), 'image/png')}, data={'reply_to_message_id': str(target['id'])})
+                    else:
+                        self.client.post(self.path, headers=self.headers('alice'), json={'content': 'rollback reply', 'reply_to_message_id': target['id']})
+        self.assertEqual(set((UPLOAD_DIR / 'images').glob('*')), before)
+        with SessionLocal() as db:
+            self.assertEqual(db.scalar(select(func.count(Message.id))), 1)
+            self.assertEqual(db.scalar(select(func.count(MessageReply.id))), 0)
+            self.assertEqual(db.scalar(select(func.count(MessageAttachment.id))), 0)
+            self.assertEqual(db.scalar(select(func.count(MessageReceipt.id))), 1)
+
+    def test_image_reply_combinations_safe_realtime_previews_and_receipts(self):
+        target = self.client.post(self.path, headers=self.headers('alice'), json={'content': 'Text target'}).json()
+        acknowledge_message(target['id'], self.users['bob'], True)
+        with self.client.websocket_connect('/ws') as alice, self.client.websocket_connect('/ws') as bob:
+            self.authenticate(alice, 'alice')
+            self.authenticate(bob, 'bob')
+            image = self.client.post(self.path + '/image', headers=self.headers('bob'), files={'file': ('image.png', self.image_bytes(), 'image/png')}, data={'reply_to_message_id': str(target['id'])}).json()
+            self.assertEqual(image['content'], '')
+            self.assertEqual(image['reply_to']['content'], 'Text target')
+            for socket in (alice, bob):
+                self.assertEqual(self.receive_type(socket, 'message:new'), {'type': 'message:new', 'data': image})
+            text = self.client.post(self.path, headers=self.headers('alice'), json={'content': 'Text to image', 'reply_to_message_id': image['id']}).json()
+            self.assertEqual(text['reply_to']['attachment_kind'], 'image')
+            self.assertEqual(text['reply_to']['content'], '')
+            for socket in (alice, bob):
+                self.assertEqual(self.receive_type(socket, 'message:new'), {'type': 'message:new', 'data': text})
+            image_reply = self.client.post(self.path + '/image', headers=self.headers('alice'), files={'file': ('image.png', self.image_bytes(), 'image/png')}, data={'caption': 'Image to image', 'reply_to_message_id': str(image['id'])}).json()
+            self.assertEqual(image_reply['reply_to']['attachment_kind'], 'image')
+            for socket in (alice, bob):
+                self.assertEqual(self.receive_type(socket, 'message:new'), {'type': 'message:new', 'data': image_reply})
+        acknowledge_message(image['id'], self.users['alice'], True)
+        self.assertEqual(self.client.get('/api/conversations', headers=self.headers('bob')).json()[0]['unread_count'], 2)
+        self.client.delete(f"/api/messages/{image['id']}", headers=self.headers('bob'))
+        history = {message['id']: message for message in self.client.get(self.path, headers=self.headers('alice')).json()}
+        self.assertIsNone(history[text['id']]['reply_to'])
+        self.assertIsNone(history[image_reply['id']]['reply_to'])
+        self.assertIsNotNone(history[image_reply['id']]['attachment'])
 
 
 class ManagerCleanupTests(unittest.IsolatedAsyncioTestCase):

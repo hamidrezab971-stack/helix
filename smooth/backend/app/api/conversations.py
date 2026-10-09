@@ -13,10 +13,11 @@ from app.models.message import Message
 from app.models.message_edit import MessageEdit
 from app.models.message_receipt import MessageReceipt
 from app.models.message_attachment import MessageAttachment
+from app.models.message_reply import MessageReply
 from app.models.user import User
 from app.realtime.manager import manager
 from app.schemas.auth import UserResponse
-from app.services.messages import allocate_message_id, effective_message
+from app.services.messages import allocate_message_id, effective_message, reply_previews, validate_reply_target
 from app.schemas.conversations import (
     ConversationResponse,
     MessageRequest,
@@ -149,17 +150,16 @@ def get_messages(
     db: Annotated[Session, Depends(get_db)],
 ) -> list[MessageResponse]:
     require_membership(conversation_id, user.id, db)
-    return [
-        effective_message(message, receipt, edit, attachment)
-        for message, receipt, edit, attachment in db.execute(
+    rows = list(db.execute(
             select(Message, MessageReceipt, MessageEdit, MessageAttachment)
             .outerjoin(MessageReceipt, MessageReceipt.message_id == Message.id)
             .outerjoin(MessageEdit, MessageEdit.message_id == Message.id)
             .outerjoin(MessageAttachment, MessageAttachment.message_id == Message.id)
             .where(Message.conversation_id == conversation_id)
             .order_by(Message.created_at.asc(), Message.id.asc())
-        )
-    ]
+        ))
+    previews = reply_previews(db, [row[0] for row in rows])
+    return [effective_message(message, receipt, edit, attachment, previews.get(message.id)) for message, receipt, edit, attachment in rows]
 
 
 @router.post(
@@ -181,15 +181,22 @@ def send_message(
     recipient_ids = [member_id for member_id in member_ids if member_id != user.id]
     if len(recipient_ids) != 1:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    message = Message(
-        id=allocate_message_id(db), conversation_id=conversation_id, sender_id=user.id, content=data.content
-    )
-    db.add(message)
-    db.flush()
-    db.add(MessageReceipt(message_id=message.id, recipient_id=recipient_ids[0]))
-    db.commit()
+    validate_reply_target(db, conversation_id, data.reply_to_message_id)
+    try:
+        message = Message(id=allocate_message_id(db), conversation_id=conversation_id, sender_id=user.id, content=data.content)
+        db.add(message)
+        db.flush()
+        db.add(MessageReceipt(message_id=message.id, recipient_id=recipient_ids[0]))
+        if data.reply_to_message_id is not None:
+            db.add(MessageReply(message_id=message.id, reply_to_message_id=data.reply_to_message_id))
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        if data.reply_to_message_id is not None:
+            raise HTTPException(status_code=404, detail="Reply target not found") from None
+        raise
     db.refresh(message)
-    saved = MessageResponse.model_validate(message)
+    saved = effective_message(message, None, None, reply_to=reply_previews(db, [message]).get(message.id))
     background_tasks.add_task(
         manager.broadcast, member_ids,
         {"type": "message:new", "data": saved.model_dump(mode="json")},

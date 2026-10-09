@@ -188,6 +188,25 @@ async function sendPhoto(page, filename, caption = '') {
   return message
 }
 
+function rowById(page, id) {
+  return page.locator(`.chat-history li[data-message-id="${id}"]`)
+}
+
+async function editById(page, id, content) {
+  await rowById(page, id).getByRole('button', { name: 'Edit', exact: true }).click()
+  await page.getByLabel('Edit message text', { exact: true }).fill(content)
+  const response = page.waitForResponse(r => r.request().method() === 'PATCH' && r.url().endsWith(`/api/messages/${id}`))
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  assert.equal((await response).status(), 200)
+}
+
+async function removeById(page, id) {
+  page.once('dialog', dialog => dialog.accept())
+  const response = page.waitForResponse(r => r.request().method() === 'DELETE' && r.url().endsWith(`/api/messages/${id}`))
+  await rowById(page, id).getByRole('button', { name: 'Delete', exact: true }).click()
+  assert.equal((await response).status(), 204)
+}
+
 async function main() {
   execFileSync(path.join(backendDirectory, '.venv/bin/python'), ['-c', 'from PIL import Image; import sys,pathlib; root=pathlib.Path(sys.argv[1]); image=Image.new("RGB", (640,360), "coral"); [image.save(root / ("fixture."+ext), format=fmt) for ext,fmt in [("jpg","JPEG"),("png","PNG"),("webp","WEBP")]]', temporary])
   await startBackend()
@@ -633,6 +652,89 @@ async function main() {
   await imageTab.close()
   console.log('PASS image picker/cancel, failed upload retry, JPEG/PNG/WEBP, empty/captioned images, authenticated blob rendering/revocation, receipts/unread/previews, multiple tabs, deletion/files, offline history, refresh/restart, mobile')
 
+  const question = await send(bob, 'Are you coming tonight?')
+  await rowById(alice, question.id).getByRole('button', { name: 'Reply', exact: true }).click()
+  await expect(alice.getByLabel('Reply composer')).toContainText(names.bob)
+  await expect(alice.getByLabel('Reply composer')).toContainText('Are you coming tonight?')
+  await alice.getByRole('button', { name: 'Cancel reply' }).click()
+  await expect(alice.getByLabel('Reply composer')).toHaveCount(0)
+  await rowById(alice, question.id).getByRole('button', { name: 'Reply', exact: true }).click()
+  // A failed send retains the selected reply for retry.
+  await alice.route('**/api/conversations/*/messages', route => route.request().method() === 'POST'
+    ? route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"test unavailable"}' }) : route.continue())
+  await alice.locator('#message-content').fill('Yes, at 8.')
+  await alice.getByRole('button', { name: 'Send', exact: true }).click()
+  await expect(alice.getByRole('alert')).toContainText(/try again/i)
+  await expect(alice.getByLabel('Reply composer')).toContainText('Are you coming tonight?')
+  await alice.unroute('**/api/conversations/*/messages')
+  const answer = await send(alice, 'Yes, at 8.')
+  assert.equal(answer.reply_to.id, question.id)
+  await expect(alice.getByLabel('Reply composer')).toHaveCount(0)
+  for (const page of [alice, bob]) {
+    await expect(rowById(page, answer.id).getByLabel('Reply preview')).toContainText('Are you coming tonight?')
+  }
+  await status(alice, 'Yes, at 8.', 'Read')
+  await expect(recentRow(alice, names.bob).getByLabel('Last message preview')).toHaveText('You: Yes, at 8.')
+  await rowById(alice, answer.id).getByLabel('Reply preview').click()
+  await expect(rowById(alice, question.id)).toBeInViewport()
+  await alice.reload()
+  await openRecent(alice, names.bob)
+  await bob.reload()
+  await openRecent(bob, names.alice)
+  for (const page of [alice, bob]) await expect(rowById(page, answer.id).getByLabel('Reply preview')).toContainText('Are you coming tonight?')
+  await editById(alice, answer.id, 'Yes, at 9.')
+  await expect(rowById(bob, answer.id)).toContainText('Yes, at 9.')
+  await expect(rowById(alice, answer.id).getByLabel('Reply preview')).toContainText('Are you coming tonight?')
+  await editById(bob, question.id, 'Updated question tonight?')
+  for (const page of [alice, bob]) await expect(rowById(page, answer.id).getByLabel('Reply preview')).toContainText('Updated question tonight?')
+  await rowById(alice, question.id).getByRole('button', { name: 'Reply', exact: true }).click()
+  await openRecent(alice, names.charlie)
+  await expect(alice.getByLabel('Reply composer')).toHaveCount(0)
+  await openRecent(alice, names.bob)
+
+  await rowById(alice, offlinePhoto.id).getByRole('button', { name: 'Reply', exact: true }).click()
+  await expect(alice.getByLabel('Reply composer')).toContainText('Photo · Offline photo')
+  const photoAnswer = await send(alice, 'Reply to photo')
+  await expect(rowById(bob, photoAnswer.id).getByLabel('Reply preview')).toContainText('Photo · Offline photo')
+  await rowById(alice, question.id).getByRole('button', { name: 'Reply', exact: true }).click()
+  const photoToText = await sendPhoto(alice, png, 'Photo reply to text')
+  assert.equal(photoToText.reply_to.id, question.id)
+  await expect(rowById(bob, photoToText.id).getByLabel('Reply preview')).toContainText('Updated question tonight?')
+  await visiblePhoto(bob, photoToText.attachment.id)
+  await rowById(alice, secondPhoto.id).getByRole('button', { name: 'Reply', exact: true }).click()
+  await expect(alice.getByLabel('Reply composer')).toContainText('Photo')
+  const photoToPhoto = await sendPhoto(alice, webp, 'Photo reply to photo')
+  await expect(rowById(bob, photoToPhoto.id).getByLabel('Reply preview')).toContainText('Photo')
+  await rowById(alice, photoToPhoto.id).getByRole('button', { name: 'Reply', exact: true }).click()
+  const ownAnswer = await send(alice, 'Own message reply')
+  assert.equal(ownAnswer.reply_to.id, photoToPhoto.id)
+  assert.equal(ownAnswer.reply_to.reply_to, undefined)
+  await expect(rowById(alice, ownAnswer.id).getByLabel('Reply preview')).toContainText('You')
+  await status(alice, 'Own message reply', 'Read')
+  await removeById(bob, question.id)
+  for (const page of [alice, bob]) {
+    await expect(rowById(page, question.id)).toHaveCount(0)
+    await expect(rowById(page, answer.id)).toBeVisible()
+    await expect(rowById(page, answer.id).getByLabel('Reply preview')).toHaveCount(0)
+    await expect(rowById(page, photoToText.id).getByLabel('Reply preview')).toHaveCount(0)
+  }
+  await removeById(alice, photoToPhoto.id)
+  for (const page of [alice, bob]) await expect(rowById(page, ownAnswer.id).getByLabel('Reply preview')).toHaveCount(0)
+  await bob.reload()
+  await openRecent(bob, names.alice)
+  await expect(rowById(bob, answer.id).getByLabel('Reply preview')).toHaveCount(0)
+  await expect(rowById(bob, photoAnswer.id).getByLabel('Reply preview')).toContainText('Photo · Offline photo')
+  await expect(rowById(bob, ownAnswer.id).getByLabel('Reply preview')).toHaveCount(0)
+  const beforeReplyRestart = await alice.evaluate(() => window.realtimeTest.authenticated)
+  await stopBackend()
+  await startBackend()
+  await alice.waitForFunction(previous => window.realtimeTest.authenticated > previous, beforeReplyRestart)
+  await alice.reload()
+  await openRecent(alice, names.bob)
+  await expect(rowById(alice, photoAnswer.id).getByLabel('Reply preview')).toContainText('Photo · Offline photo')
+  await expect(rowById(alice, answer.id).getByLabel('Reply preview')).toHaveCount(0)
+  console.log('PASS reply action/cancel/retry, same conversation, live quotes, scroll-to-target, own replies, edited reply/target, deleted target/reply cleanup, text/image combinations, refresh/restart persistence')
+
   // Explicit failure and retry; no timer-based polling is used by the app.
   await alice.route('**/api/conversations', route => route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"test unavailable"}' }))
   await alice.reload()
@@ -647,16 +749,18 @@ async function main() {
   console.log('PASS recent empty state, creation, previews/time/presence, Alice/Bob/Charlie ordering, existing-row history, refresh, mobile/keyboard, retry and 401 cleanup')
   // Confirm persisted count directly, including across server restart.
   const count = execFileSync(path.join(backendDirectory, '.venv/bin/python'), ['-c', 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("SELECT count(*) FROM messages").fetchone()[0])', `${temporary}/test.db`], { encoding: 'utf8' })
-  assert.equal(Number(count.trim()), 20)
+  assert.equal(Number(count.trim()), 24)
   const receipts = execFileSync(path.join(backendDirectory, '.venv/bin/python'), ['-c', 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("SELECT count(*), count(DISTINCT message_id), count(delivered_at), count(read_at) FROM message_receipts").fetchone())', `${temporary}/test.db`], { encoding: 'utf8' })
-  assert.equal(receipts.trim(), '(20, 20, 20, 20)')
+  assert.equal(receipts.trim(), '(24, 24, 24, 24)')
   const edits = execFileSync(path.join(backendDirectory, '.venv/bin/python'), ['-c', 'import sqlite3,sys; db=sqlite3.connect(sys.argv[1]); print(db.execute("SELECT count(*), min(content) FROM message_edits").fetchone()); print(db.execute("PRAGMA foreign_key_check").fetchall())', `${temporary}/test.db`], { encoding: 'utf8' })
-  assert.equal(edits.trim(), "(1, 'Offline edit persists')\n[]")
+  assert.equal(edits.trim(), "(2, 'Offline edit persists')\n[]")
   const attachments = execFileSync(path.join(backendDirectory, '.venv/bin/python'), ['-c', 'import sqlite3,sys,pathlib; root=pathlib.Path(sys.argv[1]); db=sqlite3.connect(root / "test.db"); names=[r[0] for r in db.execute("SELECT storage_name FROM message_attachments")]; print(len(names), len(list((root / "uploads/images").iterdir())), all((root / "uploads/images" / name).is_file() for name in names))', temporary], { encoding: 'utf8' })
-  assert.equal(attachments.trim(), '3 3 True')
+  assert.equal(attachments.trim(), '4 4 True')
+  const replies = execFileSync(path.join(backendDirectory, '.venv/bin/python'), ['-c', 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("SELECT count(*) FROM message_replies").fetchone()[0])', `${temporary}/test.db`], { encoding: 'utf8' })
+  assert.equal(Number(replies.trim()), 1)
   assert.deepEqual(errors, [])
-  console.log('PASS backend restart/reconnect, exactly 20 persisted messages, zero uncaught browser errors')
-  console.log('PASS inactive Delivered, active Read, receipt-before-HTTP race, multiple-tab receipts, offline Sent/history Read, refresh persistence, forged acknowledgements, 20 persisted receipts')
+  console.log('PASS backend restart/reconnect, exactly 24 persisted messages, zero uncaught browser errors')
+  console.log('PASS inactive Delivered, active Read, receipt-before-HTTP race, multiple-tab receipts, offline Sent/history Read, refresh persistence, forged acknowledgements, 24 persisted receipts')
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1 }).finally(async () => {

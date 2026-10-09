@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Response
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -15,10 +15,11 @@ from app.models.message import Message
 from app.models.message_edit import MessageEdit
 from app.models.message_receipt import MessageReceipt
 from app.models.message_attachment import MessageAttachment
+from app.models.message_reply import MessageReply
 from app.models.user import User
 from app.realtime.manager import manager
 from app.schemas.conversations import MessageRequest, MessageResponse
-from app.services.messages import effective_message
+from app.services.messages import effective_message, reply_previews
 from app.services.images import remove_image
 
 router = APIRouter(prefix="/api/messages", tags=["messages"])
@@ -60,7 +61,7 @@ def edit_message(
         ))
         edit = db.scalar(select(MessageEdit).where(MessageEdit.message_id == message_id))
         receipt = db.scalar(select(MessageReceipt).where(MessageReceipt.message_id == message_id))
-        saved = effective_message(message, receipt, edit)
+        saved = effective_message(message, receipt, edit, reply_to=reply_previews(db, [message]).get(message.id))
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -82,6 +83,7 @@ def delete_message(
     attachment = db.scalar(select(MessageAttachment).where(MessageAttachment.message_id == message_id))
     storage_name = attachment.storage_name if attachment else None
     member_ids = members(conversation_id, db)
+    db.execute(delete(MessageReply).where(or_(MessageReply.message_id == message_id, MessageReply.reply_to_message_id == message_id)))
     db.execute(delete(MessageReceipt).where(MessageReceipt.message_id == message_id))
     db.execute(delete(MessageEdit).where(MessageEdit.message_id == message_id))
     db.execute(delete(MessageAttachment).where(MessageAttachment.message_id == message_id))

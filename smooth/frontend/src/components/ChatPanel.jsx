@@ -12,6 +12,14 @@ function mergeMessages(current, incoming) {
   return [...messages.values()].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id)
 }
 
+function replyPreview(message) {
+  return { id: message.id, sender_id: message.sender_id, content: Array.from(message.content).slice(0, 200).join(''), attachment_kind: message.attachment?.kind || null }
+}
+
+function replyText(preview) {
+  return preview.attachment_kind === 'image' ? `Photo${preview.content ? ` · ${preview.content}` : ''}` : preview.content
+}
+
 export default function ChatPanel({ user, selectedUser, initialConversation, onConversationOpened, onMessageSent, onMessageMutated, subscribeToMutations, token, onUnauthorized, subscribeToMessages, subscribeToStatus, acknowledge, subscribeToTyping, sendTyping, isOnline }) {
   const [conversation, setConversation] = useState(null)
   const [messages, setMessages] = useState([])
@@ -42,6 +50,11 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
   const [actionBusy, setActionBusy] = useState(false)
   const actionPending = useRef(false)
   const actionController = useRef(null)
+  const [replyTarget, setReplyTarget] = useState(null)
+
+  function replyName(preview) {
+    return preview.sender_id === user.id ? 'You' : selectedUser.username
+  }
 
   useEffect(() => {
     if (!selectedImage) { setImagePreview(''); return }
@@ -64,7 +77,10 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
     setMessages((previous) => mergeMessages(previous, incoming.filter((message) => !deletedIds.current.has(message.id)).map((message) => {
       const update = updates.current.get(message.id)
       const effective = update && (!message.edited_at || Date.parse(update.edited_at) > Date.parse(message.edited_at)) ? update : message
-      return { ...effective, ...mergeReceipt(receipts.current.get(message.id), effective) }
+      const target = effective.reply_to
+      const targetUpdate = target && updates.current.get(target.id)
+      const reply_to = target && deletedIds.current.has(target.id) ? null : targetUpdate ? replyPreview(targetUpdate) : target
+      return { ...effective, reply_to, ...mergeReceipt(receipts.current.get(message.id), effective) }
     })))
   }, [])
 
@@ -75,13 +91,18 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
       deletedIds.current.add(id)
       updates.current.delete(id)
       receipts.current.delete(id)
-      setMessages((previous) => previous.filter((message) => message.id !== id))
+      setMessages((previous) => previous.filter((message) => message.id !== id).map((message) => message.reply_to?.id === id ? { ...message, reply_to: null } : message))
       setEditingId((current) => current === id ? null : current)
+      setReplyTarget((current) => current?.id === id ? null : current)
     } else if (!deletedIds.current.has(event.data.id)) {
       const existing = updates.current.get(event.data.id)
       if (!existing || Date.parse(event.data.edited_at) >= Date.parse(existing.edited_at)) updates.current.set(event.data.id, event.data)
-      setMessages((previous) => previous.some((message) => message.id === event.data.id)
-        ? mergeMessages(previous, [event.data]) : previous)
+      setMessages((previous) => {
+        const merged = previous.some((message) => message.id === event.data.id) ? mergeMessages(previous, [event.data]) : previous
+        const target = updates.current.get(event.data.id)
+        return merged.map((message) => message.reply_to?.id === target.id ? { ...message, reply_to: replyPreview(target) } : message)
+      })
+      setReplyTarget((current) => current?.id === event.data.id ? replyPreview(updates.current.get(event.data.id)) : current)
     }
   }), [subscribeToMutations])
 
@@ -165,6 +186,7 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
     setConversation(null)
     conversationId.current = null
     setMessages([])
+    setReplyTarget(null)
 
     async function openConversation() {
       let fallback = 'Unable to open this conversation. Please try again.'
@@ -257,14 +279,15 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
     sendController.current = controller
     try {
       const message = selectedImage
-        ? await sendImage(token, conversation.id, selectedImage, trimmed, controller.signal)
-        : await sendMessage(token, conversation.id, trimmed, controller.signal)
+        ? await sendImage(token, conversation.id, selectedImage, trimmed, controller.signal, replyTarget?.id || null)
+        : await sendMessage(token, conversation.id, trimmed, controller.signal, replyTarget?.id || null)
       if (controller.signal.aborted) return
       stopTyping()
       addMessages([message])
       onMessageSent(message)
       setContent('')
       setSelectedImage(null)
+      setReplyTarget(null)
     } catch (error) {
       if (controller.signal.aborted || error.name === 'AbortError') return
       if (error.status === 401) {
@@ -300,9 +323,13 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
             ) : (
               <ol className="space-y-3">
                 {messages.map((message) => (
-                  <li key={message.id} className={`flex flex-col ${message.sender_id === user.id ? 'items-end' : 'items-start'}`}>
+                  <li key={message.id} data-message-id={message.id} className={`flex flex-col ${message.sender_id === user.id ? 'items-end' : 'items-start'}`}>
                     <p className="message-bubble" data-own={message.sender_id === user.id}>
                       <span className="sr-only">{message.sender_id === user.id ? 'You' : selectedUser.username}: </span>
+                      {message.reply_to && <button type="button" aria-label="Reply preview" className="mb-2 block max-w-full rounded border-l-2 border-current bg-black/5 px-2 py-1 text-left text-xs" onClick={() => history.current?.querySelector(`[data-message-id="${message.reply_to.id}"]`)?.scrollIntoView({ block: 'center' })}>
+                        <span className="block font-semibold">{replyName(message.reply_to)}</span>
+                        <span className="block truncate">{replyText(message.reply_to)}</span>
+                      </button>}
                       {message.attachment && <AttachmentImage attachment={message.attachment} token={token} onUnauthorized={onUnauthorized} />}
                       {message.content}
                       {message.edited_at && <span aria-label="Edited message" className="mt-1 block text-[10px] opacity-75">Edited</span>}
@@ -312,6 +339,7 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
                         </span>
                       )}
                     </p>
+                    <button type="button" className="text-button min-h-8 text-xs" disabled={sending} onClick={() => { setReplyTarget(replyPreview(message)); document.getElementById('message-content')?.focus() }}>Reply</button>
                     {message.sender_id === user.id && (editingId === message.id ? (
                       <form aria-label="Edit message" className="mt-2 w-full max-w-sm space-y-2" onSubmit={(event) => performAction(message, false, event)}>
                         <label className="text-xs text-stone-600" htmlFor="edit-message-content">Edit message text</label>
@@ -334,6 +362,10 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
           </div>
           {actionError && <p role="alert" className="form-error mb-3">{actionError}</p>}
           <form onSubmit={handleSend} aria-busy={sending} className="border-t border-stone-200/80 pt-5">
+            {replyTarget && <div aria-label="Reply composer" className="mb-3 flex min-w-0 items-start justify-between gap-3 rounded-lg border-l-2 border-[#b65339] bg-stone-100 p-3 text-xs text-stone-600">
+              <span className="min-w-0"><span className="block font-semibold">Replying to {replyName(replyTarget)}</span><span className="block truncate">{replyText(replyTarget)}</span></span>
+              <button type="button" aria-label="Cancel reply" className="text-button min-h-8 shrink-0" disabled={sending} onClick={() => setReplyTarget(null)}>Cancel</button>
+            </div>}
             <input ref={imageInput} type="file" accept="image/jpeg,image/png,image/webp" aria-label="Choose image" className="hidden" onChange={(event) => { chooseImage(event.target.files?.[0]); event.target.value = '' }} />
             <button type="button" className="secondary-button mb-3" disabled={sending} onClick={() => imageInput.current?.click()}>Image</button>
             {imagePreview && <div className="mb-3 space-y-2">

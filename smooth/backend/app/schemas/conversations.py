@@ -14,6 +14,7 @@ class MessageRequest(BaseModel):
     content: Annotated[str, BeforeValidator(trim_content)] = Field(
         min_length=1, max_length=2000
     )
+    reply_to_message_id: Annotated[int, Field(strict=True, gt=0, lt=2**63)] | None = None
 
 
 class AttachmentResponse(BaseModel):
@@ -25,6 +26,13 @@ class AttachmentResponse(BaseModel):
     size_bytes: int
     width: int
     height: int
+
+
+class ReplyPreview(BaseModel):
+    id: int
+    sender_id: int
+    content: str
+    attachment_kind: str | None = None
 
 
 class MessageResponse(BaseModel):
@@ -39,6 +47,7 @@ class MessageResponse(BaseModel):
     read_at: datetime | None = None
     edited_at: datetime | None = None
     attachment: AttachmentResponse | None = None
+    reply_to: ReplyPreview | None = None
 
 
 class ConversationResponse(BaseModel):

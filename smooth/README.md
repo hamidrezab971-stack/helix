@@ -3,8 +3,8 @@
 Smooth is a lightweight web-based messaging application. Native FastAPI/browser
 WebSockets deliver persisted messages, presence, and typing indicators.
 HTTP remains responsible for creating messages. Delivered/Read receipts are
-persistent; presence and typing remain temporary state. Phase 14 adds image
-messages with local storage and authenticated access.
+persistent; presence and typing remain temporary state. Phase 15 adds flat replies
+to text and image messages.
 
 ## Technology stack
 
@@ -173,7 +173,7 @@ All endpoints require `Authorization: Bearer <token>`:
   canonical user pair prevents duplicates; both members are created atomically.
 - `GET /api/conversations/{conversation_id}/messages` returns safe message fields
   (`id`, `conversation_id`, `sender_id`, `content`, `created_at`, `edited_at`,
-  `delivered_at`, `read_at`, `attachment`), ordered by
+  `delivered_at`, `read_at`, `attachment`, `reply_to`), ordered by
   `created_at` then `id`, ascending.
 - `POST /api/conversations/{conversation_id}/messages` accepts
   `{"content":"Hello"}` and returns the stored message with 201. Content is trimmed
@@ -302,6 +302,25 @@ deletion removes the attachment/receipt/edit/message rows and stored file. Histo
 and image fetches restore media after refresh, restart, or offline login. Cloud
 object storage and other media types are intentionally deferred.
 
+## Reply to messages
+
+Text creation accepts optional JSON `reply_to_message_id`; image creation accepts
+the same optional multipart field. Targets must exist in the same conversation,
+and the sender must be a member. A `message_replies` row commits with the message,
+receipt, and attachment if present; existing message columns are unchanged.
+
+Message responses and existing live events include nullable `reply_to` with only
+target ID, sender ID, current effective content (up to 200 characters), and image
+kind. Quotes are flat previews, not recursive threads. Image quotes show Photo
+and an optional caption. Target edits update previews; editing the reply preserves
+its relation. Deleting a target removes referencing relations but preserves reply
+messages; deleting a reply removes its own relation.
+
+Reply actions support either participant's text/image messages, with composer
+cancel/retry, quoted bubbles, and click-to-scroll for loaded targets. Sending or
+switching chats clears composer reply state. Recents show the reply's actual
+content/media, and existing receipts/unread behavior applies unchanged.
+
 ## Run the frontend
 
 In a separate terminal, from `smooth/`:
@@ -339,7 +358,7 @@ full count available to assistive technology). Read confirmation refreshes recen
 counts across recipient tabs using the existing status event. Active visible chats
 avoid badge flashes; refresh and reconnect restore persisted unread counts.
 
-## Phase 8–14 verification
+## Phase 8–15 verification
 
 From `backend/`, install the test-only transport with
 `.venv/bin/python -m pip install httpx2`, then run
@@ -359,6 +378,9 @@ network failures/retries, refresh persistence, and offline history.
 Image tests cover JPEG/PNG/WEBP, spoofed/unsupported files, size/dimension limits,
 authorization, path confinement, filename collisions, persistence, rollback/file
 cleanup, authenticated blob rendering, URL revocation, receipts, and unread counts.
+Reply checks cover same-conversation authorization, atomic rollback, flat/effective
+previews, own and text/image combinations, target edit/delete cleanup, live quotes,
+composer cancel/retry, scroll-to-target, and refresh/restart persistence.
 
 The browser regression script is `frontend/tests/phase8.cjs`. Start the frontend
 at `http://127.0.0.1:5173` with its default API/WebSocket configuration and leave
