@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getMessages, getOrCreateConversation, sendMessage, editMessage, deleteMessage, mergeReceipt } from '../services/api.js'
+import { getMessages, getOrCreateConversation, sendMessage, sendImage, editMessage, deleteMessage, mergeReceipt } from '../services/api.js'
+import AttachmentImage from './AttachmentImage.jsx'
 
 function mergeMessages(current, incoming) {
   const messages = new Map(current.map((message) => [message.id, message]))
@@ -20,6 +21,9 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
   const [content, setContent] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState('')
+  const [selectedImage, setSelectedImage] = useState(null)
+  const [imagePreview, setImagePreview] = useState('')
+  const imageInput = useRef(null)
   const pending = useRef(false)
   const sendController = useRef(null)
   const history = useRef(null)
@@ -38,6 +42,23 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
   const [actionBusy, setActionBusy] = useState(false)
   const actionPending = useRef(false)
   const actionController = useRef(null)
+
+  useEffect(() => {
+    if (!selectedImage) { setImagePreview(''); return }
+    const url = URL.createObjectURL(selectedImage)
+    setImagePreview(url)
+    return () => URL.revokeObjectURL(url)
+  }, [selectedImage])
+
+  function chooseImage(file) {
+    if (!file) return
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 8 * 1024 * 1024) {
+      setSendError('Choose a JPEG, PNG, or WEBP image of 8 MB or smaller.')
+      return
+    }
+    setSelectedImage(file)
+    setSendError('')
+  }
 
   const addMessages = useCallback((incoming) => {
     setMessages((previous) => mergeMessages(previous, incoming.filter((message) => !deletedIds.current.has(message.id)).map((message) => {
@@ -223,7 +244,7 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
     event.preventDefault()
     if (pending.current || stage !== 'ready' || !conversation) return
     const trimmed = content.trim()
-    if (!trimmed) return
+    if (!trimmed && !selectedImage) return
     if (Array.from(trimmed).length > 2000) {
       setSendError('Use a message between 1 and 2000 characters.')
       return
@@ -235,12 +256,15 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
     const controller = new AbortController()
     sendController.current = controller
     try {
-      const message = await sendMessage(token, conversation.id, trimmed, controller.signal)
+      const message = selectedImage
+        ? await sendImage(token, conversation.id, selectedImage, trimmed, controller.signal)
+        : await sendMessage(token, conversation.id, trimmed, controller.signal)
       if (controller.signal.aborted) return
       stopTyping()
       addMessages([message])
       onMessageSent(message)
       setContent('')
+      setSelectedImage(null)
     } catch (error) {
       if (controller.signal.aborted || error.name === 'AbortError') return
       if (error.status === 401) {
@@ -279,6 +303,7 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
                   <li key={message.id} className={`flex flex-col ${message.sender_id === user.id ? 'items-end' : 'items-start'}`}>
                     <p className="message-bubble" data-own={message.sender_id === user.id}>
                       <span className="sr-only">{message.sender_id === user.id ? 'You' : selectedUser.username}: </span>
+                      {message.attachment && <AttachmentImage attachment={message.attachment} token={token} onUnauthorized={onUnauthorized} />}
                       {message.content}
                       {message.edited_at && <span aria-label="Edited message" className="mt-1 block text-[10px] opacity-75">Edited</span>}
                       {message.sender_id === user.id && (
@@ -298,7 +323,7 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
                       </form>
                     ) : (
                       <div className="mt-1 flex gap-3">
-                        <button type="button" className="text-button min-h-8 text-xs" disabled={actionBusy} onClick={() => { setEditingId(message.id); setEditContent(message.content); setActionError('') }}>Edit</button>
+                        {!message.attachment && <button type="button" className="text-button min-h-8 text-xs" disabled={actionBusy} onClick={() => { setEditingId(message.id); setEditContent(message.content); setActionError('') }}>Edit</button>}
                         <button type="button" className="text-button min-h-8 text-xs" disabled={actionBusy} onClick={() => performAction(message, true)}>Delete</button>
                       </div>
                     ))}
@@ -309,7 +334,14 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
           </div>
           {actionError && <p role="alert" className="form-error mb-3">{actionError}</p>}
           <form onSubmit={handleSend} aria-busy={sending} className="border-t border-stone-200/80 pt-5">
-            <label htmlFor="message-content" className="text-sm font-medium text-stone-800">Message</label>
+            <input ref={imageInput} type="file" accept="image/jpeg,image/png,image/webp" aria-label="Choose image" className="hidden" onChange={(event) => { chooseImage(event.target.files?.[0]); event.target.value = '' }} />
+            <button type="button" className="secondary-button mb-3" disabled={sending} onClick={() => imageInput.current?.click()}>Image</button>
+            {imagePreview && <div className="mb-3 space-y-2">
+              <img src={imagePreview} alt="Selected image preview" className="max-h-40 max-w-full rounded-lg object-contain" />
+              <p className="break-all text-xs text-stone-500">{selectedImage?.name}</p>
+              <button type="button" className="secondary-button" disabled={sending} onClick={() => setSelectedImage(null)}>Remove image</button>
+            </div>}
+            <label htmlFor="message-content" className="text-sm font-medium text-stone-800">{selectedImage ? 'Caption (optional)' : 'Message'}</label>
             <textarea
               id="message-content" className="auth-input min-h-24 resize-y" rows={3}
               placeholder="Write a message..." maxLength={2000} disabled={sending}
@@ -324,7 +356,7 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
             />
             <p id="message-hint" className="mt-2 text-xs leading-5 text-stone-500">Up to 2000 characters. Enter to send; Shift+Enter for a new line.</p>
             {sendError && <p role="alert" className="form-error mt-3">{sendError}</p>}
-            <button type="submit" className="primary-button mt-4 w-full" disabled={sending || !content.trim()}>{sending ? 'Sending...' : 'Send'}</button>
+            <button type="submit" className="primary-button mt-4 w-full" disabled={sending || (!content.trim() && !selectedImage)}>{sending ? (selectedImage ? 'Uploading...' : 'Sending...') : 'Send'}</button>
           </form>
         </>
       )}

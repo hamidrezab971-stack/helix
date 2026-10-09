@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.auth import router as auth_router
+from app.api.attachments import router as attachments_router
 from app.api.conversations import router as conversations_router
 from app.api.messages import router as messages_router
 from app.api.realtime import router as realtime_router
@@ -34,6 +35,7 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 app.include_router(auth_router)
+app.include_router(attachments_router)
 app.include_router(users_router)
 app.include_router(conversations_router)
 app.include_router(messages_router)

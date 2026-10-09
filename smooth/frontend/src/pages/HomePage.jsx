@@ -23,6 +23,11 @@ function recentTime(timestamp) {
     ? { hour: '2-digit', minute: '2-digit' } : { month: 'short', day: 'numeric' }).format(date)
 }
 
+function previewText(message) {
+  const text = message.content.replace(/\s+/g, ' ')
+  return message.attachment ? `Photo${text ? ` · ${text}` : ''}` : text
+}
+
 export default function HomePage({ user, token, error, onLogout, onUnauthorized }) {
   const [search, setSearch] = useState('')
   const [users, setUsers] = useState([])
@@ -98,7 +103,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
         && (!conversation.last_message || message.id > conversation.last_message.id)
       const latest = newerMessage(message, conversation.last_message)
       return { ...conversation, unread_count: conversation.unread_count + (increment ? 1 : 0),
-        ...(latest ? { last_message: { id: message.id, sender_id: message.sender_id, content: message.content, created_at: message.created_at }, updated_at: message.created_at } : {}) }
+        ...(latest ? { last_message: { id: message.id, sender_id: message.sender_id, content: message.content, created_at: message.created_at, attachment: message.attachment }, updated_at: message.created_at } : {}) }
     })))
     refreshRecent()
   }, [refreshRecent, user.id])
@@ -268,7 +273,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
                           {conversation.last_message && <time className="shrink-0 text-[11px] text-stone-500" dateTime={conversation.last_message.created_at} title={conversation.last_message.created_at}>{recentTime(conversation.last_message.created_at)}</time>}
                         </span>
                         <span className="block truncate text-xs text-stone-500" aria-label="Last message preview">
-                          {conversation.last_message ? `${conversation.last_message.sender_id === user.id ? 'You: ' : ''}${conversation.last_message.content.replace(/\s+/g, ' ')}` : 'No messages yet.'}
+                          {conversation.last_message ? `${conversation.last_message.sender_id === user.id ? 'You: ' : ''}${previewText(conversation.last_message)}` : 'No messages yet.'}
                         </span>
                         <span className="flex items-center justify-between gap-2">
                           <span className={`text-[11px] ${onlineUserIds.has(conversation.other_user.id) ? 'text-emerald-700' : 'text-stone-500'}`}>

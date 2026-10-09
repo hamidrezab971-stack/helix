@@ -12,6 +12,7 @@ from app.models.conversation_member import ConversationMember
 from app.models.message import Message
 from app.models.message_edit import MessageEdit
 from app.models.message_receipt import MessageReceipt
+from app.models.message_attachment import MessageAttachment
 from app.models.user import User
 from app.realtime.manager import manager
 from app.schemas.auth import UserResponse
@@ -53,7 +54,7 @@ def list_conversations(
         .scalar_subquery()
     )
     rows = db.execute(
-        select(Conversation, User, Message, MessageEdit, func.coalesce(unread.c.count, 0))
+        select(Conversation, User, Message, MessageEdit, MessageAttachment, func.coalesce(unread.c.count, 0))
         .select_from(Conversation)
         .join(ConversationMember, (
             (ConversationMember.conversation_id == Conversation.id)
@@ -66,6 +67,7 @@ def list_conversations(
         .join(User, User.id == other_member.user_id)
         .outerjoin(Message, Message.id == latest_message_id)
         .outerjoin(MessageEdit, MessageEdit.message_id == Message.id)
+        .outerjoin(MessageAttachment, MessageAttachment.message_id == Message.id)
         .outerjoin(unread, unread.c.conversation_id == Conversation.id)
         .order_by(
             Message.created_at.is_(None), Message.created_at.desc(),
@@ -76,10 +78,10 @@ def list_conversations(
     return [RecentConversationResponse(
         id=conversation.id,
         other_user=UserResponse.model_validate(other_user),
-        last_message=LastMessageResponse.model_validate(message).model_copy(update={"content": edit.content if edit else message.content}) if message else None,
+        last_message=LastMessageResponse.model_validate(effective_message(message, None, edit, attachment)) if message else None,
         updated_at=message.created_at if message else conversation.created_at,
         unread_count=unread_count,
-    ) for conversation, other_user, message, edit, unread_count in rows]
+    ) for conversation, other_user, message, edit, attachment, unread_count in rows]
 
 
 @router.post("/with/{user_id}", response_model=ConversationResponse)
@@ -148,11 +150,12 @@ def get_messages(
 ) -> list[MessageResponse]:
     require_membership(conversation_id, user.id, db)
     return [
-        effective_message(message, receipt, edit)
-        for message, receipt, edit in db.execute(
-            select(Message, MessageReceipt, MessageEdit)
+        effective_message(message, receipt, edit, attachment)
+        for message, receipt, edit, attachment in db.execute(
+            select(Message, MessageReceipt, MessageEdit, MessageAttachment)
             .outerjoin(MessageReceipt, MessageReceipt.message_id == Message.id)
             .outerjoin(MessageEdit, MessageEdit.message_id == Message.id)
+            .outerjoin(MessageAttachment, MessageAttachment.message_id == Message.id)
             .where(Message.conversation_id == conversation_id)
             .order_by(Message.created_at.asc(), Message.id.asc())
         )

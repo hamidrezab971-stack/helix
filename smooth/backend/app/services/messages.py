@@ -5,7 +5,9 @@ from sqlalchemy.orm import Session
 from app.models.message import Message, MessageIdSequence
 from app.models.message_edit import MessageEdit
 from app.models.message_receipt import MessageReceipt
-from app.schemas.conversations import MessageResponse
+from app.models.message_attachment import MessageAttachment
+from app.schemas.conversations import AttachmentResponse, MessageResponse
+from app.services.images import IMAGE_MESSAGE_SENTINEL
 
 
 def allocate_message_id(db: Session) -> int:
@@ -19,10 +21,11 @@ def allocate_message_id(db: Session) -> int:
     ).returning(MessageIdSequence.last_value)).scalar_one()
 
 
-def effective_message(message: Message, receipt: MessageReceipt | None, edit: MessageEdit | None) -> MessageResponse:
+def effective_message(message: Message, receipt: MessageReceipt | None, edit: MessageEdit | None, attachment: MessageAttachment | None = None) -> MessageResponse:
     return MessageResponse.model_validate(message).model_copy(update={
-        "content": edit.content if edit else message.content,
+        "content": "" if attachment and message.content == IMAGE_MESSAGE_SENTINEL else edit.content if edit else message.content,
         "edited_at": edit.edited_at if edit else None,
         "delivered_at": receipt.delivered_at if receipt else None,
         "read_at": receipt.read_at if receipt else None,
+        "attachment": AttachmentResponse.model_validate(attachment) if attachment else None,
     })

@@ -3,8 +3,8 @@
 Smooth is a lightweight web-based messaging application. Native FastAPI/browser
 WebSockets deliver persisted messages, presence, and typing indicators.
 HTTP remains responsible for creating messages. Delivered/Read receipts are
-persistent; presence and typing remain temporary state. Phase 13 adds sender-only
-message editing and deletion.
+persistent; presence and typing remain temporary state. Phase 14 adds image
+messages with local storage and authenticated access.
 
 ## Technology stack
 
@@ -173,7 +173,7 @@ All endpoints require `Authorization: Bearer <token>`:
   canonical user pair prevents duplicates; both members are created atomically.
 - `GET /api/conversations/{conversation_id}/messages` returns safe message fields
   (`id`, `conversation_id`, `sender_id`, `content`, `created_at`, `edited_at`,
-  `delivered_at`, `read_at`), ordered by
+  `delivered_at`, `read_at`, `attachment`), ordered by
   `created_at` then `id`, ascending.
 - `POST /api/conversations/{conversation_id}/messages` accepts
   `{"content":"Hello"}` and returns the stored message with 201. Content is trimmed
@@ -271,6 +271,37 @@ without altering existing message columns. A tiny `message_id_sequence` table
 preserves stable IDs after deletion, preventing SQLite ID reuse from making old
 socket acknowledgements apply to replacement messages. It stores no message text.
 
+## Image messages
+
+`POST /api/conversations/{conversation_id}/messages/image` accepts authenticated
+multipart `file` and optional `caption`, returning HTTP 201. JPEG, PNG, and WEBP
+only, maximum 8 MB; captions are trimmed and limited to 2000 characters. Pillow
+verifies the actual format and decoded image, with safe dimension/pixel limits
+and decompression-bomb protections. SVG, GIF, animated images, and arbitrary files
+are rejected. Authentication/membership precede multipart parsing; chunked bodies
+are bounded too.
+
+Images are stored locally beneath `UPLOAD_DIR/images` (`UPLOAD_DIR=./uploads` by
+default); `uploads/` is ignored by Git. UUID filenames use verified format
+extensions. `message_attachments` stores one image per message without changing
+existing message columns. Message, attachment, and receipt commit together; failed
+database creation cleans up the stored file. Public upload directories are not
+mounted.
+
+`GET /api/attachments/{attachment_id}/content` requires Bearer authentication and
+conversation membership. Responses contain image bytes with the verified MIME
+type, never a filesystem path. JSON messages carry only attachment ID, kind, MIME,
+size, width, and height. Clients fetch authenticated blobs, use object URLs, and
+revoke them when removed/unmounted. `message:new` carries metadata, not bytes.
+
+The composer supports Image selection, local preview, removal, and optional
+caption before Send. No-caption messages display no internal placeholder. Recents
+show Photo or Photo · caption. Existing receipts, unread counts, ordering, and
+real-time deletion apply. Image Edit is hidden and rejected server-side; sender
+deletion removes the attachment/receipt/edit/message rows and stored file. History
+and image fetches restore media after refresh, restart, or offline login. Cloud
+object storage and other media types are intentionally deferred.
+
 ## Run the frontend
 
 In a separate terminal, from `smooth/`:
@@ -308,7 +339,7 @@ full count available to assistive technology). Read confirmation refreshes recen
 counts across recipient tabs using the existing status event. Active visible chats
 avoid badge flashes; refresh and reconnect restore persisted unread counts.
 
-## Phase 8–13 verification
+## Phase 8–14 verification
 
 From `backend/`, install the test-only transport with
 `.venv/bin/python -m pip install httpx2`, then run
@@ -325,6 +356,9 @@ Mutation tests cover sender/membership authorization, repeated edits, receipt
 preservation, deletion cleanup, unread/preview fallback, failed commits, and stable
 IDs. Browser checks include live mutation across tabs, confirmation/cancel,
 network failures/retries, refresh persistence, and offline history.
+Image tests cover JPEG/PNG/WEBP, spoofed/unsupported files, size/dimension limits,
+authorization, path confinement, filename collisions, persistence, rollback/file
+cleanup, authenticated blob rendering, URL revocation, receipts, and unread counts.
 
 The browser regression script is `frontend/tests/phase8.cjs`. Start the frontend
 at `http://127.0.0.1:5173` with its default API/WebSocket configuration and leave

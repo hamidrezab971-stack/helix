@@ -23,3 +23,5 @@ if ACCESS_TOKEN_EXPIRE_MINUTES <= 0:
 FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN")
 if not FRONTEND_ORIGIN:
     raise RuntimeError("Set FRONTEND_ORIGIN in the environment or backend/.env.")
+
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "./uploads")).resolve()

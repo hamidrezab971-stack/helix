@@ -3,6 +3,9 @@ import os
 import asyncio
 import tempfile
 import unittest
+from io import BytesIO
+import struct
+import zlib
 from time import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -17,12 +20,14 @@ os.environ.update(
     SECRET_KEY="phase8-test-secret-only-" * 3,
     ACCESS_TOKEN_EXPIRE_MINUTES="60",
     FRONTEND_ORIGIN="http://127.0.0.1:5173",
+    UPLOAD_DIR=f"{_database.name}/uploads",
 )
 
 import jwt
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select, inspect
 from starlette.websockets import WebSocketDisconnect
+from PIL import Image
 
 from app.core.config import SECRET_KEY
 from app.database.database import Base, SessionLocal, engine
@@ -32,6 +37,8 @@ from app.models.conversation import Conversation
 from app.models.conversation_member import ConversationMember
 from app.models.message_receipt import MessageReceipt
 from app.models.message_edit import MessageEdit
+from app.models.message_attachment import MessageAttachment
+from app.services.images import IMAGE_MESSAGE_SENTINEL, MAX_IMAGE_BYTES, image_path
 from app.models.user import User
 from app.realtime.manager import ConnectionManager, manager
 from app.services.receipts import acknowledge_message, initialize_receipts
@@ -307,7 +314,7 @@ class Phase8Tests(unittest.TestCase):
         self.assertEqual(rows[0]["updated_at"], rows[0]["last_message"]["created_at"])
         self.assertEqual(set(rows[0]), {"id", "other_user", "last_message", "updated_at", "unread_count"})
         self.assertEqual(set(rows[0]["other_user"]), {"id", "username", "created_at"})
-        self.assertEqual(set(rows[0]["last_message"]), {"id", "sender_id", "content", "created_at"})
+        self.assertEqual(set(rows[0]["last_message"]), {"id", "sender_id", "content", "created_at", "attachment"})
         with SessionLocal() as db:
             db.get(Message, latest["id"]).created_at = datetime(2026, 10, 3)
             db.commit()
@@ -472,6 +479,135 @@ class Phase8Tests(unittest.TestCase):
         self.assertGreater(saved['id'], message_id)
         self.assertIsNone(acknowledge_message(message_id, self.users['alice'], True))
         self.assertEqual(self.client.get('/api/conversations', headers=self.headers('alice')).json()[0]['unread_count'], 1)
+
+
+
+    def image_bytes(self, format="PNG"):
+        stream = BytesIO()
+        Image.new("RGB", (8, 6), "coral").save(stream, format=format)
+        return stream.getvalue()
+
+    def test_images_formats_metadata_auth_persistence_and_deletion(self):
+        images = []
+        with self.client.websocket_connect('/ws') as alice, self.client.websocket_connect('/ws') as bob:
+            self.authenticate(alice, 'alice')
+            self.authenticate(bob, 'bob')
+            for format, mime, caption in (("JPEG", "image/jpeg", "  Vacation  "), ("PNG", "image/png", ""), ("WEBP", "image/webp", "")):
+                data = self.image_bytes(format)
+                response = self.client.post(self.path + '/image', headers=self.headers('alice'), files={'file': ('../../malicious.exe', data, 'application/octet-stream')}, data={'caption': caption})
+                self.assertEqual(response.status_code, 201)
+                saved = response.json()
+                images.append(saved)
+                self.assertEqual(saved['content'], caption.strip())
+                self.assertEqual(set(saved['attachment']), {'id', 'kind', 'mime_type', 'size_bytes', 'width', 'height'})
+                self.assertEqual(saved['attachment']['mime_type'], mime)
+                self.assertEqual(saved['attachment']['width'], 8)
+                self.assertEqual(saved['attachment']['height'], 6)
+                for socket in (alice, bob):
+                    self.assertEqual(self.receive_type(socket, 'message:new'), {'type': 'message:new', 'data': saved})
+                with SessionLocal() as db:
+                    attachment = db.get(MessageAttachment, saved['attachment']['id'])
+                    self.assertRegex(attachment.storage_name, r'^[a-f0-9]{32}\.(jpg|png|webp)$')
+                    self.assertEqual(image_path(attachment.storage_name).read_bytes(), data)
+                    self.assertEqual(db.scalar(select(MessageReceipt.recipient_id).where(MessageReceipt.message_id == saved['id'])), self.users['bob'])
+                    if not caption:
+                        self.assertEqual(db.get(Message, saved['id']).content, IMAGE_MESSAGE_SENTINEL)
+                download = f"/api/attachments/{saved['attachment']['id']}/content"
+                self.assertEqual(self.client.get(download).status_code, 401)
+                self.assertEqual(self.client.get(download, headers=self.headers('charlie')).status_code, 404)
+                for name in ('alice', 'bob'):
+                    fetched = self.client.get(download, headers=self.headers(name))
+                    self.assertEqual(fetched.status_code, 200)
+                    self.assertEqual(fetched.content, data)
+                    self.assertEqual(fetched.headers['content-type'], mime)
+                    self.assertEqual(fetched.headers['x-content-type-options'], 'nosniff')
+        self.assertEqual(self.client.patch(f"/api/messages/{images[0]['id']}", headers=self.headers('alice'), json={'content': 'unsupported caption edit'}).status_code, 400)
+        engine.dispose()
+        history = self.client.get(self.path, headers=self.headers('bob')).json()
+        self.assertEqual(history, images)
+        self.assertEqual(self.client.get('/api/conversations', headers=self.headers('bob')).json()[0]['unread_count'], 3)
+        saved = images[1]
+        with SessionLocal() as db:
+            path = image_path(db.get(MessageAttachment, saved['attachment']['id']).storage_name)
+        self.assertEqual(self.client.delete(f"/api/messages/{saved['id']}", headers=self.headers('alice')).status_code, 204)
+        self.assertFalse(path.exists())
+        with SessionLocal() as db:
+            self.assertIsNone(db.get(Message, saved['id']))
+            self.assertIsNone(db.get(MessageAttachment, saved['attachment']['id']))
+            self.assertIsNone(db.scalar(select(MessageReceipt).where(MessageReceipt.message_id == saved['id'])))
+        self.assertEqual(self.client.get('/api/conversations', headers=self.headers('bob')).json()[0]['unread_count'], 2)
+        self.assertEqual(self.client.get(f"/api/attachments/{saved['attachment']['id']}/content", headers=self.headers('alice')).status_code, 404)
+        old = images[-1]
+        self.client.delete(f"/api/messages/{old['id']}", headers=self.headers('alice'))
+        new = self.client.post(self.path + '/image', headers=self.headers('alice'), files={'file': ('new.png', self.image_bytes(), 'image/png')}).json()
+        self.assertGreater(new['attachment']['id'], old['attachment']['id'])
+        self.assertEqual(self.client.get(f"/api/attachments/{old['attachment']['id']}/content", headers=self.headers('alice')).status_code, 404)
+
+    def test_image_rejection_limits_and_no_orphans(self):
+        endpoint = self.path + '/image'
+        valid = self.image_bytes()
+        for headers, expected in (({}, 401), (self.headers('charlie'), 404)):
+            with patch('app.api.attachments.store_image') as store:
+                response = self.client.post(endpoint, headers=headers, files={'file': ('fake.jpg', b'not an image', 'image/jpeg')})
+                self.assertEqual(response.status_code, expected)
+                store.assert_not_called()
+        header = struct.pack('>IIBBBBB', 100000, 100000, 8, 2, 0, 0, 0)
+        bomb = valid[:8] + struct.pack('>I', 13) + b'IHDR' + header + struct.pack('>I', zlib.crc32(b'IHDR' + header)) + valid[33:]
+        for data in (b'fake JPEG', b'<svg xmlns="http://www.w3.org/2000/svg"/>', self.image_bytes('GIF'), bomb, valid[:30]):
+            response = self.client.post(endpoint, headers=self.headers('alice'), files={'file': ('fake.jpg', data, 'image/jpeg')})
+            self.assertEqual(response.status_code, 422)
+        response = self.client.post(endpoint, headers=self.headers('alice'), files={'file': ('large.png', valid + b'x' * MAX_IMAGE_BYTES, 'image/png')})
+        self.assertEqual(response.status_code, 413)
+        # Chunked bodies without Content-Length are bounded before spooling.
+        boundary = 'smooth-test-boundary'
+        prefix = f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="large.png"\r\nContent-Type: image/png\r\n\r\n'.encode()
+        def chunks():
+            yield prefix
+            for _ in range(130):
+                yield b'x' * (64 * 1024)
+            yield f'\r\n--{boundary}--\r\n'.encode()
+        response = self.client.post(endpoint, headers={**self.headers('alice'), 'Content-Type': f'multipart/form-data; boundary={boundary}'}, content=chunks())
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(self.client.post(endpoint, headers=self.headers('alice'), files={'file': ('ok.png', valid, 'image/png')}, data={'caption': 'x' * 2001}).status_code, 422)
+        from app.core.config import UPLOAD_DIR
+        before = set((UPLOAD_DIR / 'images').glob('*'))
+        with patch('app.api.attachments.manager.broadcast') as broadcast, patch('sqlalchemy.orm.Session.commit', side_effect=RuntimeError('commit failed')):
+            with self.assertRaisesRegex(RuntimeError, 'commit failed'):
+                self.client.post(endpoint, headers=self.headers('alice'), files={'file': ('ok.png', valid, 'image/png')})
+            broadcast.assert_not_called()
+        self.assertEqual(set((UPLOAD_DIR / 'images').glob('*')), before)
+        with SessionLocal() as db:
+            self.assertEqual(db.scalar(select(func.count(Message.id))), 0)
+            self.assertEqual(db.scalar(select(func.count(MessageAttachment.id))), 0)
+            self.assertEqual(db.scalar(select(func.count(MessageReceipt.id))), 0)
+
+    def test_attachment_paths_cannot_read_or_delete_arbitrary_files(self):
+        saved = self.client.post(self.path + '/image', headers=self.headers('alice'), files={'file': ('../../attack.php', self.image_bytes(), 'text/plain')}).json()
+        from app.core.config import UPLOAD_DIR
+        protected = UPLOAD_DIR / 'protected.txt'
+        protected.write_text('private')
+        with SessionLocal() as db:
+            attachment = db.get(MessageAttachment, saved['attachment']['id'])
+            attachment.storage_name = '../protected.txt'
+            db.commit()
+        fetched = self.client.get(f"/api/attachments/{saved['attachment']['id']}/content", headers=self.headers('alice'))
+        self.assertEqual(fetched.status_code, 404)
+        self.assertNotIn('protected', fetched.text)
+        self.assertEqual(self.client.delete(f"/api/messages/{saved['id']}", headers=self.headers('alice')).status_code, 204)
+        self.assertEqual(protected.read_text(), 'private')
+
+
+
+    def test_image_filename_collision_preserves_existing_file(self):
+        from types import SimpleNamespace
+        data = self.image_bytes()
+        with patch('app.services.images.uuid4', return_value=SimpleNamespace(hex='a' * 32)):
+            first = self.client.post(self.path + '/image', headers=self.headers('alice'), files={'file': ('ok.png', data, 'image/png')}).json()
+            second = self.client.post(self.path + '/image', headers=self.headers('alice'), files={'file': ('other.png', data, 'image/png')})
+            self.assertEqual(second.status_code, 503)
+        fetched = self.client.get(f"/api/attachments/{first['attachment']['id']}/content", headers=self.headers('bob'))
+        self.assertEqual(fetched.content, data)
+        self.client.delete(f"/api/messages/{first['id']}", headers=self.headers('alice'))
 
 
 class ManagerCleanupTests(unittest.IsolatedAsyncioTestCase):

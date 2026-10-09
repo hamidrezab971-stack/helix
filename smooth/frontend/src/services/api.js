@@ -8,9 +8,10 @@ function apiError(message, status) {
   return error
 }
 
-async function request(path, { body, token, signal, method } = {}) {
+async function request(path, { body, token, signal, method, binary = false } = {}) {
   const headers = {}
-  if (body) headers['Content-Type'] = 'application/json'
+  const multipart = body instanceof FormData
+  if (body && !multipart) headers['Content-Type'] = 'application/json'
   if (token) headers.Authorization = `Bearer ${token}`
 
   let response
@@ -18,7 +19,7 @@ async function request(path, { body, token, signal, method } = {}) {
     response = await fetch(`${API_URL}${path}`, {
       method: method || (body ? 'POST' : 'GET'),
       headers,
-      body: body ? JSON.stringify(body) : undefined,
+      body: body ? (multipart ? body : JSON.stringify(body)) : undefined,
       signal,
     })
   } catch (error) {
@@ -27,6 +28,7 @@ async function request(path, { body, token, signal, method } = {}) {
   }
 
   let data
+  if (response.ok && binary) return response.blob()
   if (response.ok && response.status === 204) return null
   try {
     data = await response.json()
@@ -50,6 +52,8 @@ async function request(path, { body, token, signal, method } = {}) {
       message = 'Choose another user to start a conversation.'
     } else if (response.status === 409) {
       message = 'Username already exists'
+    } else if (path.endsWith('/messages/image') && [413, 422].includes(response.status)) {
+      message = response.status === 413 ? 'Choose an image of 8 MB or smaller.' : 'Choose a valid JPEG, PNG, or WEBP image with safe dimensions and a caption up to 2000 characters.'
     } else if (response.status === 422) {
       const errors = Array.isArray(data.detail) ? data.detail : []
       if (errors.some((error) => error.loc?.includes('content'))) {
@@ -98,12 +102,19 @@ export async function getUsers(token, search = '', signal) {
 }
 
 export function safeMessage(data) {
-  if (![data?.id, data?.conversation_id, data?.sender_id].every((id) => Number.isSafeInteger(id) && id > 0) || typeof data.content !== 'string' || !data.content.trim() || Array.from(data.content).length > 2000 || typeof data.created_at !== 'string' || !Number.isFinite(Date.parse(data.created_at))) {
+  const attachment = safeAttachment(data?.attachment)
+  if (![data?.id, data?.conversation_id, data?.sender_id].every((id) => Number.isSafeInteger(id) && id > 0) || typeof data.content !== 'string' || (!attachment && !data.content.trim()) || Array.from(data.content).length > 2000 || typeof data.created_at !== 'string' || !Number.isFinite(Date.parse(data.created_at))) {
     throw apiError(GENERIC_ERROR)
   }
   const edited_at = data.edited_at ?? null
   if (edited_at !== null && (typeof edited_at !== 'string' || !Number.isFinite(Date.parse(edited_at)))) throw apiError(GENERIC_ERROR)
-  return { id: data.id, conversation_id: data.conversation_id, sender_id: data.sender_id, content: data.content, created_at: data.created_at, edited_at, ...safeReceipt(data) }
+  return { id: data.id, conversation_id: data.conversation_id, sender_id: data.sender_id, content: data.content, created_at: data.created_at, edited_at, attachment, ...safeReceipt(data) }
+}
+
+function safeAttachment(data) {
+  if (data == null) return null
+  if (data.kind !== 'image' || !['image/jpeg', 'image/png', 'image/webp'].includes(data.mime_type) || ![data.id, data.width, data.height, data.size_bytes].every(value => Number.isSafeInteger(value) && value > 0) || data.size_bytes > 8 * 1024 * 1024) throw apiError(GENERIC_ERROR)
+  return { id: data.id, kind: data.kind, mime_type: data.mime_type, size_bytes: data.size_bytes, width: data.width, height: data.height }
 }
 
 export function safeReceipt(data) {
@@ -131,7 +142,7 @@ export async function getConversations(token, signal) {
     let last_message = null
     if (conversation.last_message !== null) {
       const message = safeMessage({ ...conversation.last_message, conversation_id: conversation.id })
-      last_message = { id: message.id, sender_id: message.sender_id, content: message.content, created_at: message.created_at }
+      last_message = { id: message.id, sender_id: message.sender_id, content: message.content, created_at: message.created_at, attachment: message.attachment }
     }
     return { id: conversation.id, other_user: safeUser(conversation.other_user), last_message, updated_at: conversation.updated_at, unread_count: conversation.unread_count }
   })
@@ -153,4 +164,15 @@ export async function editMessage(token, messageId, content, signal) {
 
 export async function deleteMessage(token, messageId, signal) {
   await request(`/api/messages/${messageId}`, { token, signal, method: 'DELETE' })
+}
+
+export async function sendImage(token, conversationId, file, caption, signal) {
+  const body = new FormData()
+  body.append('file', file)
+  body.append('caption', caption)
+  return safeMessage(await request(`/api/conversations/${conversationId}/messages/image`, { token, signal, body }))
+}
+
+export async function getAttachmentBlob(token, attachmentId, signal) {
+  return request(`/api/attachments/${attachmentId}/content`, { token, signal, binary: true })
 }

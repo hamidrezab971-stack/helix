@@ -16,6 +16,17 @@ class MessageRequest(BaseModel):
     )
 
 
+class AttachmentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    kind: str
+    mime_type: str
+    size_bytes: int
+    width: int
+    height: int
+
+
 class MessageResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -27,6 +38,7 @@ class MessageResponse(BaseModel):
     delivered_at: datetime | None = None
     read_at: datetime | None = None
     edited_at: datetime | None = None
+    attachment: AttachmentResponse | None = None
 
 
 class ConversationResponse(BaseModel):
@@ -42,6 +54,7 @@ class LastMessageResponse(BaseModel):
     sender_id: int
     content: str
     created_at: datetime
+    attachment: AttachmentResponse | None = None
 
 
 class RecentConversationResponse(BaseModel):

@@ -1,7 +1,7 @@
 // Run with Playwright installed separately and available through NODE_PATH.
 const { chromium, expect } = require('playwright/test')
 const assert = require('node:assert/strict')
-const { spawn } = require('node:child_process')
+const { spawn, execFileSync } = require('node:child_process')
 const path = require('node:path')
 const fs = require('node:fs')
 const os = require('node:os')
@@ -16,7 +16,7 @@ const names = { alice: `alice_${suffix}`, bob: `bob_${suffix}`, charlie: `charli
 async function startBackend() {
   server = spawn(path.join(backendDirectory, '.venv/bin/python'), ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000'], {
     cwd: backendDirectory,
-    env: { ...process.env, DATABASE_URL: `sqlite:///${temporary}/test.db`, SECRET_KEY: 'phase8-browser-test-only-secret-123456789', ACCESS_TOKEN_EXPIRE_MINUTES: '60', FRONTEND_ORIGIN: 'http://127.0.0.1:5173' },
+    env: { ...process.env, DATABASE_URL: `sqlite:///${temporary}/test.db`, SECRET_KEY: 'phase8-browser-test-only-secret-123456789', ACCESS_TOKEN_EXPIRE_MINUTES: '60', FRONTEND_ORIGIN: 'http://127.0.0.1:5173', UPLOAD_DIR: `${temporary}/uploads` },
     stdio: 'ignore',
   })
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -39,6 +39,10 @@ async function newPage(context) {
   page.on('pageerror', error => errors.push(error.message))
   await page.addInitScript(() => {
     window.realtimeTest = { authenticated: 0, closed: 0, events: [], received: [], sentTyping: [], statuses: [] }
+    window.imageUrls = { created: [], revoked: [] }
+    const originalCreate = URL.createObjectURL.bind(URL), originalRevoke = URL.revokeObjectURL.bind(URL)
+    URL.createObjectURL = blob => { const url = originalCreate(blob); window.imageUrls.created.push(url); return url }
+    URL.revokeObjectURL = url => { window.imageUrls.revoked.push(url); originalRevoke(url) }
     const NativeWebSocket = window.WebSocket
     window.WebSocket = class extends NativeWebSocket {
       constructor(...args) {
@@ -158,7 +162,34 @@ async function remove(page, content, expected = 204) {
   assert.equal((await response).status(), expected)
 }
 
+function photo(page, id) {
+  return page.locator(`img[data-attachment-id="${id}"]`)
+}
+
+async function visiblePhoto(page, id) {
+  await expect(photo(page, id)).toHaveCount(1)
+  await expect(photo(page, id)).toBeVisible()
+  await expect.poll(() => photo(page, id).evaluate(image => image.complete && image.naturalWidth === 640)).toBe(true)
+}
+
+async function sendPhoto(page, filename, caption = '') {
+  await page.getByLabel('Choose image', { exact: true }).setInputFiles(filename)
+  await expect(page.getByAltText('Selected image preview')).toBeVisible()
+  await page.locator('#message-content').fill(caption)
+  const response = page.waitForResponse(r => r.request().method() === 'POST' && r.url().endsWith('/messages/image'))
+  await page.getByRole('button', { name: 'Send', exact: true }).click()
+  const saved = await response
+  assert.equal(saved.status(), 201)
+  const message = await saved.json()
+  assert.equal(message.content, caption)
+  assert.equal(message.attachment.kind, 'image')
+  assert.equal(message.delivered_at, null)
+  await expect(page.getByAltText('Selected image preview')).toHaveCount(0)
+  return message
+}
+
 async function main() {
+  execFileSync(path.join(backendDirectory, '.venv/bin/python'), ['-c', 'from PIL import Image; import sys,pathlib; root=pathlib.Path(sys.argv[1]); image=Image.new("RGB", (640,360), "coral"); [image.save(root / ("fixture."+ext), format=fmt) for ext,fmt in [("jpg","JPEG"),("png","PNG"),("webp","WEBP")]]', temporary])
   await startBackend()
   browser = await chromium.launch({ headless: true })
   const aliceContext = await browser.newContext(), bobContext = await browser.newContext(), charlieContext = await browser.newContext()
@@ -508,6 +539,100 @@ async function main() {
   await mutationTab.close()
   console.log('PASS own edits/repeated edits, labels, preserved receipts, real-time edit/delete across tabs, confirmation/cancel, failure retry, offline history, unread deletion, latest/empty previews, original activity ordering')
 
+  const imageTab = await newPage(aliceContext)
+  await openRecent(imageTab, names.bob)
+  const jpeg = path.join(temporary, 'fixture.jpg'), png = path.join(temporary, 'fixture.png'), webp = path.join(temporary, 'fixture.webp')
+  const contentRequests = []
+  for (const page of [alice, bob, imageTab]) page.on('request', request => {
+    if (request.url().includes('/api/attachments/')) contentRequests.push({ authorized: Boolean(request.headers().authorization), url: request.url() })
+  })
+  let uploads = 0
+  const countUpload = request => { if (request.url().endsWith('/messages/image') && request.method() === 'POST') uploads++ }
+  alice.on('request', countUpload)
+  const chooser = alice.waitForEvent('filechooser')
+  await alice.getByRole('button', { name: 'Image', exact: true }).click()
+  await (await chooser).setFiles(jpeg)
+  await expect(alice.getByAltText('Selected image preview')).toBeVisible()
+  const cancelledUrl = await alice.getByAltText('Selected image preview').getAttribute('src')
+  assert.equal(uploads, 0)
+  await alice.getByRole('button', { name: 'Remove image' }).click()
+  await expect(alice.getByAltText('Selected image preview')).toHaveCount(0)
+  assert.ok(await alice.evaluate(url => window.imageUrls.revoked.includes(url), cancelledUrl))
+  alice.off('request', countUpload)
+
+  // Failed upload retains the selection and shows a retryable error.
+  await alice.getByLabel('Choose image', { exact: true }).setInputFiles({ name: 'fake.jpg', mimeType: 'image/jpeg', buffer: Buffer.from('not an image') })
+  await alice.getByRole('button', { name: 'Send', exact: true }).click()
+  await expect(alice.getByRole('alert')).toContainText('valid JPEG')
+  await expect(alice.getByAltText('Selected image preview')).toBeVisible()
+  await alice.getByRole('button', { name: 'Remove image' }).click()
+  const firstPhoto = await sendPhoto(alice, jpeg, 'Vacation photo')
+  for (const page of [alice, bob, imageTab]) await visiblePhoto(page, firstPhoto.attachment.id)
+  await status(alice, 'Vacation photo', 'Read')
+  await expect(messageRow(alice, 'Vacation photo').getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0)
+  await expect(recentRow(alice, names.bob).getByLabel('Last message preview')).toHaveText('You: Photo · Vacation photo')
+  const secondPhoto = await sendPhoto(alice, png)
+  for (const page of [alice, bob, imageTab]) await visiblePhoto(page, secondPhoto.attachment.id)
+  await expect(recentRow(alice, names.bob).getByLabel('Last message preview')).toHaveText('You: Photo')
+  await expect(alice.locator('body')).not.toContainText('[image]')
+  await expect(bob.locator('body')).not.toContainText('[image]')
+  const thirdPhoto = await sendPhoto(alice, webp, 'WEBP photo')
+  for (const page of [alice, bob, imageTab]) await visiblePhoto(page, thirdPhoto.attachment.id)
+  await expect(alice.locator('.recent-row').first()).toContainText(names.bob)
+  await alice.reload()
+  await openRecent(alice, names.bob)
+  await bob.reload()
+  await openRecent(bob, names.alice)
+  for (const page of [alice, bob]) for (const message of [firstPhoto, secondPhoto, thirdPhoto]) await visiblePhoto(page, message.attachment.id)
+  await openRecent(bob, names.charlie)
+  const unreadPhoto = await sendPhoto(alice, png, 'Unread photo')
+  await unread(bob, names.alice, 1)
+  await status(alice, 'Unread photo', 'Delivered')
+  await expect(recentRow(bob, names.alice).getByLabel('Last message preview')).toHaveText('Photo · Unread photo')
+  await openRecent(bob, names.alice)
+  await visiblePhoto(bob, unreadPhoto.attachment.id)
+  await status(alice, 'Unread photo', 'Read')
+  await unread(bob, names.alice, 0)
+  const removedUrls = await Promise.all([alice, bob, imageTab].map(page => photo(page, firstPhoto.attachment.id).getAttribute('src')))
+  await remove(alice, 'Vacation photo')
+  for (const [index, page] of [alice, bob, imageTab].entries()) {
+    await expect(photo(page, firstPhoto.attachment.id)).toHaveCount(0)
+    assert.ok(await page.evaluate(url => window.imageUrls.revoked.includes(url), removedUrls[index]))
+  }
+  assert.equal(fs.readdirSync(path.join(temporary, 'uploads/images')).length, 3)
+  await remove(alice, 'Unread photo')
+  await expect(recentRow(alice, names.bob).getByLabel('Last message preview')).toHaveText('You: Photo · WEBP photo')
+  assert.equal(fs.readdirSync(path.join(temporary, 'uploads/images')).length, 2)
+  await bob.getByRole('button', { name: 'Log out' }).click()
+  const offlinePhoto = await sendPhoto(alice, jpeg, 'Offline photo')
+  await status(alice, 'Offline photo', 'Sent')
+  await bob.locator('#login-username').fill(names.bob)
+  await bob.locator('#login-password').fill('password123')
+  await bob.getByRole('button', { name: 'Log in', exact: true }).click()
+  await unread(bob, names.alice, 1)
+  await openRecent(bob, names.alice)
+  await visiblePhoto(bob, offlinePhoto.attachment.id)
+  await status(alice, 'Offline photo', 'Read')
+  const beforeImageRestart = await alice.evaluate(() => window.realtimeTest.authenticated)
+  await stopBackend()
+  await startBackend()
+  await alice.waitForFunction(previous => window.realtimeTest.authenticated > previous, beforeImageRestart)
+  await alice.reload()
+  await openRecent(alice, names.bob)
+  await bob.reload()
+  await openRecent(bob, names.alice)
+  for (const page of [alice, bob]) {
+    for (const message of [secondPhoto, thirdPhoto, offlinePhoto]) await visiblePhoto(page, message.attachment.id)
+    await expect(photo(page, firstPhoto.attachment.id)).toHaveCount(0)
+    await expect(photo(page, unreadPhoto.attachment.id)).toHaveCount(0)
+  }
+  await alice.setViewportSize({ width: 375, height: 812 })
+  assert.equal(await alice.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
+  await alice.setViewportSize({ width: 1280, height: 800 })
+  assert.ok(contentRequests.length >= 10 && contentRequests.every(request => request.authorized))
+  await imageTab.close()
+  console.log('PASS image picker/cancel, failed upload retry, JPEG/PNG/WEBP, empty/captioned images, authenticated blob rendering/revocation, receipts/unread/previews, multiple tabs, deletion/files, offline history, refresh/restart, mobile')
+
   // Explicit failure and retry; no timer-based polling is used by the app.
   await alice.route('**/api/conversations', route => route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"test unavailable"}' }))
   await alice.reload()
@@ -521,16 +646,17 @@ async function main() {
   assert.equal(await alice.evaluate(() => localStorage.getItem('smooth_access_token')), null)
   console.log('PASS recent empty state, creation, previews/time/presence, Alice/Bob/Charlie ordering, existing-row history, refresh, mobile/keyboard, retry and 401 cleanup')
   // Confirm persisted count directly, including across server restart.
-  const { execFileSync } = require('node:child_process')
   const count = execFileSync(path.join(backendDirectory, '.venv/bin/python'), ['-c', 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("SELECT count(*) FROM messages").fetchone()[0])', `${temporary}/test.db`], { encoding: 'utf8' })
-  assert.equal(Number(count.trim()), 17)
+  assert.equal(Number(count.trim()), 20)
   const receipts = execFileSync(path.join(backendDirectory, '.venv/bin/python'), ['-c', 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("SELECT count(*), count(DISTINCT message_id), count(delivered_at), count(read_at) FROM message_receipts").fetchone())', `${temporary}/test.db`], { encoding: 'utf8' })
-  assert.equal(receipts.trim(), '(17, 17, 17, 17)')
+  assert.equal(receipts.trim(), '(20, 20, 20, 20)')
   const edits = execFileSync(path.join(backendDirectory, '.venv/bin/python'), ['-c', 'import sqlite3,sys; db=sqlite3.connect(sys.argv[1]); print(db.execute("SELECT count(*), min(content) FROM message_edits").fetchone()); print(db.execute("PRAGMA foreign_key_check").fetchall())', `${temporary}/test.db`], { encoding: 'utf8' })
   assert.equal(edits.trim(), "(1, 'Offline edit persists')\n[]")
+  const attachments = execFileSync(path.join(backendDirectory, '.venv/bin/python'), ['-c', 'import sqlite3,sys,pathlib; root=pathlib.Path(sys.argv[1]); db=sqlite3.connect(root / "test.db"); names=[r[0] for r in db.execute("SELECT storage_name FROM message_attachments")]; print(len(names), len(list((root / "uploads/images").iterdir())), all((root / "uploads/images" / name).is_file() for name in names))', temporary], { encoding: 'utf8' })
+  assert.equal(attachments.trim(), '3 3 True')
   assert.deepEqual(errors, [])
-  console.log('PASS backend restart/reconnect, exactly 17 persisted messages, zero uncaught browser errors')
-  console.log('PASS inactive Delivered, active Read, receipt-before-HTTP race, multiple-tab receipts, offline Sent/history Read, refresh persistence, forged acknowledgements, 17 persisted receipts')
+  console.log('PASS backend restart/reconnect, exactly 20 persisted messages, zero uncaught browser errors')
+  console.log('PASS inactive Delivered, active Read, receipt-before-HTTP race, multiple-tab receipts, offline Sent/history Read, refresh persistence, forged acknowledgements, 20 persisted receipts')
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1 }).finally(async () => {

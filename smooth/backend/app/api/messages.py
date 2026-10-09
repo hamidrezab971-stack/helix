@@ -14,10 +14,12 @@ from app.models.conversation_member import ConversationMember
 from app.models.message import Message
 from app.models.message_edit import MessageEdit
 from app.models.message_receipt import MessageReceipt
+from app.models.message_attachment import MessageAttachment
 from app.models.user import User
 from app.realtime.manager import manager
 from app.schemas.conversations import MessageRequest, MessageResponse
 from app.services.messages import effective_message
+from app.services.images import remove_image
 
 router = APIRouter(prefix="/api/messages", tags=["messages"])
 
@@ -45,6 +47,8 @@ def edit_message(
     db: Annotated[Session, Depends(get_db)],
 ) -> MessageResponse:
     message = require_sender(message_id, user.id, db)
+    if db.scalar(select(MessageAttachment.id).where(MessageAttachment.message_id == message_id)) is not None:
+        raise HTTPException(status_code=400, detail="Image captions cannot be edited yet")
     member_ids = members(message.conversation_id, db)
     statement = insert(MessageEdit).values(
         message_id=message_id, content=data.content, edited_at=datetime.now(UTC).replace(tzinfo=None),
@@ -75,11 +79,16 @@ def delete_message(
 ) -> Response:
     message = require_sender(message_id, user.id, db)
     conversation_id = message.conversation_id
+    attachment = db.scalar(select(MessageAttachment).where(MessageAttachment.message_id == message_id))
+    storage_name = attachment.storage_name if attachment else None
     member_ids = members(conversation_id, db)
     db.execute(delete(MessageReceipt).where(MessageReceipt.message_id == message_id))
     db.execute(delete(MessageEdit).where(MessageEdit.message_id == message_id))
+    db.execute(delete(MessageAttachment).where(MessageAttachment.message_id == message_id))
     db.delete(message)
     db.commit()
+    if storage_name:
+        remove_image(storage_name)
     background_tasks.add_task(manager.broadcast, member_ids, {
         "type": "message:deleted", "data": {"message_id": message_id, "conversation_id": conversation_id},
     })
