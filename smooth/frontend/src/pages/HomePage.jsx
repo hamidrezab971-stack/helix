@@ -36,12 +36,15 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
   const [recentError, setRecentError] = useState('')
   const [conversationAttempt, setConversationAttempt] = useState(0)
   const [onlineUserIds, setOnlineUserIds] = useState(new Set())
+  const [pageVisible, setPageVisible] = useState(document.visibilityState === 'visible')
   const normalizedSearch = search.trim().toLowerCase()
   const messageListeners = useRef(new Set())
   const typingListeners = useRef(new Set())
   const statusListeners = useRef(new Set())
   const realtime = useRef(null)
   const recentController = useRef(null)
+  const activeConversationId = useRef(null)
+  const receivedMessageIds = useRef(new Set())
 
   const refreshRecent = useCallback(async () => {
     recentController.current?.abort()
@@ -72,15 +75,36 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
     return () => recentController.current?.abort()
   }, [refreshRecent])
 
-  const updateRecentMessage = useCallback((message) => {
-    setRecent((previous) => sortRecent(previous.map((conversation) => {
-      if (conversation.id !== message.conversation_id || !newerMessage(message, conversation.last_message)) return conversation
-      return { ...conversation, last_message: { id: message.id, sender_id: message.sender_id, content: message.content, created_at: message.created_at }, updated_at: message.created_at }
-    })))
-    refreshRecent()
+  useEffect(() => {
+    function visibilityChanged() {
+      setPageVisible(document.visibilityState === 'visible')
+      if (document.visibilityState === 'visible') refreshRecent()
+    }
+    document.addEventListener('visibilitychange', visibilityChanged)
+    return () => document.removeEventListener('visibilitychange', visibilityChanged)
   }, [refreshRecent])
 
-  const onConversationOpened = useCallback(() => { refreshRecent() }, [refreshRecent])
+  const updateRecentMessage = useCallback((message) => {
+    const firstDelivery = !receivedMessageIds.current.has(message.id)
+    receivedMessageIds.current.add(message.id)
+    const willRead = activeConversationId.current === message.conversation_id && document.visibilityState === 'visible'
+    setRecent((previous) => sortRecent(previous.map((conversation) => {
+      if (conversation.id !== message.conversation_id) return conversation
+      // IDs at/below the HTTP snapshot's latest message are already included
+      // in its count. Replayed socket events must not count them twice.
+      const increment = firstDelivery && message.sender_id !== user.id && !willRead
+        && (!conversation.last_message || message.id > conversation.last_message.id)
+      const latest = newerMessage(message, conversation.last_message)
+      return { ...conversation, unread_count: conversation.unread_count + (increment ? 1 : 0),
+        ...(latest ? { last_message: { id: message.id, sender_id: message.sender_id, content: message.content, created_at: message.created_at }, updated_at: message.created_at } : {}) }
+    })))
+    refreshRecent()
+  }, [refreshRecent, user.id])
+
+  const onConversationOpened = useCallback((conversation) => {
+    activeConversationId.current = conversation.id
+    refreshRecent()
+  }, [refreshRecent])
 
   const subscribeToStatus = useCallback((listener) => {
     statusListeners.current.add(listener)
@@ -114,6 +138,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
       },
       onStatus: (status) => {
         for (const listener of statusListeners.current) listener(status)
+        if (status.read_at) refreshRecent()
       },
       onPresenceSnapshot: (ids) => {
         setOnlineUserIds(new Set(ids))
@@ -202,6 +227,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
                       onClick={() => {
                         setSelectedUser(conversation.other_user)
                         setSelectedConversation(conversation)
+                        activeConversationId.current = conversation.id
                         setConversationAttempt((attempt) => attempt + 1)
                       }}>
                       <span className="flex min-w-0 flex-1 flex-col gap-1.5">
@@ -212,8 +238,15 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
                         <span className="block truncate text-xs text-stone-500" aria-label="Last message preview">
                           {conversation.last_message ? `${conversation.last_message.sender_id === user.id ? 'You: ' : ''}${conversation.last_message.content.replace(/\s+/g, ' ')}` : 'No messages yet.'}
                         </span>
-                        <span className={`text-[11px] ${onlineUserIds.has(conversation.other_user.id) ? 'text-emerald-700' : 'text-stone-500'}`}>
-                          {onlineUserIds.has(conversation.other_user.id) ? 'Online' : 'Offline'}
+                        <span className="flex items-center justify-between gap-2">
+                          <span className={`text-[11px] ${onlineUserIds.has(conversation.other_user.id) ? 'text-emerald-700' : 'text-stone-500'}`}>
+                            {onlineUserIds.has(conversation.other_user.id) ? 'Online' : 'Offline'}
+                          </span>
+                          {conversation.unread_count > 0 && !(selectedUser?.id === conversation.other_user.id && pageVisible) && (
+                            <span aria-label={`${conversation.unread_count} unread ${conversation.unread_count === 1 ? 'message' : 'messages'}`} className="inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-[#b65339] px-1.5 py-0.5 text-[11px] font-semibold text-white">
+                              {conversation.unread_count > 99 ? '99+' : conversation.unread_count}
+                            </span>
+                          )}
                         </span>
                       </span>
                     </button>
@@ -249,6 +282,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
                       onClick={() => {
                         setSelectedUser(directoryUser)
                         setSelectedConversation(null)
+                        activeConversationId.current = null
                         setConversationAttempt((attempt) => attempt + 1)
                       }}
                     >
@@ -268,7 +302,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
         <aside aria-label="Conversation" className={`min-w-0 border-t border-stone-200/80 bg-[#fcfbf9] md:border-t-0 md:border-l ${selectedUser ? 'block' : 'hidden md:block'}`}>
           {selectedUser ? (
             <>
-              <button type="button" className="secondary-button mx-6 mt-5 md:hidden" onClick={() => { setSelectedUser(null); setSelectedConversation(null) }}>Back to chats</button>
+              <button type="button" className="secondary-button mx-6 mt-5 md:hidden" onClick={() => { setSelectedUser(null); setSelectedConversation(null); activeConversationId.current = null }}>Back to chats</button>
               <ChatPanel key={`${selectedUser.id}:${conversationAttempt}`} user={user} selectedUser={selectedUser} initialConversation={selectedConversation} onConversationOpened={onConversationOpened} onMessageSent={updateRecentMessage} token={token} onUnauthorized={onUnauthorized} subscribeToMessages={subscribeToMessages} subscribeToStatus={subscribeToStatus} acknowledge={acknowledge} subscribeToTyping={subscribeToTyping} sendTyping={sendTyping} isOnline={onlineUserIds.has(selectedUser.id)} />
             </>
           ) : (

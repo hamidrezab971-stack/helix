@@ -48,3 +48,4 @@ class RecentConversationResponse(BaseModel):
     other_user: UserResponse
     last_message: LastMessageResponse | None
     updated_at: datetime
+    unread_count: int = Field(ge=0)

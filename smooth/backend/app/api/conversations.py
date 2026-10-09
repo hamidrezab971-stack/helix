@@ -1,7 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Response, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
@@ -31,6 +31,17 @@ def list_conversations(
     db: Annotated[Session, Depends(get_db)],
 ) -> list[RecentConversationResponse]:
     other_member = aliased(ConversationMember)
+    unread = (
+        select(Message.conversation_id, func.count(MessageReceipt.id).label("count"))
+        .join(MessageReceipt, MessageReceipt.message_id == Message.id)
+        .where(
+            MessageReceipt.recipient_id == user.id,
+            MessageReceipt.read_at.is_(None),
+            Message.sender_id != user.id,
+        )
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
     latest_message_id = (
         select(Message.id)
         .where(Message.conversation_id == Conversation.id)
@@ -40,7 +51,7 @@ def list_conversations(
         .scalar_subquery()
     )
     rows = db.execute(
-        select(Conversation, User, Message)
+        select(Conversation, User, Message, func.coalesce(unread.c.count, 0))
         .select_from(Conversation)
         .join(ConversationMember, (
             (ConversationMember.conversation_id == Conversation.id)
@@ -52,6 +63,7 @@ def list_conversations(
         ))
         .join(User, User.id == other_member.user_id)
         .outerjoin(Message, Message.id == latest_message_id)
+        .outerjoin(unread, unread.c.conversation_id == Conversation.id)
         .order_by(
             Message.created_at.is_(None), Message.created_at.desc(),
             Message.id.desc(), Conversation.id.desc(),
@@ -63,7 +75,8 @@ def list_conversations(
         other_user=UserResponse.model_validate(other_user),
         last_message=LastMessageResponse.model_validate(message) if message else None,
         updated_at=message.created_at if message else conversation.created_at,
-    ) for conversation, other_user, message in rows]
+        unread_count=unread_count,
+    ) for conversation, other_user, message, unread_count in rows]
 
 
 @router.post("/with/{user_id}", response_model=ConversationResponse)

@@ -3,7 +3,8 @@
 Smooth is a lightweight web-based messaging application. Native FastAPI/browser
 WebSockets deliver persisted messages, presence, and typing indicators.
 HTTP remains responsible for creating messages. Delivered/Read receipts are
-persistent; presence and typing remain temporary state. Phase 11 adds recent chats.
+persistent; presence and typing remain temporary state. Phase 12 adds unread badges
+to recent chats.
 
 ## Technology stack
 
@@ -158,7 +159,10 @@ or expired tokens return HTTP 401.
 All endpoints require `Authorization: Bearer <token>`:
 
 - `GET /api/conversations` returns the authenticated user's direct conversations,
-  with safe `other_user`, `last_message` (or null), and derived `updated_at` fields.
+  with safe `other_user`, `last_message` (or null), derived `updated_at`, and integer
+  `unread_count` fields. Unread means an incoming message whose recipient receipt
+  belongs to the current user and has `read_at = null`. Counts are derived from
+  persisted receipts; no unread column or table is added.
   Conversations with messages come first, ordered by latest message timestamp
   then message ID descending; empty conversations follow by conversation ID
   descending. Latest messages use timestamp then ID descending. Maximum 50
@@ -231,7 +235,7 @@ visible conversation. Other conversations receive delivery acknowledgements only
 Read implies delivered. Acknowledgements are retried after socket reconnection.
 
 After verifying recipient ownership and conversation membership, the server
-notifies the sender's tabs with `{"type":"message:status","data":{"message_id":10,
+notifies the sender's and recipient's tabs with `{"type":"message:status","data":{"message_id":10,
 "delivered_at":"...","read_at":null}}`. Repeated acknowledgements preserve
 timestamps; read also sets delivery when necessary. Missing, malformed, and forged
 receipt IDs are ignored safely. Offline messages stay Sent until acknowledged.
@@ -274,8 +278,12 @@ existing presence. People keeps the directory/search flow for starting chats.
 Recent rows open their existing history directly. The list refreshes after opening
 or creating a chat, successful sends, incoming message events, and socket recovery;
 there is no polling. Mobile shows one pane at a time with Back to chats.
+Unread badges show positive counts only (99+ visually for larger counts, with the
+full count available to assistive technology). Read confirmation refreshes recent
+counts across recipient tabs using the existing status event. Active visible chats
+avoid badge flashes; refresh and reconnect restore persisted unread counts.
 
-## Phase 8–11 verification
+## Phase 8–12 verification
 
 From `backend/`, install the test-only transport with
 `.venv/bin/python -m pip install httpx2`, then run
@@ -286,6 +294,8 @@ rejected credentials, failed persistence, receipt transitions and authorization,
 concurrent-tab idempotency, and existing SQLite schema compatibility.
 Recent-chat tests cover membership isolation, ordering, latest-message selection,
 empty conversations, and the 50-result limit.
+Unread tests cover receipt derivation, isolation, delivery versus read, clearing,
+persistence, replay deduplication, active/hidden conversations, and multiple tabs.
 
 The browser regression script is `frontend/tests/phase8.cjs`. Start the frontend
 at `http://127.0.0.1:5173` with its default API/WebSocket configuration and leave

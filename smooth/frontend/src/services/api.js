@@ -122,13 +122,13 @@ export async function getConversations(token, signal) {
   const data = await request('/api/conversations', { token, signal })
   if (!Array.isArray(data) || data.length > 50) throw apiError(GENERIC_ERROR)
   return data.map((conversation) => {
-    if (!Number.isSafeInteger(conversation?.id) || conversation.id <= 0 || typeof conversation.updated_at !== 'string' || !Number.isFinite(Date.parse(conversation.updated_at))) throw apiError(GENERIC_ERROR)
+    if (!Number.isSafeInteger(conversation?.id) || conversation.id <= 0 || typeof conversation.updated_at !== 'string' || !Number.isFinite(Date.parse(conversation.updated_at)) || !Number.isSafeInteger(conversation.unread_count) || conversation.unread_count < 0) throw apiError(GENERIC_ERROR)
     let last_message = null
     if (conversation.last_message !== null) {
       const message = safeMessage({ ...conversation.last_message, conversation_id: conversation.id })
       last_message = { id: message.id, sender_id: message.sender_id, content: message.content, created_at: message.created_at }
     }
-    return { id: conversation.id, other_user: safeUser(conversation.other_user), last_message, updated_at: conversation.updated_at }
+    return { id: conversation.id, other_user: safeUser(conversation.other_user), last_message, updated_at: conversation.updated_at, unread_count: conversation.unread_count }
   })
 }
 

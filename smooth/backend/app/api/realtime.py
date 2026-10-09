@@ -89,7 +89,9 @@ async def websocket_endpoint(socket: WebSocket) -> None:
                     )
                     if changed is not None:
                         sender_id, data = changed
-                        await manager.send_to_user(sender_id, {"type": "message:status", "data": data})
+                        # Recipient tabs also need committed read confirmation
+                        # to refresh unread counts. Reuse the receipt event.
+                        await manager.broadcast([sender_id, user_id], {"type": "message:status", "data": data})
                     continue
                 if not isinstance(event, dict) or event.get("type") not in ("typing:start", "typing:stop"):
                     raise ValueError

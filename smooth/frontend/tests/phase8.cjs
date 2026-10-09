@@ -129,6 +129,15 @@ async function status(page, content, expected) {
   await expect(page.locator('.message-bubble').filter({ hasText: content }).getByLabel('Message status')).toHaveText(expected)
 }
 
+async function unread(page, name, count) {
+  const badge = recentRow(page, name).locator('[aria-label$=" unread message"], [aria-label$=" unread messages"]')
+  if (count === 0) await expect(badge).toHaveCount(0)
+  else {
+    await expect(badge).toHaveAttribute('aria-label', `${count} unread ${count === 1 ? 'message' : 'messages'}`)
+    await expect(badge).toHaveText(count > 99 ? '99+' : String(count))
+  }
+}
+
 async function main() {
   await startBackend()
   browser = await chromium.launch({ headless: true })
@@ -332,6 +341,75 @@ async function main() {
   await alice.getByRole('button', { name: 'Back to chats' }).click()
   await alice.setViewportSize({ width: 1280, height: 800 })
 
+  // Unread counts while on the list, with replay protection and a second tab.
+  await unread(alice, names.bob, 0)
+  let third
+  for (let index = 1; index <= 3; index++) {
+    third = await send(bob, `unread batch ${index}`)
+    await unread(alice, names.bob, index)
+    await unread(bob, names.alice, 0)
+  }
+  await expect(alice.locator('.recent-row').first()).toContainText(names.bob)
+  await alice.evaluate(message => window.realtimeTest.socket.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ type: 'message:new', data: message }) })), third)
+  await unread(alice, names.bob, 3)
+  const aliceTab = await newPage(aliceContext)
+  await unread(aliceTab, names.bob, 3)
+  await openRecent(alice, names.bob)
+  await status(bob, 'unread batch 3', 'Read')
+  await unread(alice, names.bob, 0)
+  await unread(aliceTab, names.bob, 0)
+  await send(bob, 'active unread regression')
+  await once(alice, 'active unread regression')
+  await status(bob, 'active unread regression', 'Read')
+  await unread(alice, names.bob, 0)
+  await unread(aliceTab, names.bob, 0)
+
+  // An open but hidden conversation is delivered, not read, until visible.
+  await alice.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await send(bob, 'hidden conversation unread')
+  await status(bob, 'hidden conversation unread', 'Delivered')
+  await unread(alice, names.bob, 1)
+  await alice.evaluate(() => {
+    delete document.visibilityState
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await status(bob, 'hidden conversation unread', 'Read')
+  await unread(aliceTab, names.bob, 0)
+
+  await openRecent(alice, names.charlie)
+  await send(bob, 'switched conversation unread')
+  await unread(alice, names.bob, 1)
+  await alice.reload()
+  await unread(alice, names.bob, 1)
+  const priorAuth = await alice.evaluate(() => window.realtimeTest.authenticated)
+  await stopBackend()
+  await startBackend()
+  await alice.waitForFunction(previous => window.realtimeTest.authenticated > previous, priorAuth)
+  await unread(alice, names.bob, 1)
+  await openRecent(alice, names.bob)
+  await status(bob, 'switched conversation unread', 'Read')
+  await unread(aliceTab, names.bob, 0)
+  await aliceTab.close()
+  await alice.getByRole('button', { name: 'Log out' }).click()
+  await expect(directoryRow(bob, names.alice)).toContainText('Offline')
+  for (let index = 1; index <= 4; index++) await send(bob, `offline unread ${index}`)
+  await alice.locator('#login-username').fill(names.alice)
+  await alice.locator('#login-password').fill('password123')
+  await alice.getByRole('button', { name: 'Log in', exact: true }).click()
+  await unread(alice, names.bob, 4)
+  await alice.setViewportSize({ width: 375, height: 812 })
+  await unread(alice, names.bob, 4)
+  assert.equal(await alice.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
+  await openRecent(alice, names.bob)
+  await status(bob, 'offline unread 4', 'Read')
+  await alice.getByRole('button', { name: 'Back to chats' }).click()
+  await unread(alice, names.bob, 0)
+  await alice.setViewportSize({ width: 1280, height: 800 })
+  console.log('PASS unread 1/3, duplicate delivery, read clear across tabs, active/hidden chats, switching, refresh/restart, offline four-message recovery, mobile badges')
+
   // Explicit failure and retry; no timer-based polling is used by the app.
   await alice.route('**/api/conversations', route => route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"test unavailable"}' }))
   await alice.reload()
@@ -347,12 +425,12 @@ async function main() {
   // Confirm persisted count directly, including across server restart.
   const { execFileSync } = require('node:child_process')
   const count = execFileSync(path.join(backendDirectory, '.venv/bin/python'), ['-c', 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("SELECT count(*) FROM messages").fetchone()[0])', `${temporary}/test.db`], { encoding: 'utf8' })
-  assert.equal(Number(count.trim()), 7)
+  assert.equal(Number(count.trim()), 17)
   const receipts = execFileSync(path.join(backendDirectory, '.venv/bin/python'), ['-c', 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("SELECT count(*), count(DISTINCT message_id), count(delivered_at), count(read_at) FROM message_receipts").fetchone())', `${temporary}/test.db`], { encoding: 'utf8' })
-  assert.equal(receipts.trim(), '(7, 7, 7, 7)')
+  assert.equal(receipts.trim(), '(17, 17, 17, 17)')
   assert.deepEqual(errors, [])
-  console.log('PASS backend restart/reconnect, exactly seven persisted messages, zero uncaught browser errors')
-  console.log('PASS inactive Delivered, active Read, receipt-before-HTTP race, multiple-tab receipts, offline Sent/history Read, refresh persistence, forged acknowledgements, seven persisted receipts')
+  console.log('PASS backend restart/reconnect, exactly 17 persisted messages, zero uncaught browser errors')
+  console.log('PASS inactive Delivered, active Read, receipt-before-HTTP race, multiple-tab receipts, offline Sent/history Read, refresh persistence, forged acknowledgements, 17 persisted receipts')
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1 }).finally(async () => {

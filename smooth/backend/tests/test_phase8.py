@@ -304,7 +304,7 @@ class Phase8Tests(unittest.TestCase):
         self.assertEqual(rows[0]["last_message"]["id"], bob_latest["id"])
         self.assertEqual(rows[1]["last_message"]["id"], latest["id"])
         self.assertEqual(rows[0]["updated_at"], rows[0]["last_message"]["created_at"])
-        self.assertEqual(set(rows[0]), {"id", "other_user", "last_message", "updated_at"})
+        self.assertEqual(set(rows[0]), {"id", "other_user", "last_message", "updated_at", "unread_count"})
         self.assertEqual(set(rows[0]["other_user"]), {"id", "username", "created_at"})
         self.assertEqual(set(rows[0]["last_message"]), {"id", "sender_id", "content", "created_at"})
         with SessionLocal() as db:
@@ -330,6 +330,49 @@ class Phase8Tests(unittest.TestCase):
         self.assertEqual([row["id"] for row in rows], sorted([row["id"] for row in rows], reverse=True))
         self.assertTrue(all(row["other_user"]["id"] != self.users["alice"] for row in rows))
         self.assertEqual(self.client.get('/api/conversations', headers=self.headers("charlie")).json(), [])
+
+    def test_unread_counts_receipts_isolation_and_restart(self):
+        conversation_id = int(self.path.split('/')[3])
+
+        def count(name):
+            rows = self.client.get('/api/conversations', headers=self.headers(name)).json()
+            return next(row['unread_count'] for row in rows if row['id'] == conversation_id)
+
+        self.assertEqual(count('alice'), 0)
+        self.assertEqual(count('bob'), 0)
+        messages = []
+        for index in range(3):
+            message = self.client.post(self.path, headers=self.headers('bob'), json={'content': f'unread {index}'}).json()
+            messages.append(message)
+            self.assertEqual(count('alice'), index + 1)
+            self.assertEqual(count('bob'), 0)
+        # Delivery alone is still unread; forged reads cannot clear it.
+        acknowledge_message(messages[0]['id'], self.users['alice'], False)
+        acknowledge_message(messages[0]['id'], self.users['charlie'], True)
+        self.assertEqual(count('alice'), 3)
+        unrelated = self.client.post(f'/api/conversations/with/{self.users["charlie"]}', headers=self.headers('bob')).json()['id']
+        self.client.post(f'/api/conversations/{unrelated}/messages', headers=self.headers('charlie'), json={'content': 'not Alice'})
+        self.assertEqual(count('alice'), 3)
+        self.assertEqual(count('bob'), 0)
+        # Fresh connections and startup backfill use persisted receipts.
+        engine.dispose()
+        initialize_receipts()
+        self.assertEqual(count('alice'), 3)
+        with self.client.websocket_connect('/ws') as sender, self.client.websocket_connect('/ws') as reader, self.client.websocket_connect('/ws') as other_tab:
+            self.authenticate(sender, 'bob')
+            self.authenticate(reader, 'alice')
+            self.authenticate(other_tab, 'alice')
+            for message in messages:
+                reader.send_json({'type': 'message:read', 'message_id': message['id']})
+                events = [self.receive_type(socket, 'message:status') for socket in (sender, reader, other_tab)]
+                self.assertEqual(events[0], events[1])
+                self.assertEqual(events[1], events[2])
+                self.assertIsNotNone(events[0]['data']['read_at'])
+            self.assertEqual(count('alice'), 0)
+        for message in messages:
+            self.assertIsNone(acknowledge_message(message['id'], self.users['alice'], True))
+        self.assertEqual(count('alice'), 0)
+        self.assertEqual(count('bob'), 0)
 
 
 class ManagerCleanupTests(unittest.IsolatedAsyncioTestCase):
