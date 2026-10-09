@@ -98,7 +98,18 @@ export function safeMessage(data) {
   if (![data?.id, data?.conversation_id, data?.sender_id].every((id) => Number.isSafeInteger(id) && id > 0) || typeof data.content !== 'string' || !data.content.trim() || Array.from(data.content).length > 2000 || typeof data.created_at !== 'string' || !Number.isFinite(Date.parse(data.created_at))) {
     throw apiError(GENERIC_ERROR)
   }
-  return { id: data.id, conversation_id: data.conversation_id, sender_id: data.sender_id, content: data.content, created_at: data.created_at }
+  return { id: data.id, conversation_id: data.conversation_id, sender_id: data.sender_id, content: data.content, created_at: data.created_at, ...safeReceipt(data) }
+}
+
+export function safeReceipt(data) {
+  const delivered_at = data?.delivered_at ?? null
+  const read_at = data?.read_at ?? null
+  if (![delivered_at, read_at].every((value) => value === null || (typeof value === 'string' && Number.isFinite(Date.parse(value)))) || (read_at && !delivered_at)) throw apiError(GENERIC_ERROR)
+  return { delivered_at, read_at }
+}
+
+export function mergeReceipt(current, incoming) {
+  return { delivered_at: current?.delivered_at || incoming?.delivered_at || null, read_at: current?.read_at || incoming?.read_at || null }
 }
 
 export async function getOrCreateConversation(token, userId, signal) {

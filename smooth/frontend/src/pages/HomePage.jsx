@@ -15,7 +15,16 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
   const normalizedSearch = search.trim().toLowerCase()
   const messageListeners = useRef(new Set())
   const typingListeners = useRef(new Set())
+  const statusListeners = useRef(new Set())
   const realtime = useRef(null)
+
+  const subscribeToStatus = useCallback((listener) => {
+    statusListeners.current.add(listener)
+    return () => statusListeners.current.delete(listener)
+  }, [])
+  const acknowledge = useCallback((type, messageId) => {
+    realtime.current?.acknowledge(type, messageId)
+  }, [])
 
   const subscribeToTyping = useCallback((listener) => {
     typingListeners.current.add(listener)
@@ -36,6 +45,10 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
     const connection = connectRealtime(token, {
       onMessage: (message) => {
         for (const listener of messageListeners.current) listener(message)
+        if (message.sender_id !== user.id) acknowledge('message:delivered', message.id)
+      },
+      onStatus: (status) => {
+        for (const listener of statusListeners.current) listener(status)
       },
       onPresenceSnapshot: (ids) => setOnlineUserIds(new Set(ids)),
       onPresenceUpdate: ({ user_id, status }) => setOnlineUserIds((previous) => {
@@ -58,7 +71,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
       connection.stop()
       realtime.current = null
     }
-  }, [token, onUnauthorized])
+  }, [token, onUnauthorized, user.id, acknowledge])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -148,7 +161,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
         </section>
         <aside aria-label="Conversation" className="min-w-0 border-t border-stone-200/80 bg-[#fcfbf9] md:border-t-0 md:border-l">
           {selectedUser ? (
-            <ChatPanel key={`${selectedUser.id}:${conversationAttempt}`} user={user} selectedUser={selectedUser} token={token} onUnauthorized={onUnauthorized} subscribeToMessages={subscribeToMessages} subscribeToTyping={subscribeToTyping} sendTyping={sendTyping} isOnline={onlineUserIds.has(selectedUser.id)} />
+            <ChatPanel key={`${selectedUser.id}:${conversationAttempt}`} user={user} selectedUser={selectedUser} token={token} onUnauthorized={onUnauthorized} subscribeToMessages={subscribeToMessages} subscribeToStatus={subscribeToStatus} acknowledge={acknowledge} subscribeToTyping={subscribeToTyping} sendTyping={sendTyping} isOnline={onlineUserIds.has(selectedUser.id)} />
           ) : (
             <div className="flex h-full flex-col justify-center p-6 sm:p-8">
               <p className="text-xs font-semibold uppercase tracking-widest text-stone-500">A little more connection</p>

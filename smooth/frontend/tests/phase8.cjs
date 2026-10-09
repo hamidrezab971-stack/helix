@@ -38,7 +38,7 @@ async function newPage(context) {
   const page = await context.newPage()
   page.on('pageerror', error => errors.push(error.message))
   await page.addInitScript(() => {
-    window.realtimeTest = { authenticated: 0, closed: 0, events: [], received: [], sentTyping: [] }
+    window.realtimeTest = { authenticated: 0, closed: 0, events: [], received: [], sentTyping: [], statuses: [] }
     const NativeWebSocket = window.WebSocket
     window.WebSocket = class extends NativeWebSocket {
       constructor(...args) {
@@ -50,6 +50,8 @@ async function newPage(context) {
             const data = JSON.parse(event.data)
             if (data.type === 'auth:ok') window.realtimeTest.authenticated++
             if (data.type === 'message:new') window.realtimeTest.events.push(data.data)
+            if (data.type === 'message:new' && window.realtimeTest.dropNewMessage) event.stopImmediatePropagation()
+            if (data.type === 'message:status') window.realtimeTest.statuses.push(data.data)
             if (data.type.startsWith('presence:') || data.type.startsWith('typing:')) window.realtimeTest.received.push(data)
           } catch {}
         })
@@ -80,8 +82,12 @@ async function registerAndLogin(page, name) {
 }
 
 async function select(page, name) {
+  // Search fetches the current directory, including users registered after
+  // this browser's initial directory request.
+  await page.locator('#user-search').fill(name)
   await directoryRow(page, name).click()
   await expect(page.locator('#message-content')).toBeEnabled()
+  await page.locator('#user-search').fill('')
 }
 
 function directoryRow(page, name) {
@@ -92,11 +98,20 @@ async function send(page, content) {
   await page.locator('#message-content').fill(content)
   const response = page.waitForResponse(r => r.url().endsWith('/messages') && r.request().method() === 'POST')
   await page.getByRole('button', { name: 'Send', exact: true }).click()
-  assert.equal((await response).status(), 201)
+  const saved = await response
+  assert.equal(saved.status(), 201)
+  const data = await saved.json()
+  assert.equal(data.delivered_at, null)
+  assert.equal(data.read_at, null)
+  return data
 }
 
 async function once(page, content) {
   await expect(page.locator('.message-bubble').filter({ hasText: content })).toHaveCount(1)
+}
+
+async function status(page, content, expected) {
+  await expect(page.locator('.message-bubble').filter({ hasText: content }).getByLabel('Message status')).toHaveText(expected)
 }
 
 async function main() {
@@ -163,24 +178,55 @@ async function main() {
   await expect(directoryRow(bob, names.alice)).toContainText('Online')
   await expect(alice.getByLabel('Contact presence')).toHaveText('Online')
   console.log('PASS presence snapshot, typing start/stop, throttling, continued typing, clear input, switching, stale expiry, unexpected tab close/reconnect')
-  await send(alice, 'hello bob')
+  await select(bob, names.charlie)
+  await select(bobTab, names.charlie)
+  // Force the acknowledgement to arrive before the HTTP response: the status
+  // cache must preserve it when that response finally adds the message.
+  await alice.route('**/api/conversations/*/messages', async route => {
+    if (route.request().method() !== 'POST') return route.continue()
+    const response = await route.fetch()
+    const saved = await response.json()
+    await alice.waitForFunction(id => window.realtimeTest.statuses.some(s => s.message_id === id && s.delivered_at && !s.read_at), saved.id)
+    await route.fulfill({ response })
+  })
+  await alice.evaluate(() => { window.realtimeTest.dropNewMessage = true })
+  const firstMessage = await send(alice, 'hello bob')
+  await alice.evaluate(() => { window.realtimeTest.dropNewMessage = false })
+  await alice.unroute('**/api/conversations/*/messages')
+  await once(alice, 'hello bob')
+  await status(alice, 'hello bob', 'Delivered')
+  await select(bob, names.alice)
+  await status(alice, 'hello bob', 'Read')
+  await select(bobTab, names.alice)
   for (const page of [alice, bob, bobTab]) await once(page, 'hello bob')
+  await expect(bob.locator('.message-bubble').filter({ hasText: 'hello bob' }).getByLabel('Message status')).toHaveCount(0)
   await expect(typing).toHaveText('')
   await send(bob, 'hello alice')
   for (const page of [alice, bob, bobTab]) await once(page, 'hello alice')
+  await status(bob, 'hello alice', 'Read')
+  await status(bobTab, 'hello alice', 'Read')
+  // A third authenticated user cannot forge receipts, even with identity claims.
+  const originalStatus = await alice.evaluate(id => window.realtimeTest.statuses.filter(s => s.message_id === id).at(-1), firstMessage.id)
+  await charlie.evaluate(id => {
+    for (const type of ['message:delivered', 'message:read']) window.realtimeTest.socket.send(JSON.stringify({ type, message_id: id, recipient_id: 2 }))
+  }, firstMessage.id)
   await bob.reload()
   await bob.waitForFunction(() => window.realtimeTest.authenticated === 1)
   await select(bob, names.alice)
   await once(bob, 'hello bob')
   await once(bob, 'hello alice')
+  await status(bob, 'hello alice', 'Read')
+  assert.deepEqual(await alice.evaluate(id => window.realtimeTest.statuses.filter(s => s.message_id === id).at(-1), firstMessage.id), originalStatus)
   console.log('PASS registration, login, search, realtime both ways, multiple tabs, deduplication, refresh history')
 
   await select(alice, names.charlie)
   await send(bob, 'other conversation')
   await alice.waitForFunction(() => window.realtimeTest.events.some(m => m.content === 'other conversation'))
   await expect(alice.locator('.message-bubble')).toHaveCount(0)
+  await status(bob, 'other conversation', 'Delivered')
   await select(alice, names.bob)
   await once(alice, 'other conversation')
+  await status(bob, 'other conversation', 'Read')
   await bobTab.close()
   await expect(alice.getByLabel('Contact presence')).toHaveText('Online')
   assert.equal(await alice.evaluate(() => window.realtimeTest.received.filter(e => e.type === 'presence:update' && e.data.status === 'offline').length), 0)
@@ -188,14 +234,25 @@ async function main() {
   await bob.waitForFunction(() => window.realtimeTest.closed >= 1)
   await expect(alice.getByLabel('Contact presence')).toHaveText('Offline')
   const logoutEvents = await bob.evaluate(() => window.realtimeTest.events.length)
-  await send(alice, 'offline recipient')
+  const offlineMessage = await send(alice, 'offline recipient')
+  await status(alice, 'offline recipient', 'Sent')
+  await charlie.evaluate(id => {
+    for (const type of ['message:delivered', 'message:read']) window.realtimeTest.socket.send(JSON.stringify({ type, message_id: id, recipient_id: 2 }))
+  }, offlineMessage.id)
   await new Promise(resolve => setTimeout(resolve, 2300))
+  await status(alice, 'offline recipient', 'Sent')
   assert.equal(await bob.evaluate(() => window.realtimeTest.events.length), logoutEvents)
   await bob.locator('#login-username').fill(names.bob)
   await bob.locator('#login-password').fill('password123')
   await bob.getByRole('button', { name: 'Log in', exact: true }).click()
   await select(bob, names.alice)
   await once(bob, 'offline recipient')
+  await status(alice, 'offline recipient', 'Read')
+  await alice.reload()
+  await alice.waitForFunction(() => window.realtimeTest.authenticated === 1)
+  await select(alice, names.bob)
+  await status(alice, 'offline recipient', 'Read')
+  await status(alice, 'hello bob', 'Read')
   await expect(alice.getByLabel('Contact presence')).toHaveText('Online')
   console.log('PASS conversation isolation, logout socket cleanup, offline recipient history')
 
@@ -210,12 +267,16 @@ async function main() {
   await send(bob, 'after restart')
   await once(alice, 'after restart')
   await once(bob, 'after restart')
+  await status(bob, 'after restart', 'Read')
   // Confirm persisted count directly, including across server restart.
   const { execFileSync } = require('node:child_process')
   const count = execFileSync(path.join(backendDirectory, '.venv/bin/python'), ['-c', 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("SELECT count(*) FROM messages").fetchone()[0])', `${temporary}/test.db`], { encoding: 'utf8' })
   assert.equal(Number(count.trim()), 5)
+  const receipts = execFileSync(path.join(backendDirectory, '.venv/bin/python'), ['-c', 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("SELECT count(*), count(DISTINCT message_id), count(delivered_at), count(read_at) FROM message_receipts").fetchone())', `${temporary}/test.db`], { encoding: 'utf8' })
+  assert.equal(receipts.trim(), '(5, 5, 5, 5)')
   assert.deepEqual(errors, [])
   console.log('PASS backend restart/reconnect, exactly five persisted messages, zero uncaught browser errors')
+  console.log('PASS inactive Delivered, active Read, receipt-before-HTTP race, multiple-tab receipts, offline Sent/history Read, refresh persistence, forged acknowledgements, five persisted receipts')
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1 }).finally(async () => {

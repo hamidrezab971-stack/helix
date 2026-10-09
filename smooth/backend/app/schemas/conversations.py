@@ -24,6 +24,8 @@ class MessageResponse(BaseModel):
     sender_id: int
     content: str
     created_at: datetime
+    delivered_at: datetime | None = None
+    read_at: datetime | None = None
 
 
 class ConversationResponse(BaseModel):

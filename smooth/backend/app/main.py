@@ -12,11 +12,13 @@ from app.api.realtime import router as realtime_router
 from app.api.users import router as users_router
 from app.core.config import FRONTEND_ORIGIN
 from app.database.database import Base, engine
+from app.services.receipts import initialize_receipts
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     Base.metadata.create_all(bind=engine)
+    initialize_receipts()
     try:
         yield
     finally:

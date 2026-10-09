@@ -4,6 +4,7 @@ import asyncio
 import tempfile
 import unittest
 from time import time
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import AsyncMock, patch
 
 from anyio import create_task_group
@@ -19,15 +20,17 @@ os.environ.update(
 
 import jwt
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
+from sqlalchemy import func, select, inspect
 from starlette.websockets import WebSocketDisconnect
 
 from app.core.config import SECRET_KEY
 from app.database.database import Base, SessionLocal, engine
 from app.main import app
 from app.models.message import Message
+from app.models.message_receipt import MessageReceipt
 from app.models.user import User
 from app.realtime.manager import ConnectionManager, manager
+from app.services.receipts import acknowledge_message, initialize_receipts
 
 
 class Phase8Tests(unittest.TestCase):
@@ -116,6 +119,7 @@ class Phase8Tests(unittest.TestCase):
             broadcast.assert_not_called()
         with SessionLocal() as db:
             self.assertEqual(db.scalar(select(func.count(Message.id))), 0)
+            self.assertEqual(db.scalar(select(func.count(MessageReceipt.id))), 0)
 
     def test_socket_cannot_create_messages_and_origin_is_checked(self):
         with self.client.websocket_connect("/ws") as socket:
@@ -187,6 +191,90 @@ class Phase8Tests(unittest.TestCase):
                 with self.assertRaises(WebSocketDisconnect) as closed:
                     socket.receive_json()
                 self.assertEqual(closed.exception.code, 1008)
+
+    def test_receipt_transitions_status_authorization_and_idempotency(self):
+        saved = self.client.post(self.path, headers=self.headers("alice"), json={"content": "receipts"}).json()
+        self.assertIsNone(saved["delivered_at"])
+        self.assertIsNone(saved["read_at"])
+        message_id = saved["id"]
+        for non_recipient in ("alice", "charlie"):
+            for read in (False, True):
+                self.assertIsNone(acknowledge_message(message_id, self.users[non_recipient], read))
+        untouched = self.client.get(self.path, headers=self.headers("alice")).json()[0]
+        self.assertIsNone(untouched["delivered_at"])
+        self.assertIsNone(untouched["read_at"])
+        with SessionLocal() as db:
+            receipt = db.scalar(select(MessageReceipt).where(MessageReceipt.message_id == message_id))
+            self.assertEqual(receipt.recipient_id, self.users["bob"])
+            self.assertEqual(db.scalar(select(func.count(MessageReceipt.id))), 1)
+        with self.client.websocket_connect("/ws") as alice, self.client.websocket_connect("/ws") as bob:
+            self.authenticate(alice, "alice")
+            self.authenticate(bob, "bob")
+            alice.receive_json()  # Bob online.
+            bob.send_json({"type": "message:delivered", "message_id": message_id, "recipient_id": self.users["charlie"]})
+            delivered = alice.receive_json()
+            self.assertEqual(delivered["type"], "message:status")
+            self.assertEqual(set(delivered["data"]), {"message_id", "delivered_at", "read_at"})
+            self.assertIsNotNone(delivered["data"]["delivered_at"])
+            self.assertIsNone(delivered["data"]["read_at"])
+            bob.send_json({"type": "message:read", "message_id": message_id})
+            read = alice.receive_json()["data"]
+            self.assertEqual(read["delivered_at"], delivered["data"]["delivered_at"])
+            self.assertIsNotNone(read["read_at"])
+            for event_type in ("message:delivered", "message:read"):
+                bob.send_json({"type": event_type, "message_id": message_id})
+                alice.send_json({"type": event_type, "message_id": message_id})
+            # A later authorized event proves duplicate acknowledgements neither
+            # changed status nor generated extra status events.
+            bob.send_json({"type": "typing:start", "conversation_id": int(self.path.split('/')[3])})
+            self.assertEqual(alice.receive_json()["type"], "typing:start")
+            conversation = self.client.post(f'/api/conversations/with/{self.users["alice"]}', headers=self.headers("charlie")).json()
+            with self.client.websocket_connect("/ws") as charlie:
+                self.authenticate(charlie, "charlie")
+                alice.receive_json()
+                for event_type in ("message:delivered", "message:read"):
+                    for invalid_id in (message_id, True, None, "1", -1, 0, 2**63, 99999):
+                        charlie.send_json({"type": event_type, "message_id": invalid_id, "recipient_id": self.users["bob"]})
+                charlie.send_json({"type": "typing:start", "conversation_id": conversation["id"]})
+                self.assertEqual(alice.receive_json()["type"], "typing:start")
+        self.assertEqual(self.client.get(self.path, headers=self.headers("alice")).json()[0]["read_at"], read["read_at"])
+        for user in ("alice", "charlie"):
+            self.assertIsNone(acknowledge_message(message_id, self.users[user], True))
+        self.assertEqual(self.client.get(self.path, headers=self.headers("alice")).json()[0]["delivered_at"], read["delivered_at"])
+
+    def test_concurrent_tabs_read_implies_delivered(self):
+        message_id = self.client.post(self.path, headers=self.headers("alice"), json={"content": "multiple tabs"}).json()["id"]
+        with ThreadPoolExecutor(max_workers=4) as threads:
+            list(threads.map(lambda read: acknowledge_message(message_id, self.users["bob"], read), [True, False] * 4))
+        history = self.client.get(self.path, headers=self.headers("alice")).json()[0]
+        self.assertIsNotNone(history["delivered_at"])
+        self.assertIsNotNone(history["read_at"])
+        self.assertGreaterEqual(history["read_at"], history["delivered_at"])
+        for read in (False, True):
+            self.assertIsNone(acknowledge_message(message_id, self.users["bob"], read))
+        self.assertEqual(self.client.get(self.path, headers=self.headers("alice")).json()[0], history)
+
+    def test_existing_sqlite_table_compatibility_and_receipt_backfill(self):
+        message_id = self.client.post(self.path, headers=self.headers("alice"), json={"content": "legacy message"}).json()["id"]
+        def columns():
+            return [{**column, "type": str(column["type"])} for column in inspect(engine).get_columns("messages")]
+
+        original_columns = columns()
+        MessageReceipt.__table__.drop(engine)  # Only the isolated test database.
+        Base.metadata.create_all(engine)
+        initialize_receipts()
+        self.assertEqual(columns(), original_columns)
+        with SessionLocal() as db:
+            receipt = db.scalar(select(MessageReceipt))
+            self.assertEqual(receipt.message_id, message_id)
+            self.assertEqual(receipt.recipient_id, self.users["bob"])
+            self.assertIsNone(receipt.delivered_at)
+            self.assertIsNone(receipt.read_at)
+        acknowledge_message(message_id, self.users["bob"], True)
+        initialize_receipts()
+        with SessionLocal() as db:
+            self.assertEqual(db.scalar(select(func.count(MessageReceipt.id))), 1)
+        self.assertIsNotNone(self.client.get(self.path, headers=self.headers("alice")).json()[0]["read_at"])
 
 
 class ManagerCleanupTests(unittest.IsolatedAsyncioTestCase):

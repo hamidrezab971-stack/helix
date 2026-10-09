@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getMessages, getOrCreateConversation, sendMessage } from '../services/api.js'
+import { getMessages, getOrCreateConversation, sendMessage, mergeReceipt } from '../services/api.js'
 
 function mergeMessages(current, incoming) {
-  const messages = new Map([...current, ...incoming].map((message) => [message.id, message]))
+  const messages = new Map(current.map((message) => [message.id, message]))
+  for (const message of incoming) messages.set(message.id, { ...message, ...mergeReceipt(messages.get(message.id), message) })
   return [...messages.values()].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id)
 }
 
-export default function ChatPanel({ user, selectedUser, token, onUnauthorized, subscribeToMessages, subscribeToTyping, sendTyping, isOnline }) {
+export default function ChatPanel({ user, selectedUser, token, onUnauthorized, subscribeToMessages, subscribeToStatus, acknowledge, subscribeToTyping, sendTyping, isOnline }) {
   const [conversation, setConversation] = useState(null)
   const [messages, setMessages] = useState([])
   const [stage, setStage] = useState('opening')
@@ -24,6 +25,35 @@ export default function ChatPanel({ user, selectedUser, token, onUnauthorized, s
   const typingStartedAt = useRef(0)
   const typingTimer = useRef(null)
   const remoteTypingTimer = useRef(null)
+  const receipts = useRef(new Map())
+
+  const addMessages = useCallback((incoming) => {
+    setMessages((previous) => mergeMessages(previous, incoming.map((message) => (
+      { ...message, ...mergeReceipt(receipts.current.get(message.id), message) }
+    ))))
+  }, [])
+
+  useEffect(() => subscribeToStatus((status) => {
+    // A recipient can acknowledge before the sender's HTTP response arrives.
+    const merged = mergeReceipt(receipts.current.get(status.message_id), status)
+    receipts.current.set(status.message_id, merged)
+    setMessages((previous) => previous.map((message) => message.id === status.message_id && message.sender_id === user.id
+      ? { ...message, ...mergeReceipt(message, merged) } : message))
+  }), [subscribeToStatus, user.id])
+
+  useEffect(() => {
+    function acknowledgeIncoming() {
+      if (stage !== 'ready') return
+      for (const message of messages) {
+        if (message.sender_id === user.id) continue
+        if (!message.delivered_at) acknowledge('message:delivered', message.id)
+        if (!message.read_at && document.visibilityState === 'visible') acknowledge('message:read', message.id)
+      }
+    }
+    acknowledgeIncoming()
+    document.addEventListener('visibilitychange', acknowledgeIncoming)
+    return () => document.removeEventListener('visibilitychange', acknowledgeIncoming)
+  }, [messages, stage, user.id, acknowledge])
 
   const stopTyping = useCallback(() => {
     clearTimeout(typingTimer.current)
@@ -69,8 +99,8 @@ export default function ChatPanel({ user, selectedUser, token, onUnauthorized, s
   useEffect(() => subscribeToMessages((message) => {
     if (message.conversation_id !== conversationId.current) return
     if (message.sender_id !== user.id && message.sender_id !== selectedUser.id) return
-    setMessages((previous) => mergeMessages(previous, [message]))
-  }), [subscribeToMessages, user.id, selectedUser.id])
+    addMessages([message])
+  }), [subscribeToMessages, user.id, selectedUser.id, addMessages])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -96,7 +126,7 @@ export default function ChatPanel({ user, selectedUser, token, onUnauthorized, s
         const loaded = await getMessages(token, resolved.id, controller.signal)
         if (!active) return
         // Preserve events received while the HTTP history request was in flight.
-        setMessages((previous) => mergeMessages(loaded, previous))
+        addMessages(loaded)
         setStage('ready')
       } catch (error) {
         if (!active || error.name === 'AbortError') return
@@ -115,7 +145,7 @@ export default function ChatPanel({ user, selectedUser, token, onUnauthorized, s
       controller.abort()
       sendController.current?.abort()
     }
-  }, [token, selectedUser.id, retryAttempt, onUnauthorized, stopTyping])
+  }, [token, selectedUser.id, retryAttempt, onUnauthorized, stopTyping, addMessages])
 
   useEffect(() => {
     if (history.current) history.current.scrollTop = history.current.scrollHeight
@@ -140,7 +170,7 @@ export default function ChatPanel({ user, selectedUser, token, onUnauthorized, s
       const message = await sendMessage(token, conversation.id, trimmed, controller.signal)
       if (controller.signal.aborted) return
       stopTyping()
-      setMessages((previous) => mergeMessages(previous, [message]))
+      addMessages([message])
       setContent('')
     } catch (error) {
       if (controller.signal.aborted || error.name === 'AbortError') return
@@ -181,6 +211,11 @@ export default function ChatPanel({ user, selectedUser, token, onUnauthorized, s
                     <p className="message-bubble" data-own={message.sender_id === user.id}>
                       <span className="sr-only">{message.sender_id === user.id ? 'You' : selectedUser.username}: </span>
                       {message.content}
+                      {message.sender_id === user.id && (
+                        <span aria-label="Message status" className={`mt-1 block text-right text-[10px] ${message.read_at ? 'font-semibold' : 'opacity-75'}`}>
+                          {message.read_at ? 'Read' : message.delivered_at ? 'Delivered' : 'Sent'}
+                        </span>
+                      )}
                     </p>
                   </li>
                 ))}

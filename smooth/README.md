@@ -2,7 +2,8 @@
 
 Smooth is a lightweight web-based messaging application. Native FastAPI/browser
 WebSockets deliver persisted messages, presence, and typing indicators.
-HTTP remains responsible for creating messages. Phase 9 adds presence and typing.
+HTTP remains responsible for creating messages. Phase 10 adds persistent
+Delivered/Read receipts; presence and typing remain temporary state.
 
 ## Technology stack
 
@@ -161,7 +162,8 @@ All endpoints require `Authorization: Bearer <token>`:
   fields. Self-conversations return 400; nonexistent users return 404. A unique
   canonical user pair prevents duplicates; both members are created atomically.
 - `GET /api/conversations/{conversation_id}/messages` returns safe message fields
-  (`id`, `conversation_id`, `sender_id`, `content`, `created_at`), ordered by
+  (`id`, `conversation_id`, `sender_id`, `content`, `created_at`, `delivered_at`,
+  `read_at`), ordered by
   `created_at` then `id`, ascending.
 - `POST /api/conversations/{conversation_id}/messages` accepts
   `{"content":"Hello"}` and returns the stored message with 201. Content is trimmed
@@ -210,6 +212,30 @@ successful sending, or switching chats. Received typing expires after four secon
 without an update. Presence and typing are in-memory, single-process state and are
 not persisted; there are no presence/typing tables or last-seen timestamps.
 
+## Message receipts
+
+Sent means persisted. Delivered means the recipient acknowledged receipt. Read
+means the recipient viewed the conversation in a visible tab. Outgoing messages
+show these statuses as subtle text, derived from persisted receipt timestamps.
+
+The authenticated client sends `{"type":"message:delivered","message_id":10}`
+after processing an incoming event or receiving HTTP history. It sends
+`{"type":"message:read","message_id":10}` for incoming messages in its open,
+visible conversation. Other conversations receive delivery acknowledgements only.
+Read implies delivered. Acknowledgements are retried after socket reconnection.
+
+After verifying recipient ownership and conversation membership, the server
+notifies the sender's tabs with `{"type":"message:status","data":{"message_id":10,
+"delivered_at":"...","read_at":null}}`. Repeated acknowledgements preserve
+timestamps; read also sets delivery when necessary. Missing, malformed, and forged
+receipt IDs are ignored safely. Offline messages stay Sent until acknowledged.
+
+Receipt state is persisted in a new `message_receipts` table, with one unique
+receipt per message. Message and receipt creation share a transaction. Startup
+creates the new table and backfills missing receipts for existing messages with
+null timestamps; it does not alter the existing message table. HTTP history
+restores statuses after refresh. No schema migration tool is required.
+
 ## Run the frontend
 
 In a separate terminal, from `smooth/`:
@@ -237,14 +263,15 @@ button or Enter; Shift+Enter inserts a new line. Switching users replaces histor
 and clears the draft. Authentication failures clear the session and return to login.
 Build the frontend with `npm run build`.
 
-## Phase 8–9 verification
+## Phase 8–10 verification
 
 From `backend/`, install the test-only transport with
 `.venv/bin/python -m pip install httpx2`, then run
 `.venv/bin/python -m unittest discover -s tests -v`. Tests use a temporary SQLite
 database and test signing secret, covering HTTP regressions, authenticated
 delivery, presence transitions and snapshots, multiple tabs, typing authorization,
-rejected credentials, and failed persistence.
+rejected credentials, failed persistence, receipt transitions and authorization,
+concurrent-tab idempotency, and existing SQLite schema compatibility.
 
 The browser regression script is `frontend/tests/phase8.cjs`. Start the frontend
 at `http://127.0.0.1:5173` with its default API/WebSocket configuration and leave
@@ -254,5 +281,6 @@ with that installation's `node_modules` on `NODE_PATH`. If using a custom browse
 installation directory, also set `PLAYWRIGHT_BROWSERS_PATH`. It starts and
 restarts an isolated backend, checks separate Alice/Bob sessions and multiple
 tabs, presence, typing timers and cleanup, offline history, logout, refresh,
-conversation isolation, persisted message count, and uncaught browser errors.
+conversation isolation, receipt status and refresh persistence, an acknowledgement
+arriving before its HTTP response, persisted counts, and uncaught browser errors.
 These tools add no application dependencies.

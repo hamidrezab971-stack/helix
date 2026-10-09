@@ -10,6 +10,7 @@ from app.database.database import get_db
 from app.models.conversation import Conversation
 from app.models.conversation_member import ConversationMember
 from app.models.message import Message
+from app.models.message_receipt import MessageReceipt
 from app.models.user import User
 from app.realtime.manager import manager
 from app.schemas.auth import UserResponse
@@ -85,15 +86,20 @@ def get_messages(
     conversation_id: Annotated[int, Path(gt=0, lt=2**63)],
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
-) -> list[Message]:
+) -> list[MessageResponse]:
     require_membership(conversation_id, user.id, db)
-    return list(
-        db.scalars(
-            select(Message)
+    return [
+        MessageResponse.model_validate(message).model_copy(update={
+            "delivered_at": receipt.delivered_at if receipt else None,
+            "read_at": receipt.read_at if receipt else None,
+        })
+        for message, receipt in db.execute(
+            select(Message, MessageReceipt)
+            .outerjoin(MessageReceipt, MessageReceipt.message_id == Message.id)
             .where(Message.conversation_id == conversation_id)
             .order_by(Message.created_at.asc(), Message.id.asc())
         )
-    )
+    ]
 
 
 @router.post(
@@ -109,20 +115,21 @@ def send_message(
     db: Annotated[Session, Depends(get_db)],
 ) -> MessageResponse:
     require_membership(conversation_id, user.id, db)
+    member_ids = list(db.scalars(select(ConversationMember.user_id).where(
+        ConversationMember.conversation_id == conversation_id,
+    )))
+    recipient_ids = [member_id for member_id in member_ids if member_id != user.id]
+    if len(recipient_ids) != 1:
+        raise HTTPException(status_code=404, detail="Conversation not found")
     message = Message(
         conversation_id=conversation_id, sender_id=user.id, content=data.content
     )
     db.add(message)
+    db.flush()
+    db.add(MessageReceipt(message_id=message.id, recipient_id=recipient_ids[0]))
     db.commit()
     db.refresh(message)
     saved = MessageResponse.model_validate(message)
-    member_ids = list(
-        db.scalars(
-            select(ConversationMember.user_id).where(
-                ConversationMember.conversation_id == conversation_id
-            )
-        )
-    )
     background_tasks.add_task(
         manager.broadcast, member_ids,
         {"type": "message:new", "data": saved.model_dump(mode="json")},

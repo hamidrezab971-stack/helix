@@ -1,4 +1,4 @@
-import { API_URL, safeMessage } from './api.js'
+import { API_URL, safeMessage, safeReceipt } from './api.js'
 
 function websocketUrl() {
   if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL
@@ -7,11 +7,30 @@ function websocketUrl() {
   return url.toString()
 }
 
-export function connectRealtime(token, { onMessage, onUnauthorized, onPresenceSnapshot, onPresenceUpdate, onTyping, onDisconnect }) {
+export function connectRealtime(token, { onMessage, onStatus, onUnauthorized, onPresenceSnapshot, onPresenceUpdate, onTyping, onDisconnect }) {
   let socket
   let timer
   let stopped = false
   let authenticated = false
+  const acknowledgements = new Map()
+  const sentAcknowledgements = new Map()
+
+  function flushAcknowledgements() {
+    if (stopped || !authenticated || socket?.readyState !== WebSocket.OPEN) return
+    for (const [messageId, type] of acknowledgements) {
+      if (sentAcknowledgements.get(messageId) === type) continue
+      try {
+        socket.send(JSON.stringify({ type, message_id: messageId }))
+        sentAcknowledgements.set(messageId, type)
+      } catch { return }
+    }
+  }
+
+  function acknowledge(type, messageId) {
+    if (stopped || !['message:delivered', 'message:read'].includes(type) || !Number.isSafeInteger(messageId) || messageId <= 0) return
+    if (acknowledgements.get(messageId) !== 'message:read') acknowledgements.set(messageId, type)
+    flushAcknowledgements()
+  }
 
   function sendTyping(type, conversationId) {
     if (stopped || !authenticated || socket?.readyState !== WebSocket.OPEN) return false
@@ -43,6 +62,7 @@ export function connectRealtime(token, { onMessage, onUnauthorized, onPresenceSn
   function open() {
     if (stopped) return
     authenticated = false
+    sentAcknowledgements.clear()
     try {
       socket = new WebSocket(websocketUrl())
     } catch {
@@ -65,11 +85,17 @@ export function connectRealtime(token, { onMessage, onUnauthorized, onPresenceSn
       if (payload?.type === 'auth:error') return unauthorized()
       if (payload?.type === 'auth:ok') {
         authenticated = true
+        flushAcknowledgements()
         return
       }
       if (!authenticated) return
       const data = payload?.data
       const validId = (id) => Number.isSafeInteger(id) && id > 0
+      if (payload?.type === 'message:status' && validId(data?.message_id)) {
+        let receipt
+        try { receipt = safeReceipt(data) } catch { return }
+        onStatus({ message_id: data.message_id, ...receipt })
+      }
       if (payload?.type === 'presence:snapshot' && Array.isArray(data?.online_user_ids) && data.online_user_ids.every(validId)) {
         onPresenceSnapshot(data.online_user_ids)
       } else if (payload?.type === 'presence:update' && validId(data?.user_id) && ['online', 'offline'].includes(data?.status)) {
@@ -99,5 +125,5 @@ export function connectRealtime(token, { onMessage, onUnauthorized, onPresenceSn
 
   // Deferring startup also avoids a throwaway connection in React StrictMode.
   timer = setTimeout(open, 0)
-  return { stop, sendTyping }
+  return { stop, sendTyping, acknowledge }
 }
