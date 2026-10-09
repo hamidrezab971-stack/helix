@@ -26,6 +26,7 @@ class MessageResponse(BaseModel):
     created_at: datetime
     delivered_at: datetime | None = None
     read_at: datetime | None = None
+    edited_at: datetime | None = None
 
 
 class ConversationResponse(BaseModel):

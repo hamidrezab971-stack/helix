@@ -3,8 +3,8 @@
 Smooth is a lightweight web-based messaging application. Native FastAPI/browser
 WebSockets deliver persisted messages, presence, and typing indicators.
 HTTP remains responsible for creating messages. Delivered/Read receipts are
-persistent; presence and typing remain temporary state. Phase 12 adds unread badges
-to recent chats.
+persistent; presence and typing remain temporary state. Phase 13 adds sender-only
+message editing and deletion.
 
 ## Technology stack
 
@@ -114,7 +114,7 @@ token lifetime; the example uses 1440 minutes (24 hours).
 `FRONTEND_ORIGIN=http://127.0.0.1:5173` allows requests from the development
 frontend. Existing installations must add this setting to `backend/.env` and
 restart the backend. If using `localhost`, set it to `http://localhost:5173` and
-open that matching frontend URL. CORS allows only this origin, GET/POST, and the
+open that matching frontend URL. CORS allows only this origin, GET/POST/PATCH/DELETE, and the
 Authorization and Content-Type headers; cookies are not used.
 
 Startup creates missing tables through SQLAlchemy metadata. The `users` table has
@@ -172,8 +172,8 @@ All endpoints require `Authorization: Bearer <token>`:
   fields. Self-conversations return 400; nonexistent users return 404. A unique
   canonical user pair prevents duplicates; both members are created atomically.
 - `GET /api/conversations/{conversation_id}/messages` returns safe message fields
-  (`id`, `conversation_id`, `sender_id`, `content`, `created_at`, `delivered_at`,
-  `read_at`), ordered by
+  (`id`, `conversation_id`, `sender_id`, `content`, `created_at`, `edited_at`,
+  `delivered_at`, `read_at`), ordered by
   `created_at` then `id`, ascending.
 - `POST /api/conversations/{conversation_id}/messages` accepts
   `{"content":"Hello"}` and returns the stored message with 201. Content is trimmed
@@ -246,6 +246,31 @@ creates the new table and backfills missing receipts for existing messages with
 null timestamps; it does not alter the existing message table. HTTP history
 restores statuses after refresh. No schema migration tool is required.
 
+## Edit and delete messages
+
+- `PATCH /api/messages/{message_id}` accepts `{"content":"Updated text"}` and
+  returns the complete effective message with HTTP 200. Content uses the same
+  trimming and 1–2000 character validation as sending. Only the sender, while
+  still a conversation member, may edit or delete; unauthorized/missing messages
+  return a generic 404.
+- Edits persist in `message_edits`, one unique current edit per message. Repeated
+  edits update that row. History, live events, and recent previews use edited
+  content; full message responses include `edited_at` (null when unedited).
+  Editing preserves delivery/read receipts and original activity ordering.
+- `DELETE /api/messages/{message_id}` returns HTTP 204 after atomically removing
+  the message and its receipt/edit rows. History omits it; previews fall back to
+  the next message or null, and unread counts reflect removed receipts.
+- Committed edits broadcast `message:updated` with the complete safe message;
+  committed deletions broadcast `message:deleted` with `message_id` and
+  `conversation_id`, to all connected conversation-member tabs.
+
+Outgoing bubbles have Edit/Save/Cancel and a confirmed Delete action. Changes are
+server-confirmed, with retryable errors; edited bubbles show Edited. HTTP history
+remains authoritative for offline clients. New tables are created automatically
+without altering existing message columns. A tiny `message_id_sequence` table
+preserves stable IDs after deletion, preventing SQLite ID reuse from making old
+socket acknowledgements apply to replacement messages. It stores no message text.
+
 ## Run the frontend
 
 In a separate terminal, from `smooth/`:
@@ -283,7 +308,7 @@ full count available to assistive technology). Read confirmation refreshes recen
 counts across recipient tabs using the existing status event. Active visible chats
 avoid badge flashes; refresh and reconnect restore persisted unread counts.
 
-## Phase 8–12 verification
+## Phase 8–13 verification
 
 From `backend/`, install the test-only transport with
 `.venv/bin/python -m pip install httpx2`, then run
@@ -296,6 +321,10 @@ Recent-chat tests cover membership isolation, ordering, latest-message selection
 empty conversations, and the 50-result limit.
 Unread tests cover receipt derivation, isolation, delivery versus read, clearing,
 persistence, replay deduplication, active/hidden conversations, and multiple tabs.
+Mutation tests cover sender/membership authorization, repeated edits, receipt
+preservation, deletion cleanup, unread/preview fallback, failed commits, and stable
+IDs. Browser checks include live mutation across tabs, confirmation/cancel,
+network failures/retries, refresh persistence, and offline history.
 
 The browser regression script is `frontend/tests/phase8.cjs`. Start the frontend
 at `http://127.0.0.1:5173` with its default API/WebSocket configuration and leave

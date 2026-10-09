@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getMessages, getOrCreateConversation, sendMessage, mergeReceipt } from '../services/api.js'
+import { getMessages, getOrCreateConversation, sendMessage, editMessage, deleteMessage, mergeReceipt } from '../services/api.js'
 
 function mergeMessages(current, incoming) {
   const messages = new Map(current.map((message) => [message.id, message]))
-  for (const message of incoming) messages.set(message.id, { ...message, ...mergeReceipt(messages.get(message.id), message) })
+  for (const message of incoming) {
+    const previous = messages.get(message.id)
+    const effective = previous?.edited_at && (!message.edited_at || Date.parse(previous.edited_at) > Date.parse(message.edited_at)) ? previous : message
+    messages.set(message.id, { ...effective, ...mergeReceipt(previous, message) })
+  }
   return [...messages.values()].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id)
 }
 
-export default function ChatPanel({ user, selectedUser, initialConversation, onConversationOpened, onMessageSent, token, onUnauthorized, subscribeToMessages, subscribeToStatus, acknowledge, subscribeToTyping, sendTyping, isOnline }) {
+export default function ChatPanel({ user, selectedUser, initialConversation, onConversationOpened, onMessageSent, onMessageMutated, subscribeToMutations, token, onUnauthorized, subscribeToMessages, subscribeToStatus, acknowledge, subscribeToTyping, sendTyping, isOnline }) {
   const [conversation, setConversation] = useState(null)
   const [messages, setMessages] = useState([])
   const [stage, setStage] = useState('opening')
@@ -26,12 +30,39 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
   const typingTimer = useRef(null)
   const remoteTypingTimer = useRef(null)
   const receipts = useRef(new Map())
+  const updates = useRef(new Map())
+  const deletedIds = useRef(new Set())
+  const [editingId, setEditingId] = useState(null)
+  const [editContent, setEditContent] = useState('')
+  const [actionError, setActionError] = useState('')
+  const [actionBusy, setActionBusy] = useState(false)
+  const actionPending = useRef(false)
+  const actionController = useRef(null)
 
   const addMessages = useCallback((incoming) => {
-    setMessages((previous) => mergeMessages(previous, incoming.map((message) => (
-      { ...message, ...mergeReceipt(receipts.current.get(message.id), message) }
-    ))))
+    setMessages((previous) => mergeMessages(previous, incoming.filter((message) => !deletedIds.current.has(message.id)).map((message) => {
+      const update = updates.current.get(message.id)
+      const effective = update && (!message.edited_at || Date.parse(update.edited_at) > Date.parse(message.edited_at)) ? update : message
+      return { ...effective, ...mergeReceipt(receipts.current.get(message.id), effective) }
+    })))
   }, [])
+
+  useEffect(() => subscribeToMutations((event) => {
+    if (event.data.conversation_id !== conversationId.current) return
+    if (event.type === 'message:deleted') {
+      const id = event.data.message_id
+      deletedIds.current.add(id)
+      updates.current.delete(id)
+      receipts.current.delete(id)
+      setMessages((previous) => previous.filter((message) => message.id !== id))
+      setEditingId((current) => current === id ? null : current)
+    } else if (!deletedIds.current.has(event.data.id)) {
+      const existing = updates.current.get(event.data.id)
+      if (!existing || Date.parse(event.data.edited_at) >= Date.parse(existing.edited_at)) updates.current.set(event.data.id, event.data)
+      setMessages((previous) => previous.some((message) => message.id === event.data.id)
+        ? mergeMessages(previous, [event.data]) : previous)
+    }
+  }), [subscribeToMutations])
 
   useEffect(() => subscribeToStatus((status) => {
     // A recipient can acknowledge before the sender's HTTP response arrives.
@@ -145,12 +176,48 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
       active = false
       controller.abort()
       sendController.current?.abort()
+      actionController.current?.abort()
     }
   }, [token, selectedUser.id, initialConversation, retryAttempt, onUnauthorized, stopTyping, addMessages, onConversationOpened])
 
   useEffect(() => {
     if (history.current) history.current.scrollTop = history.current.scrollHeight
   }, [messages])
+
+  async function performAction(message, deleting, event) {
+    event?.preventDefault()
+    if (actionPending.current) return
+    if (deleting && !window.confirm('Delete this message?')) return
+    const trimmed = editContent.trim()
+    if (!deleting && (!trimmed || Array.from(trimmed).length > 2000)) {
+      setActionError('Use a message between 1 and 2000 characters.')
+      return
+    }
+    actionPending.current = true
+    setActionBusy(true)
+    setActionError('')
+    const controller = new AbortController()
+    actionController.current = controller
+    try {
+      if (deleting) {
+        await deleteMessage(token, message.id, controller.signal)
+        if (!controller.signal.aborted) onMessageMutated({ type: 'message:deleted', data: { message_id: message.id, conversation_id: message.conversation_id } })
+      } else {
+        const saved = await editMessage(token, message.id, trimmed, controller.signal)
+        if (!controller.signal.aborted) {
+          onMessageMutated({ type: 'message:updated', data: saved })
+          setEditingId(null)
+        }
+      }
+    } catch (error) {
+      if (controller.signal.aborted || error.name === 'AbortError') return
+      if (error.status === 401) onUnauthorized()
+      else setActionError(error.displayMessage || `Unable to ${deleting ? 'delete' : 'edit'} your message. Please try again.`)
+    } finally {
+      actionPending.current = false
+      if (!controller.signal.aborted) setActionBusy(false)
+    }
+  }
 
   async function handleSend(event) {
     event.preventDefault()
@@ -209,21 +276,38 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
             ) : (
               <ol className="space-y-3">
                 {messages.map((message) => (
-                  <li key={message.id} className={`flex ${message.sender_id === user.id ? 'justify-end' : 'justify-start'}`}>
+                  <li key={message.id} className={`flex flex-col ${message.sender_id === user.id ? 'items-end' : 'items-start'}`}>
                     <p className="message-bubble" data-own={message.sender_id === user.id}>
                       <span className="sr-only">{message.sender_id === user.id ? 'You' : selectedUser.username}: </span>
                       {message.content}
+                      {message.edited_at && <span aria-label="Edited message" className="mt-1 block text-[10px] opacity-75">Edited</span>}
                       {message.sender_id === user.id && (
                         <span aria-label="Message status" className={`mt-1 block text-right text-[10px] ${message.read_at ? 'font-semibold' : 'opacity-75'}`}>
                           {message.read_at ? 'Read' : message.delivered_at ? 'Delivered' : 'Sent'}
                         </span>
                       )}
                     </p>
+                    {message.sender_id === user.id && (editingId === message.id ? (
+                      <form aria-label="Edit message" className="mt-2 w-full max-w-sm space-y-2" onSubmit={(event) => performAction(message, false, event)}>
+                        <label className="text-xs text-stone-600" htmlFor="edit-message-content">Edit message text</label>
+                        <textarea id="edit-message-content" className="auth-input" maxLength={2000} value={editContent} onChange={(event) => setEditContent(event.target.value)} disabled={actionBusy} autoFocus />
+                        <div className="flex gap-3">
+                          <button type="submit" className="secondary-button" disabled={actionBusy}>Save</button>
+                          <button type="button" className="secondary-button" disabled={actionBusy} onClick={() => { setEditingId(null); setActionError('') }}>Cancel</button>
+                        </div>
+                      </form>
+                    ) : (
+                      <div className="mt-1 flex gap-3">
+                        <button type="button" className="text-button min-h-8 text-xs" disabled={actionBusy} onClick={() => { setEditingId(message.id); setEditContent(message.content); setActionError('') }}>Edit</button>
+                        <button type="button" className="text-button min-h-8 text-xs" disabled={actionBusy} onClick={() => performAction(message, true)}>Delete</button>
+                      </div>
+                    ))}
                   </li>
                 ))}
               </ol>
             )}
           </div>
+          {actionError && <p role="alert" className="form-error mb-3">{actionError}</p>}
           <form onSubmit={handleSend} aria-busy={sending} className="border-t border-stone-200/80 pt-5">
             <label htmlFor="message-content" className="text-sm font-medium text-stone-800">Message</label>
             <textarea

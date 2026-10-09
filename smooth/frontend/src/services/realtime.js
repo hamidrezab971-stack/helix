@@ -7,13 +7,18 @@ function websocketUrl() {
   return url.toString()
 }
 
-export function connectRealtime(token, { onMessage, onStatus, onUnauthorized, onPresenceSnapshot, onPresenceUpdate, onTyping, onDisconnect }) {
+export function connectRealtime(token, { onMessage, onMutation, onStatus, onUnauthorized, onPresenceSnapshot, onPresenceUpdate, onTyping, onDisconnect }) {
   let socket
   let timer
   let stopped = false
   let authenticated = false
   const acknowledgements = new Map()
   const sentAcknowledgements = new Map()
+
+  function forgetMessage(messageId) {
+    acknowledgements.delete(messageId)
+    sentAcknowledgements.delete(messageId)
+  }
 
   function flushAcknowledgements() {
     if (stopped || !authenticated || socket?.readyState !== WebSocket.OPEN) return
@@ -91,6 +96,15 @@ export function connectRealtime(token, { onMessage, onStatus, onUnauthorized, on
       if (!authenticated) return
       const data = payload?.data
       const validId = (id) => Number.isSafeInteger(id) && id > 0
+      if (payload?.type === 'message:updated') {
+        let message
+        try { message = safeMessage(data) } catch { return }
+        if (!message.edited_at) return
+        onMutation({ type: payload.type, data: message })
+      } else if (payload?.type === 'message:deleted' && validId(data?.message_id) && validId(data?.conversation_id)) {
+        forgetMessage(data.message_id)
+        onMutation({ type: payload.type, data: { message_id: data.message_id, conversation_id: data.conversation_id } })
+      }
       if (payload?.type === 'message:status' && validId(data?.message_id)) {
         let receipt
         try { receipt = safeReceipt(data) } catch { return }
@@ -125,5 +139,5 @@ export function connectRealtime(token, { onMessage, onStatus, onUnauthorized, on
 
   // Deferring startup also avoids a throwaway connection in React StrictMode.
   timer = setTimeout(open, 0)
-  return { stop, sendTyping, acknowledge }
+  return { stop, sendTyping, acknowledge, forgetMessage }
 }

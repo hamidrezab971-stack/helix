@@ -24,3 +24,12 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.current_timestamp()
     )
+
+
+class MessageIdSequence(Base):
+    # SQLite's existing non-AUTOINCREMENT primary key can reuse a deleted ID.
+    # Stable identities are required for socket acknowledgements and mutations.
+    __tablename__ = "message_id_sequence"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    last_value: Mapped[int] = mapped_column(nullable=False)

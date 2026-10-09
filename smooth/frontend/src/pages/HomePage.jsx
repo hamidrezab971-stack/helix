@@ -39,12 +39,14 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
   const [pageVisible, setPageVisible] = useState(document.visibilityState === 'visible')
   const normalizedSearch = search.trim().toLowerCase()
   const messageListeners = useRef(new Set())
+  const mutationListeners = useRef(new Set())
   const typingListeners = useRef(new Set())
   const statusListeners = useRef(new Set())
   const realtime = useRef(null)
   const recentController = useRef(null)
   const activeConversationId = useRef(null)
   const receivedMessageIds = useRef(new Set())
+  const deletedMessageIds = useRef(new Set())
 
   const refreshRecent = useCallback(async () => {
     recentController.current?.abort()
@@ -106,6 +108,34 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
     refreshRecent()
   }, [refreshRecent])
 
+  const subscribeToMutations = useCallback((listener) => {
+    mutationListeners.current.add(listener)
+    return () => mutationListeners.current.delete(listener)
+  }, [])
+
+  const handleMutation = useCallback((event) => {
+    if (event.type === 'message:updated' && deletedMessageIds.current.has(event.data.id)) return
+    if (event.type === 'message:deleted') {
+      deletedMessageIds.current.add(event.data.message_id)
+      receivedMessageIds.current.delete(event.data.message_id)
+      realtime.current?.forgetMessage(event.data.message_id)
+    }
+    for (const listener of mutationListeners.current) listener(event)
+    setRecent((previous) => previous.map((conversation) => {
+      if (conversation.id !== event.data.conversation_id) return conversation
+      if (event.type === 'message:deleted' && conversation.last_message?.id === event.data.message_id) {
+        // Remove the cached latest preview before fetching its fallback;
+        // otherwise the old "preserve newer preview" rule would restore it.
+        return { ...conversation, last_message: null }
+      }
+      if (event.type === 'message:updated' && conversation.last_message?.id === event.data.id) {
+        return { ...conversation, last_message: { ...conversation.last_message, content: event.data.content } }
+      }
+      return conversation
+    }))
+    refreshRecent()
+  }, [refreshRecent])
+
   const subscribeToStatus = useCallback((listener) => {
     statusListeners.current.add(listener)
     return () => statusListeners.current.delete(listener)
@@ -131,7 +161,9 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
   useEffect(() => {
     if (!token) return
     const connection = connectRealtime(token, {
+      onMutation: handleMutation,
       onMessage: (message) => {
+        if (deletedMessageIds.current.has(message.id)) return
         for (const listener of messageListeners.current) listener(message)
         if (message.sender_id !== user.id) acknowledge('message:delivered', message.id)
         updateRecentMessage(message)
@@ -164,7 +196,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
       connection.stop()
       realtime.current = null
     }
-  }, [token, onUnauthorized, user.id, acknowledge, updateRecentMessage, refreshRecent])
+  }, [token, onUnauthorized, user.id, acknowledge, updateRecentMessage, refreshRecent, handleMutation])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -303,7 +335,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
           {selectedUser ? (
             <>
               <button type="button" className="secondary-button mx-6 mt-5 md:hidden" onClick={() => { setSelectedUser(null); setSelectedConversation(null); activeConversationId.current = null }}>Back to chats</button>
-              <ChatPanel key={`${selectedUser.id}:${conversationAttempt}`} user={user} selectedUser={selectedUser} initialConversation={selectedConversation} onConversationOpened={onConversationOpened} onMessageSent={updateRecentMessage} token={token} onUnauthorized={onUnauthorized} subscribeToMessages={subscribeToMessages} subscribeToStatus={subscribeToStatus} acknowledge={acknowledge} subscribeToTyping={subscribeToTyping} sendTyping={sendTyping} isOnline={onlineUserIds.has(selectedUser.id)} />
+              <ChatPanel key={`${selectedUser.id}:${conversationAttempt}`} user={user} selectedUser={selectedUser} initialConversation={selectedConversation} onConversationOpened={onConversationOpened} onMessageSent={updateRecentMessage} onMessageMutated={handleMutation} subscribeToMutations={subscribeToMutations} token={token} onUnauthorized={onUnauthorized} subscribeToMessages={subscribeToMessages} subscribeToStatus={subscribeToStatus} acknowledge={acknowledge} subscribeToTyping={subscribeToTyping} sendTyping={sendTyping} isOnline={onlineUserIds.has(selectedUser.id)} />
             </>
           ) : (
             <div className="flex h-full flex-col justify-center p-6 sm:p-8">

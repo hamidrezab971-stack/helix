@@ -27,6 +27,7 @@ async function request(path, { body, token, signal, method } = {}) {
   }
 
   let data
+  if (response.ok && response.status === 204) return null
   try {
     data = await response.json()
   } catch {
@@ -39,6 +40,8 @@ async function request(path, { body, token, signal, method } = {}) {
       message = path.endsWith('/login')
         ? 'Invalid username or password'
         : 'Your sign-in has expired. Please log in again.'
+    } else if (path.startsWith('/api/messages') && [403, 404].includes(response.status)) {
+      message = 'This message is unavailable or you don’t have permission to change it.'
     } else if (path.startsWith('/api/conversations') && [403, 404].includes(response.status)) {
       message = path.includes('/with/')
         ? 'This user is no longer available.'
@@ -98,7 +101,9 @@ export function safeMessage(data) {
   if (![data?.id, data?.conversation_id, data?.sender_id].every((id) => Number.isSafeInteger(id) && id > 0) || typeof data.content !== 'string' || !data.content.trim() || Array.from(data.content).length > 2000 || typeof data.created_at !== 'string' || !Number.isFinite(Date.parse(data.created_at))) {
     throw apiError(GENERIC_ERROR)
   }
-  return { id: data.id, conversation_id: data.conversation_id, sender_id: data.sender_id, content: data.content, created_at: data.created_at, ...safeReceipt(data) }
+  const edited_at = data.edited_at ?? null
+  if (edited_at !== null && (typeof edited_at !== 'string' || !Number.isFinite(Date.parse(edited_at)))) throw apiError(GENERIC_ERROR)
+  return { id: data.id, conversation_id: data.conversation_id, sender_id: data.sender_id, content: data.content, created_at: data.created_at, edited_at, ...safeReceipt(data) }
 }
 
 export function safeReceipt(data) {
@@ -140,4 +145,12 @@ export async function getMessages(token, conversationId, signal) {
 
 export async function sendMessage(token, conversationId, content, signal) {
   return safeMessage(await request(`/api/conversations/${conversationId}/messages`, { token, signal, body: { content } }))
+}
+
+export async function editMessage(token, messageId, content, signal) {
+  return safeMessage(await request(`/api/messages/${messageId}`, { token, signal, method: 'PATCH', body: { content } }))
+}
+
+export async function deleteMessage(token, messageId, signal) {
+  await request(`/api/messages/${messageId}`, { token, signal, method: 'DELETE' })
 }

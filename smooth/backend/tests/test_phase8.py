@@ -31,6 +31,7 @@ from app.models.message import Message
 from app.models.conversation import Conversation
 from app.models.conversation_member import ConversationMember
 from app.models.message_receipt import MessageReceipt
+from app.models.message_edit import MessageEdit
 from app.models.user import User
 from app.realtime.manager import ConnectionManager, manager
 from app.services.receipts import acknowledge_message, initialize_receipts
@@ -340,6 +341,7 @@ class Phase8Tests(unittest.TestCase):
 
         self.assertEqual(count('alice'), 0)
         self.assertEqual(count('bob'), 0)
+
         messages = []
         for index in range(3):
             message = self.client.post(self.path, headers=self.headers('bob'), json={'content': f'unread {index}'}).json()
@@ -373,6 +375,103 @@ class Phase8Tests(unittest.TestCase):
             self.assertIsNone(acknowledge_message(message['id'], self.users['alice'], True))
         self.assertEqual(count('alice'), 0)
         self.assertEqual(count('bob'), 0)
+
+
+    def test_edit_repeated_effective_content_receipts_and_realtime(self):
+        original = self.client.post(self.path, headers=self.headers('alice'), json={'content': 'Hello Bbo'}).json()
+        message_id = original['id']
+        acknowledge_message(message_id, self.users['bob'], True)
+        receipt_before = self.client.get(self.path, headers=self.headers('alice')).json()[0]
+        with self.client.websocket_connect('/ws') as alice, self.client.websocket_connect('/ws') as bob, self.client.websocket_connect('/ws') as alice_tab:
+            for socket, name in ((alice, 'alice'), (bob, 'bob'), (alice_tab, 'alice')):
+                self.authenticate(socket, name)
+            response = self.client.patch(f'/api/messages/{message_id}', headers=self.headers('alice'), json={'content': '  Hello Bob  '})
+            self.assertEqual(response.status_code, 200)
+            edited = response.json()
+            self.assertEqual(edited['content'], 'Hello Bob')
+            self.assertIsNotNone(edited['edited_at'])
+            for field in ('created_at', 'delivered_at', 'read_at'):
+                self.assertEqual(edited[field], receipt_before[field])
+            for socket in (alice, bob, alice_tab):
+                self.assertEqual(self.receive_type(socket, 'message:updated'), {'type': 'message:updated', 'data': edited})
+        with SessionLocal() as db:
+            self.assertEqual(db.get(Message, message_id).content, 'Hello Bbo')
+            edit_id = db.scalar(select(MessageEdit.id))
+        second = self.client.patch(f'/api/messages/{message_id}', headers=self.headers('alice'), json={'content': 'Second edit'}).json()
+        self.assertGreaterEqual(second['edited_at'], edited['edited_at'])
+        with SessionLocal() as db:
+            self.assertEqual(db.scalar(select(func.count(MessageEdit.id))), 1)
+            self.assertEqual(db.scalar(select(MessageEdit.id)), edit_id)
+        engine.dispose()
+        self.assertEqual(self.client.get(self.path, headers=self.headers('bob')).json()[0], second)
+        row = self.client.get('/api/conversations', headers=self.headers('alice')).json()[0]
+        self.assertEqual(row['last_message']['content'], 'Second edit')
+        self.assertEqual(row['updated_at'], original['created_at'])
+
+    def test_mutation_authorization_validation_and_no_failed_broadcast(self):
+        message_id = self.client.post(self.path, headers=self.headers('alice'), json={'content': 'Protected'}).json()['id']
+        path = f'/api/messages/{message_id}'
+        for method in ('patch', 'delete'):
+            request = getattr(self.client, method)
+            body = {'json': {'content': 'forged', 'sender_id': self.users['alice']}} if method == 'patch' else {}
+            self.assertEqual(request(path, **body).status_code, 401)
+            for name in ('bob', 'charlie'):
+                self.assertEqual(request(path, headers=self.headers(name), **body).status_code, 404)
+            for invalid_id in ('0', '-1', 'oops', str(2**63)):
+                self.assertEqual(request(f'/api/messages/{invalid_id}', headers=self.headers('alice'), **body).status_code, 422)
+            self.assertEqual(request('/api/messages/99999', headers=self.headers('alice'), **body).status_code, 404)
+        for content in ('', '   ', 'x' * 2001):
+            self.assertEqual(self.client.patch(path, headers=self.headers('alice'), json={'content': content}).status_code, 422)
+        for method in ('patch', 'delete'):
+            with patch('app.api.messages.manager.broadcast') as broadcast, patch('sqlalchemy.orm.Session.commit', side_effect=RuntimeError('commit failed')):
+                with self.assertRaisesRegex(RuntimeError, 'commit failed'):
+                    getattr(self.client, method)(path, headers=self.headers('alice'), **({'json': {'content': 'never committed'}} if method == 'patch' else {}))
+                broadcast.assert_not_called()
+        self.assertEqual(self.client.get(self.path, headers=self.headers('alice')).json()[0]['content'], 'Protected')
+        with SessionLocal() as db:
+            self.assertEqual(db.scalar(select(func.count(MessageEdit.id))), 0)
+            self.assertEqual(db.scalar(select(func.count(MessageReceipt.id))), 1)
+        for method in ('PATCH', 'DELETE'):
+            preflight = self.client.options(path, headers={'Origin': 'http://127.0.0.1:5173', 'Access-Control-Request-Method': method, 'Access-Control-Request-Headers': 'authorization,content-type'})
+            self.assertEqual(preflight.status_code, 200)
+        with SessionLocal() as db:
+            member = db.scalar(select(ConversationMember).where(ConversationMember.conversation_id == int(self.path.split('/')[3]), ConversationMember.user_id == self.users['alice']))
+            db.delete(member)
+            db.commit()
+        self.assertEqual(self.client.patch(path, headers=self.headers('alice'), json={'content': 'no longer a member'}).status_code, 404)
+        self.assertEqual(self.client.delete(path, headers=self.headers('alice')).status_code, 404)
+
+    def test_delete_cleanup_unread_preview_fallback_and_stable_ids(self):
+        messages = [self.client.post(self.path, headers=self.headers('bob'), json={'content': f'Unread {index}'}).json() for index in range(3)]
+        message_id = messages[-1]['id']
+        self.client.patch(f'/api/messages/{message_id}', headers=self.headers('bob'), json={'content': 'Edited unread'})
+        with self.client.websocket_connect('/ws') as alice, self.client.websocket_connect('/ws') as bob:
+            self.authenticate(alice, 'alice')
+            self.authenticate(bob, 'bob')
+            response = self.client.delete(f'/api/messages/{message_id}', headers=self.headers('bob'))
+            self.assertEqual(response.status_code, 204)
+            self.assertEqual(response.content, b'')
+            expected = {'type': 'message:deleted', 'data': {'message_id': message_id, 'conversation_id': int(self.path.split('/')[3])}}
+            for socket in (alice, bob):
+                self.assertEqual(self.receive_type(socket, 'message:deleted'), expected)
+        with SessionLocal() as db:
+            self.assertIsNone(db.get(Message, message_id))
+            self.assertIsNone(db.scalar(select(MessageReceipt).where(MessageReceipt.message_id == message_id)))
+            self.assertIsNone(db.scalar(select(MessageEdit).where(MessageEdit.message_id == message_id)))
+        row = self.client.get('/api/conversations', headers=self.headers('alice')).json()[0]
+        self.assertEqual(row['unread_count'], 2)
+        self.assertEqual(row['last_message']['id'], messages[1]['id'])
+        for message in messages[:2]:
+            self.client.delete(f'/api/messages/{message["id"]}', headers=self.headers('bob'))
+        self.assertEqual(self.client.get(self.path, headers=self.headers('alice')).json(), [])
+        row = self.client.get('/api/conversations', headers=self.headers('alice')).json()[0]
+        self.assertIsNone(row['last_message'])
+        self.assertEqual(row['unread_count'], 0)
+        engine.dispose()
+        saved = self.client.post(self.path, headers=self.headers('bob'), json={'content': 'New identity'}).json()
+        self.assertGreater(saved['id'], message_id)
+        self.assertIsNone(acknowledge_message(message_id, self.users['alice'], True))
+        self.assertEqual(self.client.get('/api/conversations', headers=self.headers('alice')).json()[0]['unread_count'], 1)
 
 
 class ManagerCleanupTests(unittest.IsolatedAsyncioTestCase):
