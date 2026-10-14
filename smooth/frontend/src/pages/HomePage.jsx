@@ -44,6 +44,8 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
   const [pageVisible, setPageVisible] = useState(document.visibilityState === 'visible')
   const normalizedSearch = search.trim().toLowerCase()
   const messageListeners = useRef(new Set())
+  const reactionListeners = useRef(new Map())
+  const reactionChanges = useRef(new Set())
   const mutationListeners = useRef(new Set())
   const typingListeners = useRef(new Set())
   const statusListeners = useRef(new Set())
@@ -122,6 +124,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
     if (event.type === 'message:updated' && deletedMessageIds.current.has(event.data.id)) return
     if (event.type === 'message:deleted') {
       deletedMessageIds.current.add(event.data.message_id)
+      reactionChanges.current.delete(event.data.message_id)
       receivedMessageIds.current.delete(event.data.message_id)
       realtime.current?.forgetMessage(event.data.message_id)
     }
@@ -163,9 +166,26 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
     return () => messageListeners.current.delete(listener)
   }, [])
 
+  const subscribeToReactions = useCallback((messageId, listener) => {
+    if (!reactionListeners.current.has(messageId)) reactionListeners.current.set(messageId, new Set())
+    reactionListeners.current.get(messageId).add(listener)
+    // An event can precede mounting a message loaded by an in-flight history request.
+    if (reactionChanges.current.has(messageId)) listener()
+    return () => {
+      const listeners = reactionListeners.current.get(messageId)
+      listeners?.delete(listener)
+      if (!listeners?.size) reactionListeners.current.delete(messageId)
+    }
+  }, [])
+
   useEffect(() => {
     if (!token) return
     const connection = connectRealtime(token, {
+      onReactions: ({ message_id }) => {
+        if (deletedMessageIds.current.has(message_id)) return
+        reactionChanges.current.add(message_id)
+        for (const listener of reactionListeners.current.get(message_id) || []) listener()
+      },
       onMutation: handleMutation,
       onMessage: (message) => {
         if (deletedMessageIds.current.has(message.id)) return
@@ -180,6 +200,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
       onPresenceSnapshot: (ids) => {
         setOnlineUserIds(new Set(ids))
         refreshRecent()
+        for (const listeners of reactionListeners.current.values()) for (const listener of listeners) listener()
       },
       onPresenceUpdate: ({ user_id, status }) => setOnlineUserIds((previous) => {
         const next = new Set(previous)
@@ -340,7 +361,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
           {selectedUser ? (
             <>
               <button type="button" className="secondary-button mx-6 mt-5 md:hidden" onClick={() => { setSelectedUser(null); setSelectedConversation(null); activeConversationId.current = null }}>Back to chats</button>
-              <ChatPanel key={`${selectedUser.id}:${conversationAttempt}`} user={user} selectedUser={selectedUser} initialConversation={selectedConversation} onConversationOpened={onConversationOpened} onMessageSent={updateRecentMessage} onMessageMutated={handleMutation} subscribeToMutations={subscribeToMutations} token={token} onUnauthorized={onUnauthorized} subscribeToMessages={subscribeToMessages} subscribeToStatus={subscribeToStatus} acknowledge={acknowledge} subscribeToTyping={subscribeToTyping} sendTyping={sendTyping} isOnline={onlineUserIds.has(selectedUser.id)} />
+              <ChatPanel key={`${selectedUser.id}:${conversationAttempt}`} user={user} selectedUser={selectedUser} initialConversation={selectedConversation} onConversationOpened={onConversationOpened} onMessageSent={updateRecentMessage} onMessageMutated={handleMutation} subscribeToMutations={subscribeToMutations} subscribeToReactions={subscribeToReactions} token={token} onUnauthorized={onUnauthorized} subscribeToMessages={subscribeToMessages} subscribeToStatus={subscribeToStatus} acknowledge={acknowledge} subscribeToTyping={subscribeToTyping} sendTyping={sendTyping} isOnline={onlineUserIds.has(selectedUser.id)} />
             </>
           ) : (
             <div className="flex h-full flex-col justify-center p-6 sm:p-8">

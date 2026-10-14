@@ -3,8 +3,8 @@
 Smooth is a lightweight web-based messaging application. Native FastAPI/browser
 WebSockets deliver persisted messages, presence, and typing indicators.
 HTTP remains responsible for creating messages. Delivered/Read receipts are
-persistent; presence and typing remain temporary state. Phase 15 adds flat replies
-to text and image messages.
+persistent; presence and typing remain temporary state. Phase 16 adds persistent
+emoji reactions to text, image, and reply messages.
 
 ## Technology stack
 
@@ -97,7 +97,7 @@ in PowerShell. A newer Python version can also be used.
 On Debian/Ubuntu, install `python3.12-venv` if the environment reports that
 `ensurepip` is missing.
 
-Open http://127.0.0.1:8000/ to see:
+Open http://127.0.0.1:8000/ (or your forwarded backend URL) to see:
 
 ```json
 {"message": "Smooth API is running"}
@@ -173,7 +173,7 @@ All endpoints require `Authorization: Bearer <token>`:
   canonical user pair prevents duplicates; both members are created atomically.
 - `GET /api/conversations/{conversation_id}/messages` returns safe message fields
   (`id`, `conversation_id`, `sender_id`, `content`, `created_at`, `edited_at`,
-  `delivered_at`, `read_at`, `attachment`, `reply_to`), ordered by
+  `delivered_at`, `read_at`, `attachment`, `reply_to`, `reactions`), ordered by
   `created_at` then `id`, ascending.
 - `POST /api/conversations/{conversation_id}/messages` accepts
   `{"content":"Hello"}` and returns the stored message with 201. Content is trimmed
@@ -321,6 +321,38 @@ cancel/retry, quoted bubbles, and click-to-scroll for loaded targets. Sending or
 switching chats clears composer reply state. Recents show the reply's actual
 content/media, and existing receipts/unread behavior applies unchanged.
 
+## Message reactions
+
+Conversation members can react to any text, image, or reply message using
+👍, ❤️, 😂, 😮, 😢, or 👎. Each person can use several different emoji, once each
+per message. Clicking a selected reaction removes that person's reaction.
+
+Authenticated endpoints:
+
+- `GET /api/messages/{message_id}/reactions` returns an ordered list of
+  `{"emoji":"👍","count":2,"reacted_by_me":true}` summaries.
+- `POST /api/messages/{message_id}/reactions` accepts `{"emoji":"👍"}` and returns
+  the personalized summary with 201 for a new reaction or 200 for a duplicate.
+- `DELETE /api/messages/{message_id}/reactions/{emoji}` removes only the current
+  user's matching reaction, returning the summary with 200 even if already absent.
+
+Missing or inaccessible messages return 404; unsupported emoji return 422.
+Startup creates `message_reactions` without changing existing message columns.
+A unique message/user/emoji constraint makes concurrent duplicate adds safe.
+Edits preserve reactions; deleting a message removes its reaction rows atomically.
+
+History includes personalized `reactions`. Committed changes send
+`message:reactions` with only `message_id` and `conversation_id` to both members'
+connected tabs. Each tab fetches its own summary, preserving the correct selected
+state. Shared edit events omit personalized reactions. Socket recovery refreshes
+loaded reactions; history restores them after refresh or offline login.
+
+The React button opens a six-emoji picker. Existing reactions show counts and
+selected state, support keyboard use, and display retryable errors. Requests
+are cancelled when switching chats, and older responses cannot overwrite newer
+summaries. Reactions do not change activity ordering, unread counts, receipts,
+message previews, or typing state.
+
 ## Run the frontend
 
 In a separate terminal, from `smooth/`:
@@ -332,11 +364,18 @@ cp .env.example .env
 npm run dev -- --host 127.0.0.1
 ```
 
-Set `VITE_API_URL=http://127.0.0.1:8000` in `frontend/.env` (the same value is the
-local fallback). `VITE_WS_URL` optionally overrides the WebSocket URL; otherwise
-it is derived from `VITE_API_URL` using `ws`/`wss` and `/ws`. Use `wss` with HTTPS.
-Restart Vite after changing configuration. Keep existing environment files
-when rerunning the setup commands.
+Leave `VITE_API_URL` and `VITE_WS_URL` empty for development. HTTP and WebSocket
+requests use the frontend origin; Vite proxies `/api` and `/ws` to the backend
+on port 8000. This also works through a forwarded frontend port. Set the backend's
+`FRONTEND_ORIGIN` to the exact URL opened in the browser, including the scheme and
+port (or the forwarded HTTPS origin), then restart the backend.
+
+For a separately hosted API, set `VITE_API_URL` to its absolute origin.
+`VITE_WS_URL` optionally overrides the WebSocket URL; otherwise it is derived
+from the API origin using `ws`/`wss` and `/ws`. Use `wss` with HTTPS. Production
+hosting must route `/api` and `/ws` to the backend when using empty URLs; the Vite
+proxy applies only to the development server. Restart Vite after changing
+configuration. Keep existing environment files when rerunning the setup commands.
 
 Open http://127.0.0.1:5173/ to register or log in. Registration returns to login;
 successful login loads the current user through `/api/auth/me`. Only the access
@@ -358,7 +397,7 @@ full count available to assistive technology). Read confirmation refreshes recen
 counts across recipient tabs using the existing status event. Active visible chats
 avoid badge flashes; refresh and reconnect restore persisted unread counts.
 
-## Phase 8–15 verification
+## Phase 8–16 verification
 
 From `backend/`, install the test-only transport with
 `.venv/bin/python -m pip install httpx2`, then run
@@ -381,6 +420,10 @@ cleanup, authenticated blob rendering, URL revocation, receipts, and unread coun
 Reply checks cover same-conversation authorization, atomic rollback, flat/effective
 previews, own and text/image combinations, target edit/delete cleanup, live quotes,
 composer cancel/retry, scroll-to-target, and refresh/restart persistence.
+Reaction checks cover membership/ownership, emoji validation, concurrent duplicate
+adds, personalized counts, multiple tabs, image/reply messages, failed commits,
+edit/delete behavior, delayed responses, retry, mobile layout, reconnect, and
+persistence without changing activity, unread counts, receipts, or typing.
 
 The browser regression script is `frontend/tests/phase8.cjs`. Start the frontend
 at `http://127.0.0.1:5173` with its default API/WebSocket configuration and leave

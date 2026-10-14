@@ -1,4 +1,4 @@
-export const API_URL = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '')
+export const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '')
 const GENERIC_ERROR = 'Something went wrong. Please try again.'
 
 function apiError(message, status) {
@@ -56,7 +56,9 @@ async function request(path, { body, token, signal, method, binary = false } = {
       message = response.status === 413 ? 'Choose an image of 8 MB or smaller.' : 'Choose a valid JPEG, PNG, or WEBP image with safe dimensions and a caption up to 2000 characters.'
     } else if (response.status === 422) {
       const errors = Array.isArray(data.detail) ? data.detail : []
-      if (errors.some((error) => error.loc?.includes('reply_to_message_id'))) {
+      if (path.includes('/reactions')) {
+        message = 'Choose a supported reaction.'
+      } else if (errors.some((error) => error.loc?.includes('reply_to_message_id'))) {
         message = 'Choose a valid message to reply to.'
       } else if (errors.some((error) => error.loc?.includes('content'))) {
         message = 'Use a message between 1 and 2000 characters.'
@@ -110,7 +112,16 @@ export function safeMessage(data) {
   }
   const edited_at = data.edited_at ?? null
   if (edited_at !== null && (typeof edited_at !== 'string' || !Number.isFinite(Date.parse(edited_at)))) throw apiError(GENERIC_ERROR)
-  return { id: data.id, conversation_id: data.conversation_id, sender_id: data.sender_id, content: data.content, created_at: data.created_at, edited_at, attachment, reply_to: safeReply(data.reply_to), ...safeReceipt(data) }
+  return { id: data.id, conversation_id: data.conversation_id, sender_id: data.sender_id, content: data.content, created_at: data.created_at, edited_at, attachment, reply_to: safeReply(data.reply_to), reactions: safeReactions(data.reactions ?? []), ...safeReceipt(data) }
+}
+
+export function safeReactions(data) {
+  const order = ['👍', '❤️', '😂', '😮', '😢', '👎']
+  if (!Array.isArray(data) || data.length > order.length || new Set(data.map(item => item?.emoji)).size !== data.length) throw apiError(GENERIC_ERROR)
+  return data.map(item => {
+    if (!order.includes(item?.emoji) || !Number.isSafeInteger(item.count) || item.count <= 0 || typeof item.reacted_by_me !== 'boolean') throw apiError(GENERIC_ERROR)
+    return { emoji: item.emoji, count: item.count, reacted_by_me: item.reacted_by_me }
+  }).sort((a, b) => order.indexOf(a.emoji) - order.indexOf(b.emoji))
 }
 
 function safeReply(data) {
@@ -184,4 +195,14 @@ export async function sendImage(token, conversationId, file, caption, signal, re
 
 export async function getAttachmentBlob(token, attachmentId, signal) {
   return request(`/api/attachments/${attachmentId}/content`, { token, signal, binary: true })
+}
+
+export async function getReactions(token, messageId, signal) {
+  return safeReactions(await request(`/api/messages/${messageId}/reactions`, { token, signal }))
+}
+
+export async function changeReaction(token, messageId, emoji, removing, signal) {
+  return safeReactions(await request(`/api/messages/${messageId}/reactions${removing ? `/${encodeURIComponent(emoji)}` : ''}`, {
+    token, signal, method: removing ? 'DELETE' : 'POST', body: removing ? undefined : { emoji },
+  }))
 }

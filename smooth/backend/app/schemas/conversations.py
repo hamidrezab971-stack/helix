@@ -4,6 +4,7 @@ from typing import Annotated
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 from app.schemas.auth import UserResponse
+from app.schemas.reactions import ReactionSummary
 
 
 def trim_content(value: object) -> object:
@@ -48,6 +49,7 @@ class MessageResponse(BaseModel):
     edited_at: datetime | None = None
     attachment: AttachmentResponse | None = None
     reply_to: ReplyPreview | None = None
+    reactions: list[ReactionSummary] = Field(default_factory=list)
 
 
 class ConversationResponse(BaseModel):

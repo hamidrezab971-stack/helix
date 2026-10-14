@@ -10,6 +10,7 @@ from app.models.message_receipt import MessageReceipt
 from app.models.message_attachment import MessageAttachment
 from app.models.message_reply import MessageReply
 from app.schemas.conversations import AttachmentResponse, MessageResponse, ReplyPreview
+from app.schemas.reactions import ReactionSummary
 from app.services.images import IMAGE_MESSAGE_SENTINEL
 
 
@@ -24,7 +25,7 @@ def allocate_message_id(db: Session) -> int:
     ).returning(MessageIdSequence.last_value)).scalar_one()
 
 
-def effective_message(message: Message, receipt: MessageReceipt | None, edit: MessageEdit | None, attachment: MessageAttachment | None = None, reply_to: ReplyPreview | None = None) -> MessageResponse:
+def effective_message(message: Message, receipt: MessageReceipt | None, edit: MessageEdit | None, attachment: MessageAttachment | None = None, reply_to: ReplyPreview | None = None, reactions: list[ReactionSummary] | None = None) -> MessageResponse:
     return MessageResponse.model_validate(message).model_copy(update={
         "content": "" if attachment and message.content == IMAGE_MESSAGE_SENTINEL else edit.content if edit else message.content,
         "edited_at": edit.edited_at if edit else None,
@@ -32,6 +33,7 @@ def effective_message(message: Message, receipt: MessageReceipt | None, edit: Me
         "read_at": receipt.read_at if receipt else None,
         "attachment": AttachmentResponse.model_validate(attachment) if attachment else None,
         "reply_to": reply_to,
+        "reactions": reactions or [],
     })
 
 

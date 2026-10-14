@@ -38,7 +38,7 @@ async function newPage(context) {
   const page = await context.newPage()
   page.on('pageerror', error => errors.push(error.message))
   await page.addInitScript(() => {
-    window.realtimeTest = { authenticated: 0, closed: 0, events: [], received: [], sentTyping: [], statuses: [] }
+    window.realtimeTest = { authenticated: 0, closed: 0, events: [], received: [], sentTyping: [], statuses: [], mutations: [] }
     window.imageUrls = { created: [], revoked: [] }
     const originalCreate = URL.createObjectURL.bind(URL), originalRevoke = URL.revokeObjectURL.bind(URL)
     URL.createObjectURL = blob => { const url = originalCreate(blob); window.imageUrls.created.push(url); return url }
@@ -56,6 +56,7 @@ async function newPage(context) {
             if (data.type === 'message:new') window.realtimeTest.events.push(data.data)
             if (data.type === 'message:new' && window.realtimeTest.dropNewMessage) event.stopImmediatePropagation()
             if (data.type === 'message:status') window.realtimeTest.statuses.push(data.data)
+            if (data.type === 'message:updated') window.realtimeTest.mutations.push(data.data)
             if (data.type.startsWith('presence:') || data.type.startsWith('typing:')) window.realtimeTest.received.push(data)
           } catch {}
         })
@@ -205,6 +206,23 @@ async function removeById(page, id) {
   const response = page.waitForResponse(r => r.request().method() === 'DELETE' && r.url().endsWith(`/api/messages/${id}`))
   await rowById(page, id).getByRole('button', { name: 'Delete', exact: true }).click()
   assert.equal((await response).status(), 204)
+}
+
+async function chooseReaction(page, id, name) {
+  await rowById(page, id).getByRole('button', { name: 'React', exact: true }).click()
+  const response = page.waitForResponse(r => r.url().includes(`/api/messages/${id}/reactions`) && ['POST', 'DELETE'].includes(r.request().method()))
+  await rowById(page, id).getByRole('group', { name: 'Choose reaction' }).getByRole('button', { name: new RegExp(`^(Add|Remove) ${name} reaction$`) }).click()
+  assert.ok([200, 201].includes((await response).status()))
+  await expect(rowById(page, id).getByRole('group', { name: 'Choose reaction' })).toHaveCount(0)
+}
+
+async function reaction(page, id, name, count, mine = false) {
+  const button = rowById(page, id).getByRole('group', { name: 'Message reactions' }).getByRole('button', { name: new RegExp(`^\\d+ ${name} reactions?\\.`) })
+  if (!count) await expect(button).toHaveCount(0)
+  else {
+    await expect(button).toHaveAccessibleName(new RegExp(`^${count} ${name} reactions?\\.`))
+    await expect(button).toHaveAttribute('aria-pressed', String(mine))
+  }
 }
 
 async function main() {
@@ -358,13 +376,15 @@ async function main() {
   await expect(alice.getByLabel('Contact presence')).toHaveText('Online')
   console.log('PASS conversation isolation, logout socket cleanup, offline recipient history')
 
+  const beforeRestart = await Promise.all([alice, bob].map(page => page.evaluate(() => window.realtimeTest.authenticated)))
   await stopBackend()
   await alice.waitForFunction(() => window.realtimeTest.closed >= 1)
   await new Promise(resolve => setTimeout(resolve, 2500))
   await expect(alice.locator('#message-content')).toBeEnabled()
   await startBackend()
-  await alice.waitForFunction(() => window.realtimeTest.authenticated >= 2)
-  await bob.waitForFunction(() => window.realtimeTest.authenticated >= 3)
+  for (const [index, page] of [alice, bob].entries()) {
+    await page.waitForFunction(previous => window.realtimeTest.authenticated > previous, beforeRestart[index])
+  }
   for (const page of [alice, bob]) await expect(page.getByLabel('Contact presence')).toHaveText('Online')
   await send(bob, 'after restart')
   await once(alice, 'after restart')
@@ -735,6 +755,127 @@ async function main() {
   await expect(rowById(alice, answer.id).getByLabel('Reply preview')).toHaveCount(0)
   console.log('PASS reply action/cancel/retry, same conversation, live quotes, scroll-to-target, own replies, edited reply/target, deleted target/reply cleanup, text/image combinations, refresh/restart persistence')
 
+  await openRecent(bob, names.alice)
+  const reactionTarget = await send(bob, 'Reaction Hello')
+  await status(bob, 'Reaction Hello', 'Read')
+  await send(charlie, 'New Charlie activity')
+  await expect(alice.locator('.recent-row').first()).toContainText(names.charlie)
+  await unread(alice, names.charlie, 1)
+  const typingBeforeReactions = await alice.evaluate(() => window.realtimeTest.sentTyping.length)
+  await chooseReaction(alice, reactionTarget.id, 'thumbs up')
+  await reaction(alice, reactionTarget.id, 'thumbs up', 1, true)
+  await reaction(bob, reactionTarget.id, 'thumbs up', 1, false)
+  const reactionTab = await newPage(aliceContext)
+  await openRecent(reactionTab, names.bob)
+  await reaction(reactionTab, reactionTarget.id, 'thumbs up', 1, true)
+  await chooseReaction(bob, reactionTarget.id, 'thumbs up')
+  for (const page of [alice, bob, reactionTab]) await reaction(page, reactionTarget.id, 'thumbs up', 2, true)
+  await chooseReaction(alice, reactionTarget.id, 'heart')
+  await reaction(alice, reactionTarget.id, 'heart', 1, true)
+  await reaction(bob, reactionTarget.id, 'heart', 1, false)
+  await rowById(alice, reactionTarget.id).getByRole('group', { name: 'Message reactions' }).getByRole('button', { name: /^2 thumbs up reactions/ }).click()
+  await reaction(alice, reactionTarget.id, 'thumbs up', 1, false)
+  await reaction(reactionTab, reactionTarget.id, 'thumbs up', 1, false)
+  await reaction(bob, reactionTarget.id, 'thumbs up', 1, true)
+  await alice.route(`**/api/messages/${reactionTarget.id}/reactions`, route => route.request().method() === 'POST'
+    ? route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"test unavailable"}' }) : route.continue())
+  await rowById(alice, reactionTarget.id).getByRole('button', { name: 'React', exact: true }).click()
+  await expect(rowById(alice, reactionTarget.id).getByRole('group', { name: 'Choose reaction' }).getByRole('button')).toHaveCount(6)
+  await rowById(alice, reactionTarget.id).getByRole('button', { name: 'Add sad reaction', exact: true }).click()
+  await expect(rowById(alice, reactionTarget.id).getByRole('alert')).toContainText('Unable to change reaction')
+  await reaction(alice, reactionTarget.id, 'thumbs up', 1, false)
+  await alice.unroute(`**/api/messages/${reactionTarget.id}/reactions`)
+  await rowById(alice, reactionTarget.id).getByRole('button', { name: 'Add sad reaction', exact: true }).click()
+  await reaction(alice, reactionTarget.id, 'sad', 1, true)
+
+  // Capture an old response and release it after a newer socket-driven fetch.
+  let releaseOld, capturedOld
+  const holdOld = new Promise(resolve => { releaseOld = resolve })
+  const oldCaptured = new Promise(resolve => { capturedOld = resolve })
+  let delayNextGet = true
+  await alice.route(`**/api/messages/${reactionTarget.id}/reactions`, async route => {
+    if (route.request().method() !== 'GET' || !delayNextGet) return route.continue()
+    delayNextGet = false
+    const response = await route.fetch()
+    capturedOld()
+    await holdOld
+    try { await route.fulfill({ response }) } catch {}
+  })
+  await alice.evaluate(message => window.realtimeTest.socket.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ type: 'message:reactions', data: { message_id: message.id, conversation_id: message.conversation_id } }) })), reactionTarget)
+  await oldCaptured
+  await rowById(bob, reactionTarget.id).getByRole('group', { name: 'Message reactions' }).getByRole('button', { name: /^1 thumbs up reaction/ }).click()
+  await reaction(alice, reactionTarget.id, 'thumbs up', 0)
+  releaseOld()
+  await alice.unroute(`**/api/messages/${reactionTarget.id}/reactions`)
+  await reaction(alice, reactionTarget.id, 'thumbs up', 0)
+  await reaction(reactionTab, reactionTarget.id, 'thumbs up', 0)
+  await expect(alice.locator('.recent-row').first()).toContainText(names.charlie)
+  await unread(alice, names.charlie, 1)
+  await unread(alice, names.bob, 0)
+  await expect(recentRow(alice, names.bob).getByLabel('Last message preview')).toHaveText('Reaction Hello')
+  assert.equal(await alice.evaluate(() => window.realtimeTest.sentTyping.length), typingBeforeReactions)
+  await alice.reload()
+  await openRecent(alice, names.bob)
+  await bob.reload()
+  await openRecent(bob, names.alice)
+  await reaction(alice, reactionTarget.id, 'heart', 1, true)
+  await reaction(bob, reactionTarget.id, 'heart', 1, false)
+  // A shared edit arriving before history must preserve its personalized summary.
+  const historyTab = await newPage(aliceContext)
+  await historyTab.waitForFunction(() => window.realtimeTest.authenticated === 1)
+  let releaseHistory, capturedHistory
+  const holdHistory = new Promise(resolve => { releaseHistory = resolve })
+  const historyCaptured = new Promise(resolve => { capturedHistory = resolve })
+  await historyTab.route('**/api/conversations/*/messages', async route => {
+    const response = await route.fetch()
+    capturedHistory()
+    await holdHistory
+    await route.fulfill({ response })
+  })
+  const openingHistory = openRecent(historyTab, names.bob)
+  await historyCaptured
+  await editById(bob, reactionTarget.id, 'Reaction Hello edited while loading')
+  await historyTab.waitForFunction(id => window.realtimeTest.mutations.some(message => message.id === id), reactionTarget.id)
+  releaseHistory()
+  await openingHistory
+  await expect(rowById(historyTab, reactionTarget.id)).toContainText('Reaction Hello edited while loading')
+  await reaction(historyTab, reactionTarget.id, 'heart', 1, true)
+  await historyTab.close()
+  await bob.getByRole('button', { name: 'Log out' }).click()
+  await chooseReaction(alice, offlinePhoto.id, 'heart')
+  await reaction(alice, offlinePhoto.id, 'heart', 1, true)
+  await chooseReaction(alice, photoAnswer.id, 'laughing')
+  await reaction(alice, photoAnswer.id, 'laughing', 1, true)
+  await bob.locator('#login-username').fill(names.bob)
+  await bob.locator('#login-password').fill('password123')
+  await bob.getByRole('button', { name: 'Log in', exact: true }).click()
+  await openRecent(bob, names.alice)
+  await reaction(bob, offlinePhoto.id, 'heart', 1, false)
+  await reaction(bob, photoAnswer.id, 'laughing', 1, false)
+  await editById(alice, photoAnswer.id, 'Reply to photo with reactions')
+  await expect(rowById(bob, photoAnswer.id)).toContainText('Reply to photo with reactions')
+  await reaction(alice, photoAnswer.id, 'laughing', 1, true)
+  await reaction(bob, photoAnswer.id, 'laughing', 1, false)
+  await expect(rowById(bob, photoAnswer.id).getByLabel('Reply preview')).toContainText('Photo · Offline photo')
+  await removeById(alice, photoAnswer.id)
+  await expect(rowById(bob, photoAnswer.id)).toHaveCount(0)
+  await removeById(bob, reactionTarget.id)
+  await expect(rowById(alice, reactionTarget.id)).toHaveCount(0)
+  await expect(rowById(reactionTab, reactionTarget.id)).toHaveCount(0)
+  const beforeReactionRestart = await alice.evaluate(() => window.realtimeTest.authenticated)
+  await stopBackend()
+  await startBackend()
+  await alice.waitForFunction(previous => window.realtimeTest.authenticated > previous, beforeReactionRestart)
+  await reaction(alice, offlinePhoto.id, 'heart', 1, true)
+  await alice.setViewportSize({ width: 375, height: 812 })
+  await rowById(alice, offlinePhoto.id).getByRole('button', { name: 'React', exact: true }).click()
+  await expect(rowById(alice, offlinePhoto.id).getByRole('group', { name: 'Choose reaction' }).getByRole('button')).toHaveCount(6)
+  assert.equal(await alice.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
+  await rowById(alice, offlinePhoto.id).getByRole('button', { name: 'React', exact: true }).click()
+  await alice.setViewportSize({ width: 1280, height: 800 })
+  await reactionTab.close()
+  console.log('PASS reaction picker/toggle, per-user flags, multiple emoji/users/tabs, failure retry, duplicate/out-of-order refresh, offline persistence, image/reply reactions, edit preservation, delete cleanup, no activity/unread/typing effects, mobile/restart')
+
   // Explicit failure and retry; no timer-based polling is used by the app.
   await alice.route('**/api/conversations', route => route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"test unavailable"}' }))
   await alice.reload()
@@ -751,13 +892,15 @@ async function main() {
   const count = execFileSync(path.join(backendDirectory, '.venv/bin/python'), ['-c', 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("SELECT count(*) FROM messages").fetchone()[0])', `${temporary}/test.db`], { encoding: 'utf8' })
   assert.equal(Number(count.trim()), 24)
   const receipts = execFileSync(path.join(backendDirectory, '.venv/bin/python'), ['-c', 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("SELECT count(*), count(DISTINCT message_id), count(delivered_at), count(read_at) FROM message_receipts").fetchone())', `${temporary}/test.db`], { encoding: 'utf8' })
-  assert.equal(receipts.trim(), '(24, 24, 24, 24)')
+  assert.equal(receipts.trim(), '(24, 24, 24, 23)')
   const edits = execFileSync(path.join(backendDirectory, '.venv/bin/python'), ['-c', 'import sqlite3,sys; db=sqlite3.connect(sys.argv[1]); print(db.execute("SELECT count(*), min(content) FROM message_edits").fetchone()); print(db.execute("PRAGMA foreign_key_check").fetchall())', `${temporary}/test.db`], { encoding: 'utf8' })
   assert.equal(edits.trim(), "(2, 'Offline edit persists')\n[]")
   const attachments = execFileSync(path.join(backendDirectory, '.venv/bin/python'), ['-c', 'import sqlite3,sys,pathlib; root=pathlib.Path(sys.argv[1]); db=sqlite3.connect(root / "test.db"); names=[r[0] for r in db.execute("SELECT storage_name FROM message_attachments")]; print(len(names), len(list((root / "uploads/images").iterdir())), all((root / "uploads/images" / name).is_file() for name in names))', temporary], { encoding: 'utf8' })
   assert.equal(attachments.trim(), '4 4 True')
   const replies = execFileSync(path.join(backendDirectory, '.venv/bin/python'), ['-c', 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("SELECT count(*) FROM message_replies").fetchone()[0])', `${temporary}/test.db`], { encoding: 'utf8' })
-  assert.equal(Number(replies.trim()), 1)
+  assert.equal(Number(replies.trim()), 0)
+  const reactions = execFileSync(path.join(backendDirectory, '.venv/bin/python'), ['-c', 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("SELECT count(*), min(emoji) FROM message_reactions").fetchone())', `${temporary}/test.db`], { encoding: 'utf8' })
+  assert.equal(reactions.trim(), "(1, '❤️')")
   assert.deepEqual(errors, [])
   console.log('PASS backend restart/reconnect, exactly 24 persisted messages, zero uncaught browser errors')
   console.log('PASS inactive Delivered, active Read, receipt-before-HTTP race, multiple-tab receipts, offline Sent/history Read, refresh persistence, forged acknowledgements, 24 persisted receipts')

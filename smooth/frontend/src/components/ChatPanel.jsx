@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getMessages, getOrCreateConversation, sendMessage, sendImage, editMessage, deleteMessage, mergeReceipt } from '../services/api.js'
 import AttachmentImage from './AttachmentImage.jsx'
+import ReactionBar from './ReactionBar.jsx'
 
 function mergeMessages(current, incoming) {
   const messages = new Map(current.map((message) => [message.id, message]))
@@ -20,7 +21,7 @@ function replyText(preview) {
   return preview.attachment_kind === 'image' ? `Photo${preview.content ? ` · ${preview.content}` : ''}` : preview.content
 }
 
-export default function ChatPanel({ user, selectedUser, initialConversation, onConversationOpened, onMessageSent, onMessageMutated, subscribeToMutations, token, onUnauthorized, subscribeToMessages, subscribeToStatus, acknowledge, subscribeToTyping, sendTyping, isOnline }) {
+export default function ChatPanel({ user, selectedUser, initialConversation, onConversationOpened, onMessageSent, onMessageMutated, subscribeToMutations, subscribeToReactions, token, onUnauthorized, subscribeToMessages, subscribeToStatus, acknowledge, subscribeToTyping, sendTyping, isOnline }) {
   const [conversation, setConversation] = useState(null)
   const [messages, setMessages] = useState([])
   const [stage, setStage] = useState('opening')
@@ -80,7 +81,9 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
       const target = effective.reply_to
       const targetUpdate = target && updates.current.get(target.id)
       const reply_to = target && deletedIds.current.has(target.id) ? null : targetUpdate ? replyPreview(targetUpdate) : target
-      return { ...effective, reply_to, ...mergeReceipt(receipts.current.get(message.id), effective) }
+      // Shared edits omit personalized reactions; keep the HTTP snapshot when
+      // an edit arrives before that snapshot finishes loading.
+      return { ...effective, reactions: message.reactions, reply_to, ...mergeReceipt(receipts.current.get(message.id), effective) }
     })))
   }, [])
 
@@ -339,6 +342,7 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
                         </span>
                       )}
                     </p>
+                    <ReactionBar message={message} token={token} subscribeToReactions={subscribeToReactions} onUnauthorized={onUnauthorized} />
                     <button type="button" className="text-button min-h-8 text-xs" disabled={sending} onClick={() => { setReplyTarget(replyPreview(message)); document.getElementById('message-content')?.focus() }}>Reply</button>
                     {message.sender_id === user.id && (editingId === message.id ? (
                       <form aria-label="Edit message" className="mt-2 w-full max-w-sm space-y-2" onSubmit={(event) => performAction(message, false, event)}>

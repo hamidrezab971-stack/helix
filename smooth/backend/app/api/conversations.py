@@ -18,6 +18,7 @@ from app.models.user import User
 from app.realtime.manager import manager
 from app.schemas.auth import UserResponse
 from app.services.messages import allocate_message_id, effective_message, reply_previews, validate_reply_target
+from app.services.reactions import reaction_summaries
 from app.schemas.conversations import (
     ConversationResponse,
     MessageRequest,
@@ -159,7 +160,8 @@ def get_messages(
             .order_by(Message.created_at.asc(), Message.id.asc())
         ))
     previews = reply_previews(db, [row[0] for row in rows])
-    return [effective_message(message, receipt, edit, attachment, previews.get(message.id)) for message, receipt, edit, attachment in rows]
+    reactions = reaction_summaries(db, [row[0].id for row in rows], user.id)
+    return [effective_message(message, receipt, edit, attachment, previews.get(message.id), reactions.get(message.id)) for message, receipt, edit, attachment in rows]
 
 
 @router.post(

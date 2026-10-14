@@ -39,6 +39,8 @@ from app.models.message_receipt import MessageReceipt
 from app.models.message_edit import MessageEdit
 from app.models.message_attachment import MessageAttachment
 from app.models.message_reply import MessageReply
+from app.models.message_reaction import MessageReaction
+from app.core.reactions import ALLOWED_REACTIONS
 from app.services.images import IMAGE_MESSAGE_SENTINEL, MAX_IMAGE_BYTES, image_path
 from app.models.user import User
 from app.realtime.manager import ConnectionManager, manager
@@ -401,7 +403,7 @@ class Phase8Tests(unittest.TestCase):
             for field in ('created_at', 'delivered_at', 'read_at'):
                 self.assertEqual(edited[field], receipt_before[field])
             for socket in (alice, bob, alice_tab):
-                self.assertEqual(self.receive_type(socket, 'message:updated'), {'type': 'message:updated', 'data': edited})
+                self.assertEqual(self.receive_type(socket, 'message:updated'), {'type': 'message:updated', 'data': {key: value for key, value in edited.items() if key != 'reactions'}})
         with SessionLocal() as db:
             self.assertEqual(db.get(Message, message_id).content, 'Hello Bbo')
             edit_id = db.scalar(select(MessageEdit.id))
@@ -702,6 +704,106 @@ class Phase8Tests(unittest.TestCase):
         self.assertIsNone(history[text['id']]['reply_to'])
         self.assertIsNone(history[image_reply['id']]['reply_to'])
         self.assertIsNotNone(history[image_reply['id']]['attachment'])
+
+
+
+    def test_reaction_aggregation_ownership_idempotency_and_metadata(self):
+        target = self.client.post(self.path, headers=self.headers('bob'), json={'content': 'React to Hello'}).json()
+        endpoint = f"/api/messages/{target['id']}/reactions"
+        other = self.client.post(f'/api/conversations/with/{self.users["charlie"]}', headers=self.headers('alice')).json()['id']
+        self.client.post(f'/api/conversations/{other}/messages', headers=self.headers('alice'), json={'content': 'Newer conversation'})
+        recents = self.client.get('/api/conversations', headers=self.headers('alice')).json()
+        history = self.client.get(self.path, headers=self.headers('alice')).json()[0]
+        self.assertEqual(history['reactions'], [])
+        with self.client.websocket_connect('/ws') as alice, self.client.websocket_connect('/ws') as bob:
+            self.authenticate(alice, 'alice')
+            self.authenticate(bob, 'bob')
+            first = self.client.post(endpoint, headers=self.headers('alice'), json={'emoji': '👍'})
+            self.assertEqual(first.status_code, 201)
+            expected = {'type': 'message:reactions', 'data': {'message_id': target['id'], 'conversation_id': target['conversation_id']}}
+            for socket in (alice, bob):
+                self.assertEqual(self.receive_type(socket, 'message:reactions'), expected)
+            self.assertEqual(self.client.post(endpoint, headers=self.headers('alice'), json={'emoji': '👍'}).status_code, 200)
+            self.assertEqual(self.client.post(endpoint, headers=self.headers('bob'), json={'emoji': '👍'}).status_code, 201)
+            for name in ('alice', 'bob'):
+                self.assertEqual(self.client.get(endpoint, headers=self.headers(name)).json(), [{'emoji': '👍', 'count': 2, 'reacted_by_me': True}])
+            self.client.post(endpoint, headers=self.headers('alice'), json={'emoji': '❤️'})
+            removed = self.client.delete(endpoint + '/👍', headers=self.headers('alice')).json()
+            self.assertEqual(removed, [{'emoji': '👍', 'count': 1, 'reacted_by_me': False}, {'emoji': '❤️', 'count': 1, 'reacted_by_me': True}])
+            self.assertEqual(self.client.delete(endpoint + '/👍', headers=self.headers('alice'), params={'user_id': self.users['bob']}).json(), removed)
+        with SessionLocal() as db:
+            self.assertEqual(db.scalar(select(func.count(MessageReaction.id))), 2)
+            self.assertEqual(db.scalar(select(MessageReaction.user_id).where(MessageReaction.emoji == '👍')), self.users['bob'])
+        for name in ('alice', 'bob'):
+            summary = self.client.get(endpoint, headers=self.headers(name)).json()
+            self.assertEqual(self.client.get(self.path, headers=self.headers(name)).json()[0]['reactions'], summary)
+            self.assertTrue(all(set(item) == {'emoji', 'count', 'reacted_by_me'} for item in summary))
+        after = self.client.get(self.path, headers=self.headers('alice')).json()[0]
+        for key in ('created_at', 'delivered_at', 'read_at'):
+            self.assertEqual(after[key], history[key])
+        self.assertEqual(self.client.get('/api/conversations', headers=self.headers('alice')).json(), recents)
+        engine.dispose()
+        self.assertEqual(self.client.get(endpoint, headers=self.headers('alice')).json(), removed)
+
+    def test_reaction_security_concurrency_edit_preservation_and_failed_commit(self):
+        target = self.client.post(self.path, headers=self.headers('alice'), json={'content': 'Protected reaction target'}).json()
+        endpoint = f"/api/messages/{target['id']}/reactions"
+        for method, path, body in (('get', endpoint, {}), ('post', endpoint, {'json': {'emoji': '👍'}}), ('delete', endpoint + '/👍', {})):
+            self.assertEqual(getattr(self.client, method)(path, **body).status_code, 401)
+            self.assertEqual(getattr(self.client, method)(path, headers=self.headers('charlie'), **body).status_code, 404)
+        for emoji in ('', 'random', '😀', '👍👍', '<script>', '👍🏽', '❤', False):
+            self.assertEqual(self.client.post(endpoint, headers=self.headers('alice'), json={'emoji': emoji}).status_code, 422)
+        self.assertEqual(self.client.delete(endpoint + '/random', headers=self.headers('alice')).status_code, 422)
+        for message_id in (0, -1, 'oops', 2**63):
+            self.assertEqual(self.client.post(f'/api/messages/{message_id}/reactions', headers=self.headers('alice'), json={'emoji': '👍'}).status_code, 422)
+        for method, suffix, body in (('get', '', {}), ('post', '', {'json': {'emoji': '👍'}}), ('delete', '/👍', {})):
+            self.assertEqual(getattr(self.client, method)('/api/messages/99999/reactions' + suffix, headers=self.headers('alice'), **body).status_code, 404)
+        with ThreadPoolExecutor(max_workers=4) as threads:
+            responses = list(threads.map(lambda _: self.client.post(endpoint, headers=self.headers('bob'), json={'emoji': '❤️'}), range(8)))
+        self.assertEqual(sum(response.status_code == 201 for response in responses), 1)
+        self.assertTrue(all(response.status_code in (200, 201) for response in responses))
+        with SessionLocal() as db:
+            self.assertEqual(db.scalar(select(func.count(MessageReaction.id))), 1)
+        with self.client.websocket_connect('/ws') as alice, self.client.websocket_connect('/ws') as bob:
+            self.authenticate(alice, 'alice')
+            self.authenticate(bob, 'bob')
+            edited = self.client.patch(f"/api/messages/{target['id']}", headers=self.headers('alice'), json={'content': 'Edited reacted target'}).json()
+            self.assertEqual(edited['reactions'], [{'emoji': '❤️', 'count': 1, 'reacted_by_me': False}])
+            for socket in (alice, bob):
+                event = self.receive_type(socket, 'message:updated')
+                self.assertNotIn('reactions', event['data'])
+        self.assertEqual(self.client.get(self.path, headers=self.headers('bob')).json()[0]['reactions'][0]['reacted_by_me'], True)
+        for method, path, name, body in (('post', endpoint, 'alice', {'json': {'emoji': '👍'}}), ('delete', endpoint + '/❤️', 'bob', {})):
+            with patch('app.api.messages.manager.broadcast') as broadcast, patch('sqlalchemy.orm.Session.commit', side_effect=RuntimeError('commit failed')):
+                with self.assertRaisesRegex(RuntimeError, 'commit failed'):
+                    getattr(self.client, method)(path, headers=self.headers(name), **body)
+                broadcast.assert_not_called()
+        self.assertEqual(self.client.get(endpoint, headers=self.headers('alice')).json(), [{'emoji': '❤️', 'count': 1, 'reacted_by_me': False}])
+        self.client.delete(f"/api/messages/{target['id']}", headers=self.headers('alice'))
+        with SessionLocal() as db:
+            self.assertEqual(db.scalar(select(func.count(MessageReaction.id))), 0)
+        self.assertEqual(self.client.get(endpoint, headers=self.headers('alice')).status_code, 404)
+
+    def test_image_reply_reactions_fixed_order_and_persistence(self):
+        target = self.client.post(self.path, headers=self.headers('alice'), json={'content': 'Reply target'}).json()
+        image = self.client.post(self.path + '/image', headers=self.headers('bob'), files={'file': ('image.png', self.image_bytes(), 'image/png')}, data={'reply_to_message_id': str(target['id'])}).json()
+        text = self.client.post(self.path, headers=self.headers('alice'), json={'content': 'Reply with reactions', 'reply_to_message_id': image['id']}).json()
+        for message in (image, text):
+            endpoint = f"/api/messages/{message['id']}/reactions"
+            for emoji in reversed(ALLOWED_REACTIONS):
+                self.assertEqual(self.client.post(endpoint, headers=self.headers('alice'), json={'emoji': emoji}).status_code, 201)
+            summary = self.client.get(endpoint, headers=self.headers('alice')).json()
+            self.assertEqual([item['emoji'] for item in summary], list(ALLOWED_REACTIONS))
+            self.assertTrue(all(item['count'] == 1 and item['reacted_by_me'] for item in summary))
+            self.assertTrue(all(not item['reacted_by_me'] for item in self.client.get(endpoint, headers=self.headers('bob')).json()))
+        engine.dispose()
+        history = {message['id']: message for message in self.client.get(self.path, headers=self.headers('bob')).json()}
+        self.assertEqual(len(history[image['id']]['reactions']), 6)
+        self.assertEqual(history[text['id']]['reply_to']['id'], image['id'])
+        for message in (image, text):
+            self.client.delete(f"/api/messages/{message['id']}", headers=self.headers('bob' if message == image else 'alice'))
+        with SessionLocal() as db:
+            self.assertEqual(db.scalar(select(func.count(MessageReaction.id))), 0)
 
 
 class ManagerCleanupTests(unittest.IsolatedAsyncioTestCase):

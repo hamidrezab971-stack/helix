@@ -2,12 +2,12 @@ import { API_URL, safeMessage, safeReceipt } from './api.js'
 
 function websocketUrl() {
   if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL
-  const url = new URL(`${API_URL}/ws`)
+  const url = new URL(`${API_URL}/ws`, window.location.origin)
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
   return url.toString()
 }
 
-export function connectRealtime(token, { onMessage, onMutation, onStatus, onUnauthorized, onPresenceSnapshot, onPresenceUpdate, onTyping, onDisconnect }) {
+export function connectRealtime(token, { onMessage, onMutation, onReactions, onStatus, onUnauthorized, onPresenceSnapshot, onPresenceUpdate, onTyping, onDisconnect }) {
   let socket
   let timer
   let stopped = false
@@ -96,6 +96,9 @@ export function connectRealtime(token, { onMessage, onMutation, onStatus, onUnau
       if (!authenticated) return
       const data = payload?.data
       const validId = (id) => Number.isSafeInteger(id) && id > 0
+      if (payload?.type === 'message:reactions' && validId(data?.message_id) && validId(data?.conversation_id)) {
+        onReactions({ message_id: data.message_id, conversation_id: data.conversation_id })
+      }
       if (payload?.type === 'message:updated') {
         let message
         try { message = safeMessage(data) } catch { return }
