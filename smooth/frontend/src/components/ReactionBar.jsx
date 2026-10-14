@@ -3,7 +3,7 @@ import { changeReaction, getReactions } from '../services/api.js'
 
 const choices = [['👍', 'thumbs up'], ['❤️', 'heart'], ['😂', 'laughing'], ['😮', 'surprised'], ['😢', 'sad'], ['👎', 'thumbs down']]
 
-export default function ReactionBar({ message, token, subscribeToReactions, onUnauthorized }) {
+export default function ReactionBar({ message, token, onChanged, onUnauthorized }) {
   // Seed from personalized history; subsequent state comes only from this
   // user's reaction endpoint, never from a shared message edit event.
   const [summary, setSummary] = useState(message.reactions)
@@ -34,15 +34,19 @@ export default function ReactionBar({ message, token, subscribeToReactions, onUn
       }
     }
     refreshRef.current = refresh
-    const unsubscribe = subscribeToReactions(message.id, refresh)
     return () => {
       active.current = false
       ++version.current
-      unsubscribe()
       fetchController.current?.abort()
       actionController.current?.abort()
     }
-  }, [message.id, token, subscribeToReactions, onUnauthorized])
+  }, [message.id, token, onUnauthorized])
+
+  useEffect(() => {
+    ++version.current
+    fetchController.current?.abort()
+    setSummary(message.reactions)
+  }, [message.reactions])
 
   async function toggle(emoji) {
     if (pending.current) return
@@ -59,7 +63,7 @@ export default function ReactionBar({ message, token, subscribeToReactions, onUn
       if (!active.current || controller.signal.aborted) return
       if (current === version.current) setSummary(latest)
       setPicker(false)
-      refreshRef.current?.()
+      onChanged()
     } catch (error) {
       if (!active.current || controller.signal.aborted || error.name === 'AbortError') return
       if (error.status === 401) onUnauthorized()

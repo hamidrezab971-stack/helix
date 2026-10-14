@@ -46,6 +46,7 @@ async function newPage(context) {
     const NativeWebSocket = window.WebSocket
     window.WebSocket = class extends NativeWebSocket {
       constructor(...args) {
+        if (window.realtimeTest.pauseRealtime) throw new Error('Realtime paused by regression test')
         super(...args)
         window.realtimeTest.socket = this
         this.addEventListener('close', () => window.realtimeTest.closed++)
@@ -168,6 +169,7 @@ function photo(page, id) {
 }
 
 async function visiblePhoto(page, id) {
+  await page.locator(`[data-attachment-placeholder="${id}"]`).scrollIntoViewIfNeeded()
   await expect(photo(page, id)).toHaveCount(1)
   await expect(photo(page, id)).toBeVisible()
   await expect.poll(() => photo(page, id).evaluate(image => image.complete && image.naturalWidth === 640)).toBe(true)
@@ -632,7 +634,7 @@ async function main() {
   await visiblePhoto(bob, unreadPhoto.attachment.id)
   await status(alice, 'Unread photo', 'Read')
   await unread(bob, names.alice, 0)
-  const removedUrls = await Promise.all([alice, bob, imageTab].map(page => photo(page, firstPhoto.attachment.id).getAttribute('src')))
+  const removedUrls = await Promise.all([alice, bob, imageTab].map(async page => { await visiblePhoto(page, firstPhoto.attachment.id); return photo(page, firstPhoto.attachment.id).getAttribute('src') }))
   await remove(alice, 'Vacation photo')
   for (const [index, page] of [alice, bob, imageTab].entries()) {
     await expect(photo(page, firstPhoto.attachment.id)).toHaveCount(0)
@@ -793,8 +795,8 @@ async function main() {
   const holdOld = new Promise(resolve => { releaseOld = resolve })
   const oldCaptured = new Promise(resolve => { capturedOld = resolve })
   let delayNextGet = true
-  await alice.route(`**/api/messages/${reactionTarget.id}/reactions`, async route => {
-    if (route.request().method() !== 'GET' || !delayNextGet) return route.continue()
+  await alice.route('**/api/conversations/*/sync?*', async route => {
+    if (route.request().method() !== 'POST' || !delayNextGet) return route.continue()
     delayNextGet = false
     const response = await route.fetch()
     capturedOld()
@@ -804,9 +806,8 @@ async function main() {
   await alice.evaluate(message => window.realtimeTest.socket.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ type: 'message:reactions', data: { message_id: message.id, conversation_id: message.conversation_id } }) })), reactionTarget)
   await oldCaptured
   await rowById(bob, reactionTarget.id).getByRole('group', { name: 'Message reactions' }).getByRole('button', { name: /^1 thumbs up reaction/ }).click()
-  await reaction(alice, reactionTarget.id, 'thumbs up', 0)
   releaseOld()
-  await alice.unroute(`**/api/messages/${reactionTarget.id}/reactions`)
+  await alice.unroute('**/api/conversations/*/sync?*')
   await reaction(alice, reactionTarget.id, 'thumbs up', 0)
   await reaction(reactionTab, reactionTarget.id, 'thumbs up', 0)
   await expect(alice.locator('.recent-row').first()).toContainText(names.charlie)
@@ -826,7 +827,7 @@ async function main() {
   let releaseHistory, capturedHistory
   const holdHistory = new Promise(resolve => { releaseHistory = resolve })
   const historyCaptured = new Promise(resolve => { capturedHistory = resolve })
-  await historyTab.route('**/api/conversations/*/messages', async route => {
+  await historyTab.route('**/api/conversations/*/messages/page?*', async route => {
     const response = await route.fetch()
     capturedHistory()
     await holdHistory
@@ -906,8 +907,11 @@ async function main() {
   console.log('PASS inactive Delivered, active Read, receipt-before-HTTP race, multiple-tab receipts, offline Sent/history Read, refresh persistence, forged acknowledgements, 24 persisted receipts')
 }
 
-main().catch(error => { console.error(error); process.exitCode = 1 }).finally(async () => {
+if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 }).finally(async () => {
   if (browser) await browser.close()
   await stopBackend()
   fs.rmSync(temporary, { recursive: true, force: true })
 })
+
+module.exports = { startBackend, stopBackend, newPage, registerAndLogin, select, openRecent,
+  send, status, rowById, chooseReaction, reaction, visiblePhoto, names, temporary, backendDirectory, errors }

@@ -21,6 +21,7 @@ from app.models.message_reply import MessageReply
 from app.models.user import User
 from app.realtime.manager import manager
 from app.schemas.conversations import MessageResponse
+from app.services.sync import record_event
 from app.services.images import IMAGE_MESSAGE_SENTINEL, MAX_IMAGE_BYTES, image_path, remove_image, store_image
 from app.services.messages import allocate_message_id, effective_message, reply_previews, validate_reply_target
 
@@ -46,6 +47,7 @@ def create_image_message(conversation_id: int, user_id: int, caption: str, file:
             db.add(MessageReply(message_id=message.id, reply_to_message_id=reply_to_message_id))
         db.flush()
         saved = effective_message(message, receipt, None, attachment, reply_previews(db, [message]).get(message.id))
+        record_event(db, conversation_id, 'new', message.id)
         db.commit()
     except BaseException as error:
         db.rollback()

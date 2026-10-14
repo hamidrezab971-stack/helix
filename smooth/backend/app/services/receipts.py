@@ -7,6 +7,7 @@ from app.database.database import SessionLocal
 from app.models.conversation_member import ConversationMember
 from app.models.message import Message
 from app.models.message_receipt import MessageReceipt
+from app.services.sync import record_event
 
 
 def initialize_receipts() -> None:
@@ -48,6 +49,8 @@ def acknowledge_message(message_id: int, user_id: int, read: bool) -> tuple[int,
             (MessageReceipt.read_at if read else MessageReceipt.delivered_at).is_(None),
         ).values(**values).returning(MessageReceipt.delivered_at, MessageReceipt.read_at)).first()
         sender_id = message.sender_id
+        if changed is not None:
+            record_event(db, message.conversation_id, 'status', message_id)
         db.commit()
         if changed is None:
             return None

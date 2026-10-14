@@ -206,3 +206,27 @@ export async function changeReaction(token, messageId, emoji, removing, signal) 
     token, signal, method: removing ? 'DELETE' : 'POST', body: removing ? undefined : { emoji },
   }))
 }
+
+function safePage(data) {
+  if (!Array.isArray(data?.items) || data.items.length > 100 || !Number.isSafeInteger(data.event_id) || data.event_id < 0 || typeof data.sync_cursor !== 'string' || typeof data.has_older !== 'boolean' || typeof data.has_newer !== 'boolean') throw apiError(GENERIC_ERROR)
+  return { ...data, items: data.items.map(item => ({ ...safeMessage(item), _seq: data.event_id, _cursor: data.cursors[item.id] })) }
+}
+
+export async function getMessagePage(token, conversationId, signal, direction = {}) {
+  const query = new URLSearchParams(direction)
+  return safePage(await request(`/api/conversations/${conversationId}/messages/page?${query}`, { token, signal }))
+}
+
+export async function getMessageContext(token, conversationId, messageId, signal) {
+  return safePage(await request(`/api/conversations/${conversationId}/messages/${messageId}/context`, { token, signal }))
+}
+
+export async function synchronize(token, conversationId, after, messageIds, signal) {
+  const data = await request(`/api/conversations/${conversationId}/sync?${new URLSearchParams({ after })}`, { token, signal, body: { message_ids: messageIds } })
+  if (!Array.isArray(data?.events) || data.events.length > 100 || !Array.isArray(data.items) || data.items.length > 400 || !Array.isArray(data.missing_ids) || data.missing_ids.length > 400 || !Number.isSafeInteger(data.event_id) || typeof data.next_cursor !== 'string') throw apiError(GENERIC_ERROR)
+  return { ...data, items: data.items.map(item => ({ ...safeMessage(item), _seq: data.event_id, _cursor: data.cursors[item.id] })) }
+}
+
+export async function markConversationRead(token, conversationId, through, signal, read = true) {
+  return request(`/api/conversations/${conversationId}/receipts`, { token, signal, body: { through, read } })
+}

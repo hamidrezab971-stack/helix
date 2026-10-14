@@ -23,6 +23,7 @@ from app.schemas.conversations import MessageRequest, MessageResponse
 from app.services.messages import effective_message, reply_previews
 from app.services.images import remove_image
 from app.services.reactions import reaction_summaries
+from app.services.sync import record_event
 from app.core.reactions import ALLOWED_REACTIONS
 from app.schemas.reactions import ReactionRequest, ReactionSummary
 
@@ -66,6 +67,7 @@ def edit_message(
         edit = db.scalar(select(MessageEdit).where(MessageEdit.message_id == message_id))
         receipt = db.scalar(select(MessageReceipt).where(MessageReceipt.message_id == message_id))
         saved = effective_message(message, receipt, edit, reply_to=reply_previews(db, [message]).get(message.id), reactions=reaction_summaries(db, [message_id], user.id).get(message_id))
+        record_event(db, message.conversation_id, 'updated', message_id)
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -95,6 +97,7 @@ def delete_message(
     db.execute(delete(MessageEdit).where(MessageEdit.message_id == message_id))
     db.execute(delete(MessageAttachment).where(MessageAttachment.message_id == message_id))
     db.delete(message)
+    record_event(db, conversation_id, 'deleted', message_id)
     db.commit()
     if storage_name:
         remove_image(storage_name)
@@ -144,6 +147,8 @@ def add_reaction(
         result = db.execute(insert(MessageReaction).values(message_id=message_id, user_id=user.id, emoji=data.emoji)
                             .on_conflict_do_nothing(index_elements=["message_id", "user_id", "emoji"]))
         created = result.rowcount > 0
+        if created:
+            record_event(db, conversation_id, 'reactions', message_id)
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -168,6 +173,8 @@ def remove_reaction(
     conversation_id = message.conversation_id
     member_ids = members(conversation_id, db)
     result = db.execute(delete(MessageReaction).where(MessageReaction.message_id == message_id, MessageReaction.user_id == user.id, MessageReaction.emoji == emoji))
+    if result.rowcount:
+        record_event(db, conversation_id, 'reactions', message_id)
     db.commit()
     if result.rowcount:
         notify_reactions(message_id, conversation_id, member_ids, background_tasks)

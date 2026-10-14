@@ -1,17 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { getMessages, getOrCreateConversation, sendMessage, sendImage, editMessage, deleteMessage, mergeReceipt } from '../services/api.js'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { sendMessage, sendImage, editMessage, deleteMessage } from '../services/api.js'
 import AttachmentImage from './AttachmentImage.jsx'
 import ReactionBar from './ReactionBar.jsx'
-
-function mergeMessages(current, incoming) {
-  const messages = new Map(current.map((message) => [message.id, message]))
-  for (const message of incoming) {
-    const previous = messages.get(message.id)
-    const effective = previous?.edited_at && (!message.edited_at || Date.parse(previous.edited_at) > Date.parse(message.edited_at)) ? previous : message
-    messages.set(message.id, { ...effective, ...mergeReceipt(previous, message) })
-  }
-  return [...messages.values()].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id)
-}
+import useTimeline from '../hooks/useTimeline.js'
 
 function replyPreview(message) {
   return { id: message.id, sender_id: message.sender_id, content: Array.from(message.content).slice(0, 200).join(''), attachment_kind: message.attachment?.kind || null }
@@ -21,11 +12,7 @@ function replyText(preview) {
   return preview.attachment_kind === 'image' ? `Photo${preview.content ? ` · ${preview.content}` : ''}` : preview.content
 }
 
-export default function ChatPanel({ user, selectedUser, initialConversation, onConversationOpened, onMessageSent, onMessageMutated, subscribeToMutations, subscribeToReactions, token, onUnauthorized, subscribeToMessages, subscribeToStatus, acknowledge, subscribeToTyping, sendTyping, isOnline }) {
-  const [conversation, setConversation] = useState(null)
-  const [messages, setMessages] = useState([])
-  const [stage, setStage] = useState('opening')
-  const [loadError, setLoadError] = useState('')
+export default function ChatPanel({ user, selectedUser, initialConversation, onConversationOpened, onMessageSent, onMessageMutated, subscribeToMutations, subscribeToSync, token, onUnauthorized, subscribeToMessages, subscribeToStatus, acknowledge, subscribeToTyping, sendTyping, isOnline }) {
   const [retryAttempt, setRetryAttempt] = useState(0)
   const [content, setContent] = useState('')
   const [sending, setSending] = useState(false)
@@ -42,9 +29,6 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
   const typingStartedAt = useRef(0)
   const typingTimer = useRef(null)
   const remoteTypingTimer = useRef(null)
-  const receipts = useRef(new Map())
-  const updates = useRef(new Map())
-  const deletedIds = useRef(new Set())
   const [editingId, setEditingId] = useState(null)
   const [editContent, setEditContent] = useState('')
   const [actionError, setActionError] = useState('')
@@ -74,62 +58,81 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
     setSendError('')
   }
 
-  const addMessages = useCallback((incoming) => {
-    setMessages((previous) => mergeMessages(previous, incoming.filter((message) => !deletedIds.current.has(message.id)).map((message) => {
-      const update = updates.current.get(message.id)
-      const effective = update && (!message.edited_at || Date.parse(update.edited_at) > Date.parse(message.edited_at)) ? update : message
-      const target = effective.reply_to
-      const targetUpdate = target && updates.current.get(target.id)
-      const reply_to = target && deletedIds.current.has(target.id) ? null : targetUpdate ? replyPreview(targetUpdate) : target
-      // Shared edits omit personalized reactions; keep the HTTP snapshot when
-      // an edit arrives before that snapshot finishes loading.
-      return { ...effective, reactions: message.reactions, reply_to, ...mergeReceipt(receipts.current.get(message.id), effective) }
-    })))
+  const atBottom = useRef(true)
+  const scrollAnchor = useRef(null)
+  const navigationTimer = useRef(null)
+  const positioned = useRef(false)
+  const [highlightId, setHighlightId] = useState(null)
+  const captureScroll = useCallback((reason) => {
+    const element = history.current
+    if (!element) return null
+    const rect = element.getBoundingClientRect()
+    const visible = [...element.querySelectorAll('[data-message-id]')].filter(row => row.getBoundingClientRect().bottom > rect.top)
+    const anchors = visible.slice(0, 3).map(row => ({ id: Number(row.dataset.messageId), top: row.getBoundingClientRect().top - rect.top }))
+    scrollAnchor.current = { anchors, scrollTop: element.scrollTop, bottom: ['latest', 'reset'].includes(reason) || (atBottom.current && !['older', 'newer', 'context'].includes(reason)) }
+    return anchors[0]
   }, [])
+  const reconcileComposer = useCallback((items, missing) => {
+    setReplyTarget(current => {
+      if (!current || missing.includes(current.id)) return null
+      const updated = items.find(message => message.id === current.id)
+      if (!updated) return current
+      const preview = replyPreview(updated)
+      return preview.content === current.content && preview.attachment_kind === current.attachment_kind ? current : preview
+    })
+    setEditingId(current => missing.includes(current) ? null : current)
+  }, [])
+  const timeline = useTimeline({ token, selectedUser, initialConversation, onConversationOpened,
+    onUnauthorized, subscribeToSync, beforeChange: captureScroll, atBottom,
+    onPersistedRead: onMessageSent, retryAttempt, onReconciled: reconcileComposer,
+    trackedIds: [replyTarget?.id, editingId].filter(id => id != null) })
+  const { messages, conversation, stage, loadError, addMessages } = timeline
+  conversationId.current = conversation?.id || null
+
+  useLayoutEffect(() => {
+    const element = history.current
+    if (!element) return
+    const anchor = scrollAnchor.current
+    if (timeline.navigationId) {
+      const target = element.querySelector(`[data-message-id="${timeline.navigationId}"]`)
+      if (target) {
+        target.scrollIntoView({ block: 'center', behavior: 'instant' })
+        target.focus({ preventScroll: true })
+        setHighlightId(timeline.navigationId)
+        clearTimeout(navigationTimer.current)
+        navigationTimer.current = setTimeout(() => setHighlightId(null), 1800)
+        timeline.clearNavigation()
+      }
+    } else if ((!anchor && !positioned.current) || anchor?.bottom) element.scrollTop = element.scrollHeight
+    else if (anchor) {
+      const rect = element.getBoundingClientRect()
+      const candidate = anchor.anchors.find(item => element.querySelector(`[data-message-id="${item.id}"]`))
+      const row = candidate && element.querySelector(`[data-message-id="${candidate.id}"]`)
+      if (row) element.scrollTop += row.getBoundingClientRect().top - rect.top - candidate.top
+      else element.scrollTop = anchor.scrollTop
+    }
+    positioned.current = true
+    scrollAnchor.current = null
+    atBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 64 && !timeline.hasNewer
+  }, [messages, stage, timeline.navigationId])
+
+  useEffect(() => {
+    // Heights can change after image decoding, reaction updates, or a resize.
+    const element = history.current
+    if (!element || stage !== 'ready') return
+    const observer = new ResizeObserver(() => { if (atBottom.current) element.scrollTop = element.scrollHeight })
+    const list = element.querySelector('ol')
+    if (list) observer.observe(list)
+    return () => observer.disconnect()
+  }, [stage])
 
   useEffect(() => subscribeToMutations((event) => {
     if (event.data.conversation_id !== conversationId.current) return
     if (event.type === 'message:deleted') {
-      const id = event.data.message_id
-      deletedIds.current.add(id)
-      updates.current.delete(id)
-      receipts.current.delete(id)
-      setMessages((previous) => previous.filter((message) => message.id !== id).map((message) => message.reply_to?.id === id ? { ...message, reply_to: null } : message))
-      setEditingId((current) => current === id ? null : current)
-      setReplyTarget((current) => current?.id === id ? null : current)
-    } else if (!deletedIds.current.has(event.data.id)) {
-      const existing = updates.current.get(event.data.id)
-      if (!existing || Date.parse(event.data.edited_at) >= Date.parse(existing.edited_at)) updates.current.set(event.data.id, event.data)
-      setMessages((previous) => {
-        const merged = previous.some((message) => message.id === event.data.id) ? mergeMessages(previous, [event.data]) : previous
-        const target = updates.current.get(event.data.id)
-        return merged.map((message) => message.reply_to?.id === target.id ? { ...message, reply_to: replyPreview(target) } : message)
-      })
-      setReplyTarget((current) => current?.id === event.data.id ? replyPreview(updates.current.get(event.data.id)) : current)
-    }
+      setEditingId(current => current === event.data.message_id ? null : current)
+      setReplyTarget(current => current?.id === event.data.message_id ? null : current)
+    } else setReplyTarget(current => current?.id === event.data.id ? replyPreview(event.data) : current)
   }), [subscribeToMutations])
-
-  useEffect(() => subscribeToStatus((status) => {
-    // A recipient can acknowledge before the sender's HTTP response arrives.
-    const merged = mergeReceipt(receipts.current.get(status.message_id), status)
-    receipts.current.set(status.message_id, merged)
-    setMessages((previous) => previous.map((message) => message.id === status.message_id && message.sender_id === user.id
-      ? { ...message, ...mergeReceipt(message, merged) } : message))
-  }), [subscribeToStatus, user.id])
-
-  useEffect(() => {
-    function acknowledgeIncoming() {
-      if (stage !== 'ready') return
-      for (const message of messages) {
-        if (message.sender_id === user.id) continue
-        if (!message.delivered_at) acknowledge('message:delivered', message.id)
-        if (!message.read_at && document.visibilityState === 'visible') acknowledge('message:read', message.id)
-      }
-    }
-    acknowledgeIncoming()
-    document.addEventListener('visibilitychange', acknowledgeIncoming)
-    return () => document.removeEventListener('visibilitychange', acknowledgeIncoming)
-  }, [messages, stage, user.id, acknowledge])
 
   const stopTyping = useCallback(() => {
     clearTimeout(typingTimer.current)
@@ -172,63 +175,11 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
     }
   }, [subscribeToTyping, stopTyping, selectedUser.id, user.id])
 
-  useEffect(() => subscribeToMessages((message) => {
-    if (message.conversation_id !== conversationId.current) return
-    if (message.sender_id !== user.id && message.sender_id !== selectedUser.id) return
-    addMessages([message])
-  }), [subscribeToMessages, user.id, selectedUser.id, addMessages])
-
-  useEffect(() => {
-    const controller = new AbortController()
-    let active = true
-    stopTyping()
-    clearTimeout(remoteTypingTimer.current)
-    setOtherTyping(false)
-    setStage('opening')
-    setLoadError('')
-    setConversation(null)
-    conversationId.current = null
-    setMessages([])
-    setReplyTarget(null)
-
-    async function openConversation() {
-      let fallback = 'Unable to open this conversation. Please try again.'
-      try {
-        const resolved = initialConversation || await getOrCreateConversation(token, selectedUser.id, controller.signal)
-        if (!active) return
-        conversationId.current = resolved.id
-        setConversation(resolved)
-        onConversationOpened(resolved)
-        setStage('loading')
-        fallback = 'Unable to load messages. Please try again.'
-        const loaded = await getMessages(token, resolved.id, controller.signal)
-        if (!active) return
-        // Preserve events received while the HTTP history request was in flight.
-        addMessages(loaded)
-        setStage('ready')
-      } catch (error) {
-        if (!active || error.name === 'AbortError') return
-        if (error.status === 401) {
-          onUnauthorized()
-        } else {
-          setLoadError([403, 404].includes(error.status) ? error.displayMessage : fallback)
-          setStage('error')
-        }
-      }
-    }
-
-    openConversation()
-    return () => {
-      active = false
-      controller.abort()
-      sendController.current?.abort()
-      actionController.current?.abort()
-    }
-  }, [token, selectedUser.id, initialConversation, retryAttempt, onUnauthorized, stopTyping, addMessages, onConversationOpened])
-
-  useEffect(() => {
-    if (history.current) history.current.scrollTop = history.current.scrollHeight
-  }, [messages])
+  useEffect(() => () => {
+    sendController.current?.abort()
+    actionController.current?.abort()
+    clearTimeout(navigationTimer.current)
+  }, [])
 
   async function performAction(message, deleting, event) {
     event?.preventDefault()
@@ -320,16 +271,27 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
         </div>
       ) : (
         <>
-          <div ref={history} role="log" aria-label="Message history" className="chat-history">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            {timeline.hasOlder && <button type="button" className="text-button min-h-9 text-sm" disabled={timeline.busy} onClick={timeline.loadOlder}>Load older messages</button>}
+            {timeline.busy && <span role="status" className="text-xs text-stone-500">Updating messages...</span>}
+          </div>
+          {timeline.syncError && <p role="alert" className="mb-2 text-sm text-stone-600">{timeline.syncError} <button type="button" className="text-button" onClick={timeline.retrySync}>Retry messages</button></p>}
+          <div ref={history} tabIndex={0} onScroll={() => {
+            const element = history.current
+            atBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 64 && !timeline.hasNewer
+            if (atBottom.current) timeline.clearNew()
+          }} role="log" aria-label="Message history" className="chat-history">
             {messages.length === 0 ? (
               <p className="py-8 text-center text-sm leading-6 text-stone-500">No messages yet.<br />Start the conversation.</p>
             ) : (
               <ol className="space-y-3">
-                {messages.map((message) => (
-                  <li key={message.id} data-message-id={message.id} className={`flex flex-col ${message.sender_id === user.id ? 'items-end' : 'items-start'}`}>
+                {messages.map((message, index) => (
+                  <Fragment key={message.id}>
+                  {index > 0 && timeline.isGap(messages[index - 1], message) && <li className="text-center text-xs text-stone-500"><button type="button" disabled={timeline.busy} className="text-button min-h-9" onClick={() => timeline.loadGap(messages[index - 1])}>Load messages in this gap</button></li>}
+                  <li tabIndex={-1} data-highlighted={highlightId === message.id} data-message-id={message.id} className={`flex flex-col ${message.sender_id === user.id ? 'items-end' : 'items-start'}`}>
                     <p className="message-bubble" data-own={message.sender_id === user.id}>
                       <span className="sr-only">{message.sender_id === user.id ? 'You' : selectedUser.username}: </span>
-                      {message.reply_to && <button type="button" aria-label="Reply preview" className="mb-2 block max-w-full rounded border-l-2 border-current bg-black/5 px-2 py-1 text-left text-xs" onClick={() => history.current?.querySelector(`[data-message-id="${message.reply_to.id}"]`)?.scrollIntoView({ block: 'center' })}>
+                      {message.reply_to && <button type="button" aria-label="Reply preview" className="mb-2 block max-w-full rounded border-l-2 border-current bg-black/5 px-2 py-1 text-left text-xs" onClick={() => timeline.navigate(message.reply_to.id)}>
                         <span className="block font-semibold">{replyName(message.reply_to)}</span>
                         <span className="block truncate">{replyText(message.reply_to)}</span>
                       </button>}
@@ -342,7 +304,7 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
                         </span>
                       )}
                     </p>
-                    <ReactionBar message={message} token={token} subscribeToReactions={subscribeToReactions} onUnauthorized={onUnauthorized} />
+                    <ReactionBar message={message} token={token} onChanged={timeline.retrySync} onUnauthorized={onUnauthorized} />
                     <button type="button" className="text-button min-h-8 text-xs" disabled={sending} onClick={() => { setReplyTarget(replyPreview(message)); document.getElementById('message-content')?.focus() }}>Reply</button>
                     {message.sender_id === user.id && (editingId === message.id ? (
                       <form aria-label="Edit message" className="mt-2 w-full max-w-sm space-y-2" onSubmit={(event) => performAction(message, false, event)}>
@@ -360,9 +322,14 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
                       </div>
                     ))}
                   </li>
+                  </Fragment>
                 ))}
               </ol>
             )}
+          </div>
+          <div className="my-2 flex flex-wrap items-center justify-end gap-3">
+            {timeline.hasNewer && <button type="button" className="text-button min-h-9 text-sm" disabled={timeline.busy} onClick={timeline.loadNewer}>Load newer messages</button>}
+            {(timeline.newCount > 0 || timeline.hasNewer) && <button type="button" className="secondary-button text-sm" disabled={timeline.busy} onClick={timeline.jumpLatest}>{timeline.newCount > 0 ? `${timeline.newCount} new ${timeline.newCount === 1 ? 'message' : 'messages'} · ` : ''}Jump to latest</button>}
           </div>
           {actionError && <p role="alert" className="form-error mb-3">{actionError}</p>}
           <form onSubmit={handleSend} aria-busy={sending} className="border-t border-stone-200/80 pt-5">

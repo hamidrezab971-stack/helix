@@ -3,8 +3,8 @@
 Smooth is a lightweight web-based messaging application. Native FastAPI/browser
 WebSockets deliver persisted messages, presence, and typing indicators.
 HTTP remains responsible for creating messages. Delivered/Read receipts are
-persistent; presence and typing remain temporary state. Phase 16 adds persistent
-emoji reactions to text, image, and reply messages.
+persistent; presence and typing remain temporary state. Phase 17 adds bounded
+message history, stable scroll navigation, and durable realtime recovery.
 
 ## Technology stack
 
@@ -199,9 +199,10 @@ The in-memory manager supports multiple tabs and is for a single server process.
 The pinned `wsproto` dependency supplies WebSocket transport for bare Uvicorn.
 The frontend deduplicates by message ID, orders by timestamp then ID, closes its
 socket on logout, and reconnects after two seconds on unexpected disconnection.
-Socket clients cannot create messages. There is no polling or guaranteed event
-delivery: persisted HTTP history remains the source of truth. Reopen a conversation
-or refresh and select it again to recover messages missed while disconnected.
+Socket clients cannot create messages. Persisted HTTP history remains the source
+of truth. The open timeline recovers from its durable cursor after reconnects,
+visibility changes, and mutation hints. Visible timelines also recover every
+15 seconds to cover a dropped frame on an apparently healthy socket.
 
 Presence and typing use the same authenticated `/ws` connection:
 
@@ -343,9 +344,10 @@ Edits preserve reactions; deleting a message removes its reaction rows atomicall
 
 History includes personalized `reactions`. Committed changes send
 `message:reactions` with only `message_id` and `conversation_id` to both members'
-connected tabs. Each tab fetches its own summary, preserving the correct selected
-state. Shared edit events omit personalized reactions. Socket recovery refreshes
-loaded reactions; history restores them after refresh or offline login.
+connected tabs. Each tab synchronizes its bounded window with personalized
+summaries, preserving the correct selected state without a request per message.
+Shared edit events omit personalized reactions. Recovery refreshes loaded
+reactions; history restores them after refresh or offline login.
 
 The React button opens a six-emoji picker. Existing reactions show counts and
 selected state, support keyboard use, and display retryable errors. Requests
@@ -397,7 +399,68 @@ full count available to assistive technology). Read confirmation refreshes recen
 counts across recipient tabs using the existing status event. Active visible chats
 avoid badge flashes; refresh and reconnect restore persisted unread counts.
 
-## Phase 8–16 verification
+## Reliable message timeline
+
+The frontend opens the newest 30 messages, ordered by creation timestamp and ID.
+Load older messages preserves the visible scroll anchor. The timeline retains at
+most 180 message components; evicted messages remain available through older and
+newer navigation. Incoming messages preserve the reading position away from the
+bottom and show a new-message indicator with Jump to latest. Edits, deletions,
+reaction updates, and image decoding preserve the existing reading position.
+
+Reply previews navigate to loaded targets or fetch at most 31 surrounding messages,
+then focus and briefly highlight the target. Separate loaded segments display an
+explicit Load messages in this gap action. Missing targets show a retryable error.
+Composer reply targets are reconciled even after their rows leave the window.
+Image downloads are lazy; dimension placeholders reserve their layout space. A
+token-scoped memory cache holds at most 12 blobs or 24 MB, and components revoke
+object URLs when images leave the viewport or unmount.
+
+All timeline endpoints require Bearer authentication and conversation membership:
+
+- `GET /api/conversations/{id}/messages/page` returns `items`, `has_more`,
+  `next_cursor`, `has_older`, `has_newer`, per-message cursors, and synchronization
+  metadata. The default limit is 30, with limits from 1 to 100. Optional `before`
+  and `after` cursors navigate in one direction; supplying both is rejected.
+- `GET /api/conversations/{id}/messages/{message_id}/context` returns the target
+  with up to 15 messages on each side, including current quotes and personalized
+  reactions.
+- `POST /api/conversations/{id}/sync?after=<cursor>` accepts
+  `{"message_ids":[1,2]}` with at most 300 requested IDs. It replays up to 100
+  journal entries per response, returning current message state, missing IDs,
+  `has_more`, and `next_cursor`. Clients advance only after applying the response.
+- `POST /api/conversations/{id}/receipts` accepts the snapshot's signed boundary
+  as `{"through":"<read_cursor>","read":true}`. It acknowledges incoming messages
+  through that snapshot, including unloaded older history. Hidden tabs send
+  `read:false` for delivery only. Later arrivals remain outside the boundary;
+  repeated acknowledgements preserve timestamps and read implies delivered.
+
+Cursors are signed, bound to a conversation and purpose, and expire after seven
+days; receipt cursors also bind the authenticated user. Invalid cursors return
+422, inaccessible conversations return 404, and expired cursors return 410.
+Deleted page boundaries remain usable. Indexed canonical timestamp comparisons
+handle legacy SQLite whole-second timestamps and Python microseconds equally.
+The original unpaginated history endpoint remains for compatibility; the frontend
+uses the bounded endpoints.
+
+Message creation, edits, deletion, reactions, and receipt changes append durable
+invalidation records in the same transaction as the change. Records contain IDs
+and kinds, without message text or personalized payloads. SQLite read transactions
+keep snapshot data and journal watermarks consistent. Timeline requests are serial,
+cancelled on conversation switches, and merged by stable message ID and watermark;
+replayed socket hints cannot restore deleted messages or overwrite newer state.
+Missed edits, deletes, reactions, receipts, and creates recover across reconnects
+and backend restarts.
+
+Startup applies an idempotent additive migration for the journal, synchronization
+state, migration version, and history/receipt indexes. Existing message rows and
+table columns are preserved. Journal retention is operator-controlled through
+`app.services.sync.prune_events` in a committed transaction. Recovery before the
+retention floor returns 409 with `replay_gap`; the frontend fetches a fresh bounded
+snapshot for this response or an expired cursor. Realtime presence, typing, and
+broadcasting continue to use the existing single-server-process manager.
+
+## Phase 8–17 verification
 
 From `backend/`, install the test-only transport with
 `.venv/bin/python -m pip install httpx2`, then run
@@ -438,3 +501,23 @@ arriving before its HTTP response, persisted counts, and uncaught browser errors
 It also checks recent previews, ordering, direct history loading, refresh, mobile
 and keyboard navigation, network retry, and authentication failure cleanup.
 These tools add no application dependencies.
+
+`frontend/tests/phase17.cjs` uses the same Playwright installation and frontend
+server. Run it separately from `phase8.cjs`, since both start their own backend
+on port 8000:
+
+```bash
+env PLAYWRIGHT_BROWSERS_PATH=/tmp/smooth-browser-check/browsers \
+  NODE_PATH=/tmp/smooth-browser-check/node_modules \
+  node smooth/frontend/tests/phase17.cjs
+```
+
+Run this command from the repository root. Phase 17 verification covers a
+10,000-message conversation, page limits and index use, equal and mixed-format
+timestamps, the 180-component limit, scroll anchoring, unloaded reply targets,
+offline mutations, duplicate/stale events and responses, reconnects, restarts,
+conversation switches, personalized reactions, snapshot-bounded receipts,
+visibility, lazy images, mobile and keyboard navigation, retention/expiry resets,
+deleted-window recovery, and dropped frames on a healthy socket. Backend tests
+also cover cursor authorization, failed-transaction rollback, retention floors,
+and idempotent migration without rewriting existing messages.

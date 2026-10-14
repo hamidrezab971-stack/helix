@@ -7,10 +7,13 @@ function websocketUrl() {
   return url.toString()
 }
 
-export function connectRealtime(token, { onMessage, onMutation, onReactions, onStatus, onUnauthorized, onPresenceSnapshot, onPresenceUpdate, onTyping, onDisconnect }) {
+export function connectRealtime(token, { onMessage, onMutation, onReactions, onStatus, onUnauthorized, onPresenceSnapshot, onPresenceUpdate, onTyping, onDisconnect, onWake }) {
   let socket
   let timer
   let stopped = false
+  let attempt = 0
+  let stableTimer
+  let authTimer
   let authenticated = false
   const acknowledgements = new Map()
   const sentAcknowledgements = new Map()
@@ -33,6 +36,7 @@ export function connectRealtime(token, { onMessage, onMutation, onReactions, onS
 
   function acknowledge(type, messageId) {
     if (stopped || !['message:delivered', 'message:read'].includes(type) || !Number.isSafeInteger(messageId) || messageId <= 0) return
+    if (acknowledgements.size >= 1024) forgetMessage(acknowledgements.keys().next().value)
     if (acknowledgements.get(messageId) !== 'message:read') acknowledgements.set(messageId, type)
     flushAcknowledgements()
   }
@@ -51,6 +55,9 @@ export function connectRealtime(token, { onMessage, onMutation, onReactions, onS
   function stop() {
     stopped = true
     clearTimeout(timer)
+    clearTimeout(stableTimer)
+    clearTimeout(authTimer)
+    window.removeEventListener('online', online)
     if (socket) socket.close(1000)
   }
 
@@ -61,7 +68,11 @@ export function connectRealtime(token, { onMessage, onMutation, onReactions, onS
   }
 
   function reconnect() {
-    if (!stopped) timer = setTimeout(open, 2000)
+    if (!stopped) {
+      clearTimeout(timer)
+      const ceiling = Math.min(30000, 1000 * 2 ** Math.min(attempt++, 5))
+      timer = setTimeout(open, ceiling * (0.5 + Math.random() * 0.5))
+    }
   }
 
   function open() {
@@ -75,6 +86,7 @@ export function connectRealtime(token, { onMessage, onMutation, onReactions, onS
       return
     }
     const current = socket
+    authTimer = setTimeout(() => current.close(), 10000)
     current.onopen = () => {
       if (stopped) return current.close(1000)
       current.send(JSON.stringify({ type: 'auth', token }))
@@ -90,11 +102,15 @@ export function connectRealtime(token, { onMessage, onMutation, onReactions, onS
       if (payload?.type === 'auth:error') return unauthorized()
       if (payload?.type === 'auth:ok') {
         authenticated = true
+        clearTimeout(authTimer)
+        stableTimer = setTimeout(() => { attempt = 0 }, 10000)
+        onWake?.()
         flushAcknowledgements()
         return
       }
       if (!authenticated) return
       const data = payload?.data
+      if (payload.type?.startsWith('message:') || payload.type === 'conversation:receipts') onWake?.(data?.conversation_id)
       const validId = (id) => Number.isSafeInteger(id) && id > 0
       if (payload?.type === 'message:reactions' && validId(data?.message_id) && validId(data?.conversation_id)) {
         onReactions({ message_id: data.message_id, conversation_id: data.conversation_id })
@@ -111,6 +127,8 @@ export function connectRealtime(token, { onMessage, onMutation, onReactions, onS
       if (payload?.type === 'message:status' && validId(data?.message_id)) {
         let receipt
         try { receipt = safeReceipt(data) } catch { return }
+        const pending = acknowledgements.get(data.message_id)
+        if (receipt.read_at || (receipt.delivered_at && pending !== 'message:read')) forgetMessage(data.message_id)
         onStatus({ message_id: data.message_id, ...receipt })
       }
       if (payload?.type === 'presence:snapshot' && Array.isArray(data?.online_user_ids) && data.online_user_ids.every(validId)) {
@@ -134,11 +152,18 @@ export function connectRealtime(token, { onMessage, onMutation, onReactions, onS
     current.onclose = (event) => {
       if (stopped || current !== socket) return
       authenticated = false
+      clearTimeout(authTimer)
+      clearTimeout(stableTimer)
       onDisconnect()
       if (event.code === 4401) return unauthorized()
       reconnect()
     }
   }
+
+  function online() {
+    if (!stopped && (!socket || socket.readyState === WebSocket.CLOSED)) { clearTimeout(timer); open() }
+  }
+  window.addEventListener('online', online)
 
   // Deferring startup also avoids a throwaway connection in React StrictMode.
   timer = setTimeout(open, 0)

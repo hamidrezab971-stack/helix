@@ -19,6 +19,7 @@ from app.realtime.manager import manager
 from app.schemas.auth import UserResponse
 from app.services.messages import allocate_message_id, effective_message, reply_previews, validate_reply_target
 from app.services.reactions import reaction_summaries
+from app.services.sync import record_event
 from app.schemas.conversations import (
     ConversationResponse,
     MessageRequest,
@@ -191,6 +192,7 @@ def send_message(
         db.add(MessageReceipt(message_id=message.id, recipient_id=recipient_ids[0]))
         if data.reply_to_message_id is not None:
             db.add(MessageReply(message_id=message.id, reply_to_message_id=data.reply_to_message_id))
+        record_event(db, conversation_id, 'new', message.id)
         db.commit()
     except IntegrityError:
         db.rollback()

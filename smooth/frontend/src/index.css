@@ -167,3 +167,18 @@ button:disabled,
     transition: none;
   }
 }
+
+.chat-history {
+  overflow-anchor: none;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.chat-history [data-highlighted="true"] .message-bubble {
+  outline: 3px solid #d6a45b;
+  outline-offset: 3px;
+}
+
+@media (max-width: 767px) {
+  .chat-history { max-height: min(28rem, 52dvh); }
+}

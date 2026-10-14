@@ -15,11 +15,14 @@ from app.api.users import router as users_router
 from app.core.config import FRONTEND_ORIGIN
 from app.database.database import Base, engine
 from app.services.receipts import initialize_receipts
+from app.database.migrations import migrate_phase17
+from app.api.timeline import router as timeline_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     Base.metadata.create_all(bind=engine)
+    migrate_phase17(engine)
     initialize_receipts()
     try:
         yield
@@ -39,6 +42,7 @@ app.include_router(attachments_router)
 app.include_router(users_router)
 app.include_router(conversations_router)
 app.include_router(messages_router)
+app.include_router(timeline_router)
 app.include_router(realtime_router)
 
 
