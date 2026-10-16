@@ -20,6 +20,7 @@ from app.schemas.auth import UserResponse
 from app.services.messages import allocate_message_id, effective_message, reply_previews, validate_reply_target
 from app.services.reactions import reaction_summaries
 from app.services.sync import record_event
+from app.services.idempotency import fingerprint, replay, remember
 from app.schemas.conversations import (
     ConversationResponse,
     MessageRequest,
@@ -184,18 +185,28 @@ def send_message(
     recipient_ids = [member_id for member_id in member_ids if member_id != user.id]
     if len(recipient_ids) != 1:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    user_id = user.id
+    client_id = str(data.client_message_id) if data.client_message_id else None
+    digest = fingerprint(conversation_id, data.content, data.reply_to_message_id)
+    duplicate = replay(db, user_id, client_id, digest)
+    if duplicate is not None:
+        return duplicate
     validate_reply_target(db, conversation_id, data.reply_to_message_id)
     try:
-        message = Message(id=allocate_message_id(db), conversation_id=conversation_id, sender_id=user.id, content=data.content)
+        message = Message(id=allocate_message_id(db), conversation_id=conversation_id, sender_id=user_id, content=data.content, client_message_id=client_id)
         db.add(message)
         db.flush()
         db.add(MessageReceipt(message_id=message.id, recipient_id=recipient_ids[0]))
         if data.reply_to_message_id is not None:
             db.add(MessageReply(message_id=message.id, reply_to_message_id=data.reply_to_message_id))
+        remember(db, message, digest)
         record_event(db, conversation_id, 'new', message.id)
         db.commit()
     except IntegrityError:
         db.rollback()
+        duplicate = replay(db, user_id, client_id, digest)
+        if duplicate is not None:
+            return duplicate
         if data.reply_to_message_id is not None:
             raise HTTPException(status_code=404, detail="Reply target not found") from None
         raise

@@ -1,5 +1,5 @@
 """Additive SQLite migrations. Never rebuild an existing application table."""
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 from app.models.conversation_event import ConversationEvent, ConversationSyncState
 from app.services.sync import TIMESTAMP_SQL
@@ -16,3 +16,14 @@ def migrate_phase17(engine):
         connection.execute(text('CREATE INDEX IF NOT EXISTS ix_receipts_unread ON message_receipts (recipient_id, read_at, message_id)'))
         connection.execute(text('CREATE TABLE IF NOT EXISTS smooth_schema_migrations (version INTEGER PRIMARY KEY)'))
         connection.execute(text('INSERT OR IGNORE INTO smooth_schema_migrations (version) VALUES (17)'))
+
+
+def migrate_phase18(engine):
+    from app.models.message import MessageSendIntent
+    with engine.begin() as connection:
+        columns = {column['name'] for column in inspect(connection).get_columns('messages')}
+        if 'client_message_id' not in columns:
+            connection.execute(text('ALTER TABLE messages ADD COLUMN client_message_id VARCHAR(36)'))
+        connection.execute(text('CREATE UNIQUE INDEX IF NOT EXISTS ix_messages_client_id ON messages (sender_id, client_message_id)'))
+        MessageSendIntent.__table__.create(connection, checkfirst=True)
+        connection.execute(text('INSERT OR IGNORE INTO smooth_schema_migrations (version) VALUES (18)'))

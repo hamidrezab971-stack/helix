@@ -51,7 +51,7 @@ async function request(path, { body, token, signal, method, binary = false } = {
     } else if (path.startsWith('/api/conversations') && response.status === 400) {
       message = 'Choose another user to start a conversation.'
     } else if (response.status === 409) {
-      message = 'Username already exists'
+      message = path.startsWith('/api/conversations') ? 'This send ID belongs to a different message.' : 'Username already exists'
     } else if (path.endsWith('/messages/image') && [413, 422].includes(response.status)) {
       message = response.status === 413 ? 'Choose an image of 8 MB or smaller.' : 'Choose a valid JPEG, PNG, or WEBP image with safe dimensions and a caption up to 2000 characters.'
     } else if (response.status === 422) {
@@ -112,7 +112,7 @@ export function safeMessage(data) {
   }
   const edited_at = data.edited_at ?? null
   if (edited_at !== null && (typeof edited_at !== 'string' || !Number.isFinite(Date.parse(edited_at)))) throw apiError(GENERIC_ERROR)
-  return { id: data.id, conversation_id: data.conversation_id, sender_id: data.sender_id, content: data.content, created_at: data.created_at, edited_at, attachment, reply_to: safeReply(data.reply_to), reactions: safeReactions(data.reactions ?? []), ...safeReceipt(data) }
+  return { id: data.id, client_message_id: typeof data.client_message_id === 'string' ? data.client_message_id : null, conversation_id: data.conversation_id, sender_id: data.sender_id, content: data.content, created_at: data.created_at, edited_at, attachment, reply_to: safeReply(data.reply_to), reactions: safeReactions(data.reactions ?? []), ...safeReceipt(data) }
 }
 
 export function safeReactions(data) {
@@ -173,8 +173,8 @@ export async function getMessages(token, conversationId, signal) {
   return data.map(safeMessage)
 }
 
-export async function sendMessage(token, conversationId, content, signal, replyToMessageId = null) {
-  return safeMessage(await request(`/api/conversations/${conversationId}/messages`, { token, signal, body: { content, reply_to_message_id: replyToMessageId } }))
+export async function sendMessage(token, conversationId, content, signal, replyToMessageId = null, clientMessageId = null) {
+  return safeMessage(await request(`/api/conversations/${conversationId}/messages`, { token, signal, body: { content, reply_to_message_id: replyToMessageId, client_message_id: clientMessageId } }))
 }
 
 export async function editMessage(token, messageId, content, signal) {
@@ -185,10 +185,11 @@ export async function deleteMessage(token, messageId, signal) {
   await request(`/api/messages/${messageId}`, { token, signal, method: 'DELETE' })
 }
 
-export async function sendImage(token, conversationId, file, caption, signal, replyToMessageId = null) {
+export async function sendImage(token, conversationId, file, caption, signal, replyToMessageId = null, clientMessageId = null) {
   const body = new FormData()
   body.append('file', file)
   body.append('caption', caption)
+  if (clientMessageId) body.append('client_message_id', clientMessageId)
   if (replyToMessageId !== null) body.append('reply_to_message_id', String(replyToMessageId))
   return safeMessage(await request(`/api/conversations/${conversationId}/messages/image`, { token, signal, body }))
 }

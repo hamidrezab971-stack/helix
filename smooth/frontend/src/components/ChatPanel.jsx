@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { sendMessage, sendImage, editMessage, deleteMessage } from '../services/api.js'
+import { editMessage, deleteMessage } from '../services/api.js'
 import MessageList from './chat/MessageList.jsx'
 import MessageActionMenu from './chat/MessageActionMenu.jsx'
 import ImageViewer from './chat/ImageViewer.jsx'
@@ -7,17 +7,16 @@ import { replyPreview, replyText } from './chat/MessageBubble.jsx'
 import useMessageActions from '../hooks/useMessageActions.js' 
 import ChatHeader from './chat/ChatHeader.jsx'
 import ChatComposer from './chat/ChatComposer.jsx'
+import { visiblePending } from '../utils/optimisticMessages.js'
 import useTimeline from '../hooks/useTimeline.js'
 
-export default function ChatPanel({ user, selectedUser, initialConversation, onConversationOpened, onMessageSent, onMessageMutated, subscribeToMutations, subscribeToSync, token, onUnauthorized, subscribeToMessages, subscribeToStatus, acknowledge, subscribeToTyping, sendTyping, isOnline, onBack }) {
+export default function ChatPanel({ user, selectedUser, initialConversation, onConversationOpened, onMessageSent, onMessageMutated, subscribeToMutations, subscribeToSync, token, onUnauthorized, subscribeToMessages, subscribeToStatus, acknowledge, subscribeToTyping, sendTyping, isOnline, onBack, optimistic }) {
   const [retryAttempt, setRetryAttempt] = useState(0)
   const [content, setContent] = useState('')
-  const [sending, setSending] = useState(false)
+  const sending = false
   const [sendError, setSendError] = useState('')
   const [selectedImage, setSelectedImage] = useState(null)
   const [imagePreview, setImagePreview] = useState('')
-  const pending = useRef(false)
-  const sendController = useRef(null)
   const history = useRef(null)
   const conversationId = useRef(null)
   const [otherTyping, setOtherTyping] = useState(false)
@@ -71,6 +70,7 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
     return anchors[0]
   }, [])
   const reconcileComposer = useCallback((items, missing) => {
+    optimistic.reconcile(items, missing)
     setReplyTarget(current => {
       if (!current || missing.includes(current.id)) return null
       const updated = items.find(message => message.id === current.id)
@@ -79,12 +79,14 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
       return preview.content === current.content && preview.attachment_kind === current.attachment_kind ? current : preview
     })
     setEditingId(current => missing.includes(current) ? null : current)
-  }, [])
+  }, [optimistic.reconcile])
   const timeline = useTimeline({ token, selectedUser, initialConversation, onConversationOpened,
     onUnauthorized, subscribeToSync, beforeChange: captureScroll, atBottom,
     onPersistedRead: onMessageSent, retryAttempt, onReconciled: reconcileComposer,
-    trackedIds: [replyTarget?.id, editingId].filter(id => id != null) })
-  const { messages, conversation, stage, loadError, addMessages } = timeline
+    trackedIds: [replyTarget?.id, editingId, ...optimistic.entries.map(entry => entry.serverId)].filter(id => id != null) })
+  const { messages, conversation, stage, loadError } = timeline
+  const pendingMessages = visiblePending(optimistic.entries, messages, conversation?.id)
+  useEffect(() => optimistic.reconcile(messages), [messages, optimistic.reconcile])
   const actions = useMessageActions(messages, history)
   conversationId.current = conversation?.id || null
 
@@ -113,7 +115,7 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
     positioned.current = true
     scrollAnchor.current = null
     atBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 64 && !timeline.hasNewer
-  }, [messages, stage, timeline.navigationId])
+  }, [messages, stage, timeline.navigationId, optimistic.entries])
 
   useEffect(() => {
     // Heights can change after image decoding, reaction updates, or a resize.
@@ -175,7 +177,6 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
   }, [subscribeToTyping, stopTyping, selectedUser.id, user.id])
 
   useEffect(() => () => {
-    sendController.current?.abort()
     actionController.current?.abort()
     clearTimeout(navigationTimer.current)
   }, [])
@@ -214,43 +215,18 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
     }
   }
 
-  async function handleSend(event) {
+  function handleSend(event) {
     event.preventDefault()
-    if (pending.current || stage !== 'ready' || !conversation) return
+    if (stage !== 'ready' || !conversation) return
     const trimmed = content.trim()
     if (!trimmed && !selectedImage) return
-    if (Array.from(trimmed).length > 2000) {
-      setSendError('Use a message between 1 and 2000 characters.')
-      return
-    }
-
-    pending.current = true
-    setSending(true)
-    setSendError('')
-    const controller = new AbortController()
-    sendController.current = controller
+    if (Array.from(trimmed).length > 2000) { setSendError('Use a message between 1 and 2000 characters.'); return }
     try {
-      const message = selectedImage
-        ? await sendImage(token, conversation.id, selectedImage, trimmed, controller.signal, replyTarget?.id || null)
-        : await sendMessage(token, conversation.id, trimmed, controller.signal, replyTarget?.id || null)
-      if (controller.signal.aborted) return
+      captureScroll('pending')
+      optimistic.enqueue({ conversation_id: conversation.id, content: trimmed, file: selectedImage, reply_to: replyTarget })
       stopTyping()
-      addMessages([message])
-      onMessageSent(message)
-      setContent('')
-      setSelectedImage(null)
-      setReplyTarget(null)
-    } catch (error) {
-      if (controller.signal.aborted || error.name === 'AbortError') return
-      if (error.status === 401) {
-        onUnauthorized()
-      } else {
-        setSendError([403, 404, 422].includes(error.status) ? error.displayMessage : 'Unable to send your message. Please try again.')
-      }
-    } finally {
-      pending.current = false
-      if (!controller.signal.aborted) setSending(false)
-    }
+      setContent(''); setSelectedImage(null); setReplyTarget(null); setSendError('')
+    } catch (error) { setSendError(error.message) }
   }
 
   return (
@@ -275,10 +251,10 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
             atBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 64 && !timeline.hasNewer
             if (atBottom.current) timeline.clearNew()
           }} role="log" aria-label="Message history" className="chat-history">
-            {messages.length === 0 ? (
+            {messages.length === 0 && pendingMessages.length === 0 ? (
               <p className="py-8 text-center text-sm leading-6 text-stone-500">No messages yet.<br />Start the conversation.</p>
             ) : (
-              <MessageList messages={messages} user={user} selectedUser={selectedUser} timeline={timeline} highlightId={highlightId} token={token} onUnauthorized={onUnauthorized} onOpen={actions.open} onPhoto={setPhoto} />
+              <MessageList pending={pendingMessages} onRetry={optimistic.retry} onDismiss={optimistic.dismiss} messages={messages} user={user} selectedUser={selectedUser} timeline={timeline} highlightId={highlightId} token={token} onUnauthorized={onUnauthorized} onOpen={actions.open} onPhoto={setPhoto} />
             )}
           </div>
           <div className="my-2 flex flex-wrap items-center justify-end gap-3">

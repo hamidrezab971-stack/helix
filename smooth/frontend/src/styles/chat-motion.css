@@ -33,3 +33,7 @@
 @keyframes message-enter { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
 .message-row[data-enter="true"], .pending-message { animation: message-enter 220ms ease-out; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0s !important; transition-duration: 0s !important; scroll-behavior: auto !important; } }
+
+.pending-photo { display: block; width: 240px; height: 180px; object-fit: contain; background: #e9e5de; }
+.pending-error { max-width: min(82%, 520px); font-size: 12px; color: #a72c20; padding: 6px 0; }
+.pending-error button { min-height: 40px; margin-right: 14px; }

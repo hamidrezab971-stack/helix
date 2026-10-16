@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import useOptimisticMessages from '../hooks/useOptimisticMessages.js'
 import ChatPanel from '../components/ChatPanel.jsx'
 import { getUsers, getConversations } from '../services/api.js'
 import { connectRealtime } from '../services/realtime.js'
@@ -140,6 +141,8 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
     messageListeners.current.add(listener)
     return () => messageListeners.current.delete(listener)
   }, [])
+
+  const optimistic = useOptimisticMessages({ token, userId: user.id, onUnauthorized, onChanged: updateRecentMessage, subscribeToMessages })
 
 
   useEffect(() => {
@@ -324,7 +327,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
           {selectedUser ? (
             <>
 
-              <ChatPanel onBack={() => setShowList(true)} key={`${selectedUser.id}:${conversationAttempt}`} user={user} selectedUser={selectedUser} initialConversation={selectedConversation} onConversationOpened={onConversationOpened} onMessageSent={updateRecentMessage} onMessageMutated={handleMutation} subscribeToMutations={subscribeToMutations} subscribeToSync={subscribeToSync} token={token} onUnauthorized={onUnauthorized} subscribeToMessages={subscribeToMessages} subscribeToStatus={subscribeToStatus} acknowledge={acknowledge} subscribeToTyping={subscribeToTyping} sendTyping={sendTyping} isOnline={onlineUserIds.has(selectedUser.id)} />
+              <ChatPanel optimistic={optimistic} onBack={() => setShowList(true)} key={`${selectedUser.id}:${conversationAttempt}`} user={user} selectedUser={selectedUser} initialConversation={selectedConversation} onConversationOpened={onConversationOpened} onMessageSent={updateRecentMessage} onMessageMutated={handleMutation} subscribeToMutations={subscribeToMutations} subscribeToSync={subscribeToSync} token={token} onUnauthorized={onUnauthorized} subscribeToMessages={subscribeToMessages} subscribeToStatus={subscribeToStatus} acknowledge={acknowledge} subscribeToTyping={subscribeToTyping} sendTyping={sendTyping} isOnline={onlineUserIds.has(selectedUser.id)} />
             </>
           ) : (
             <div className="flex h-full flex-col justify-center p-6 sm:p-8">
