@@ -1,18 +1,13 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { sendMessage, sendImage, editMessage, deleteMessage } from '../services/api.js'
-import AttachmentImage from './AttachmentImage.jsx'
-import ReactionBar from './ReactionBar.jsx'
+import MessageList from './chat/MessageList.jsx'
+import MessageActionMenu from './chat/MessageActionMenu.jsx'
+import ImageViewer from './chat/ImageViewer.jsx'
+import { replyPreview, replyText } from './chat/MessageBubble.jsx'
+import useMessageActions from '../hooks/useMessageActions.js' 
 import ChatHeader from './chat/ChatHeader.jsx'
 import ChatComposer from './chat/ChatComposer.jsx'
 import useTimeline from '../hooks/useTimeline.js'
-
-function replyPreview(message) {
-  return { id: message.id, sender_id: message.sender_id, content: Array.from(message.content).slice(0, 200).join(''), attachment_kind: message.attachment?.kind || null }
-}
-
-function replyText(preview) {
-  return preview.attachment_kind === 'image' ? `Photo${preview.content ? ` · ${preview.content}` : ''}` : preview.content
-}
 
 export default function ChatPanel({ user, selectedUser, initialConversation, onConversationOpened, onMessageSent, onMessageMutated, subscribeToMutations, subscribeToSync, token, onUnauthorized, subscribeToMessages, subscribeToStatus, acknowledge, subscribeToTyping, sendTyping, isOnline, onBack }) {
   const [retryAttempt, setRetryAttempt] = useState(0)
@@ -37,6 +32,8 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
   const actionPending = useRef(false)
   const actionController = useRef(null)
   const [replyTarget, setReplyTarget] = useState(null)
+  const [photo, setPhoto] = useState(null)
+  const closePhoto = useCallback(() => setPhoto(null), [])
 
   function replyName(preview) {
     return preview.sender_id === user.id ? 'You' : selectedUser.username
@@ -88,6 +85,7 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
     onPersistedRead: onMessageSent, retryAttempt, onReconciled: reconcileComposer,
     trackedIds: [replyTarget?.id, editingId].filter(id => id != null) })
   const { messages, conversation, stage, loadError, addMessages } = timeline
+  const actions = useMessageActions(messages, history)
   conversationId.current = conversation?.id || null
 
   useLayoutEffect(() => {
@@ -185,7 +183,6 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
   async function performAction(message, deleting, event) {
     event?.preventDefault()
     if (actionPending.current) return
-    if (deleting && !window.confirm('Delete this message?')) return
     const trimmed = editContent.trim()
     if (!deleting && (!trimmed || Array.from(trimmed).length > 2000)) {
       setActionError('Use a message between 1 and 2000 characters.')
@@ -210,7 +207,7 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
     } catch (error) {
       if (controller.signal.aborted || error.name === 'AbortError') return
       if (error.status === 401) onUnauthorized()
-      else setActionError(error.displayMessage || `Unable to ${deleting ? 'delete' : 'edit'} your message. Please try again.`)
+      else { setActionError(error.displayMessage || `Unable to ${deleting ? 'delete' : 'edit'} your message. Please try again.`); if (deleting) throw error }
     } finally {
       actionPending.current = false
       if (!controller.signal.aborted) setActionBusy(false)
@@ -281,47 +278,7 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
             {messages.length === 0 ? (
               <p className="py-8 text-center text-sm leading-6 text-stone-500">No messages yet.<br />Start the conversation.</p>
             ) : (
-              <ol className="space-y-3">
-                {messages.map((message, index) => (
-                  <Fragment key={message.id}>
-                  {index > 0 && timeline.isGap(messages[index - 1], message) && <li className="text-center text-xs text-stone-500"><button type="button" disabled={timeline.busy} className="text-button min-h-9" onClick={() => timeline.loadGap(messages[index - 1])}>Load messages in this gap</button></li>}
-                  <li tabIndex={-1} data-highlighted={highlightId === message.id} data-message-id={message.id} className={`flex flex-col ${message.sender_id === user.id ? 'items-end' : 'items-start'}`}>
-                    <p className="message-bubble" data-own={message.sender_id === user.id}>
-                      <span className="sr-only">{message.sender_id === user.id ? 'You' : selectedUser.username}: </span>
-                      {message.reply_to && <button type="button" aria-label="Reply preview" className="mb-2 block max-w-full rounded border-l-2 border-current bg-black/5 px-2 py-1 text-left text-xs" onClick={() => timeline.navigate(message.reply_to.id)}>
-                        <span className="block font-semibold">{replyName(message.reply_to)}</span>
-                        <span className="block truncate">{replyText(message.reply_to)}</span>
-                      </button>}
-                      {message.attachment && <AttachmentImage attachment={message.attachment} token={token} onUnauthorized={onUnauthorized} />}
-                      {message.content}
-                      {message.edited_at && <span aria-label="Edited message" className="mt-1 block text-[10px] opacity-75">Edited</span>}
-                      {message.sender_id === user.id && (
-                        <span aria-label="Message status" className={`mt-1 block text-right text-[10px] ${message.read_at ? 'font-semibold' : 'opacity-75'}`}>
-                          {message.read_at ? 'Read' : message.delivered_at ? 'Delivered' : 'Sent'}
-                        </span>
-                      )}
-                    </p>
-                    <ReactionBar message={message} token={token} onChanged={timeline.retrySync} onUnauthorized={onUnauthorized} />
-                    <button type="button" className="text-button min-h-8 text-xs" disabled={sending} onClick={() => { setReplyTarget(replyPreview(message)); document.getElementById('message-content')?.focus() }}>Reply</button>
-                    {message.sender_id === user.id && (editingId === message.id ? (
-                      <form aria-label="Edit message" className="mt-2 w-full max-w-sm space-y-2" onSubmit={(event) => performAction(message, false, event)}>
-                        <label className="text-xs text-stone-600" htmlFor="edit-message-content">Edit message text</label>
-                        <textarea id="edit-message-content" className="auth-input" maxLength={2000} value={editContent} onChange={(event) => setEditContent(event.target.value)} disabled={actionBusy} autoFocus />
-                        <div className="flex gap-3">
-                          <button type="submit" className="secondary-button" disabled={actionBusy}>Save</button>
-                          <button type="button" className="secondary-button" disabled={actionBusy} onClick={() => { setEditingId(null); setActionError('') }}>Cancel</button>
-                        </div>
-                      </form>
-                    ) : (
-                      <div className="mt-1 flex gap-3">
-                        {!message.attachment && <button type="button" className="text-button min-h-8 text-xs" disabled={actionBusy} onClick={() => { setEditingId(message.id); setEditContent(message.content); setActionError('') }}>Edit</button>}
-                        <button type="button" className="text-button min-h-8 text-xs" disabled={actionBusy} onClick={() => performAction(message, true)}>Delete</button>
-                      </div>
-                    ))}
-                  </li>
-                  </Fragment>
-                ))}
-              </ol>
+              <MessageList messages={messages} user={user} selectedUser={selectedUser} timeline={timeline} highlightId={highlightId} token={token} onUnauthorized={onUnauthorized} onOpen={actions.open} onPhoto={setPhoto} />
             )}
           </div>
           <div className="my-2 flex flex-wrap items-center justify-end gap-3">
@@ -329,9 +286,11 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
             {(timeline.newCount > 0 || timeline.hasNewer) && <button type="button" className="secondary-button text-sm" disabled={timeline.busy} onClick={timeline.jumpLatest}>{timeline.newCount > 0 ? `${timeline.newCount} new ${timeline.newCount === 1 ? 'message' : 'messages'} · ` : ''}Jump to latest</button>}
           </div>
           {actionError && <p role="alert" className="form-error mb-3">{actionError}</p>}
-          <ChatComposer content={content} onChange={handleContentChange} onSubmit={handleSend} sending={sending} error={sendError} image={selectedImage} imagePreview={imagePreview} onImage={chooseImage} onRemoveImage={() => setSelectedImage(null)} replyTarget={replyTarget} replyName={replyName} replyText={replyText} onCancelReply={() => setReplyTarget(null)} />
+          <ChatComposer editing={editingId !== null} onCancelEdit={() => setEditingId(null)} content={editingId !== null ? editContent : content} onChange={editingId !== null ? setEditContent : handleContentChange} onSubmit={editingId !== null ? event => performAction(messages.find(message => message.id === editingId) || { id: editingId }, false, event) : handleSend} sending={sending || actionBusy} error={sendError || actionError} image={selectedImage} imagePreview={imagePreview} onImage={chooseImage} onRemoveImage={() => setSelectedImage(null)} replyTarget={replyTarget} replyName={replyName} replyText={replyText} onCancelReply={() => setReplyTarget(null)} />
         </>
       )}
+      {actions.target && messages.some(message => message.id === actions.target.id) && <MessageActionMenu target={actions.target} message={messages.find(message => message.id === actions.target.id)} own={messages.find(message => message.id === actions.target.id).sender_id === user.id} onClose={actions.close} token={token} onUnauthorized={onUnauthorized} onChanged={timeline.retrySync} onReply={message => { setEditingId(null); setReplyTarget(replyPreview(message)); requestAnimationFrame(() => document.getElementById('message-content')?.focus()) }} onEdit={message => { setEditingId(message.id); setEditContent(message.content); setActionError(''); requestAnimationFrame(() => document.getElementById('message-content')?.focus()) }} onDelete={message => performAction(message, true)} />}
+      {photo && <ImageViewer attachment={photo} token={token} onUnauthorized={onUnauthorized} onClose={closePhoto} />}
     </section>
   )
 }

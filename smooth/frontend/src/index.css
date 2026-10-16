@@ -1,6 +1,7 @@
 @import "./styles/chat-tokens.css";
 @import "tailwindcss";
 
+
 :root {
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
   color: #292524;
@@ -172,5 +173,6 @@ button:disabled,
   outline: 3px solid #d6a45b;
   outline-offset: 3px;
 }
+
 
 

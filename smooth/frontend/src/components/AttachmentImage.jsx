@@ -14,13 +14,13 @@ function remember(key, blob) {
   }
 }
 
-export default function AttachmentImage({ attachment, token, onUnauthorized }) {
+export default function AttachmentImage({ attachment, token, onUnauthorized, onOpen }) {
   const element = useRef(null)
   const [near, setNear] = useState(false)
   const [url, setUrl] = useState('')
   const [error, setError] = useState('')
   const [attempt, setAttempt] = useState(0)
-  const scale = Math.min(1, 240 / attachment.width, 288 / attachment.height)
+  const scale = Math.min(1, 320 / attachment.width, 360 / attachment.height)
 
   useEffect(() => {
     const observer = new IntersectionObserver(entries => setNear(entries[0].isIntersecting), {
@@ -38,11 +38,8 @@ export default function AttachmentImage({ attachment, token, onUnauthorized }) {
     setError('')
     async function load() {
       try {
-        const key = `${token}:${attachment.id}`
-        const cached = cache.get(key)
-        const blob = cached || await getAttachmentBlob(token, attachment.id, controller.signal)
+        const blob = await attachmentBlob(token, attachment.id, controller.signal)
         if (!active) return
-        remember(key, blob)
         objectUrl = URL.createObjectURL(blob)
         setUrl(objectUrl)
       } catch (error) {
@@ -59,10 +56,17 @@ export default function AttachmentImage({ attachment, token, onUnauthorized }) {
     }
   }, [near, token, attachment.id, attempt, onUnauthorized])
 
-  return <span ref={element} data-attachment-placeholder={attachment.id} className="relative mb-2 block max-w-full overflow-hidden rounded-lg bg-black/5"
+  return <span ref={element} data-attachment-placeholder={attachment.id} className="message-media relative block max-w-full overflow-hidden bg-black/5"
     style={{ width: attachment.width * scale, aspectRatio: `${attachment.width} / ${attachment.height}` }}>
-    {url ? <img src={url} alt="Message photo" data-attachment-id={attachment.id} width={attachment.width} height={attachment.height} className="absolute inset-0 h-full w-full object-contain" />
+    {url ? <button type="button" className="absolute inset-0 h-full w-full" aria-label="Open photo" onClick={() => onOpen?.(attachment)}><img src={url} alt="Message photo" data-attachment-id={attachment.id} width={attachment.width} height={attachment.height} className="absolute inset-0 h-full w-full object-contain" /></button>
       : error ? <span className="block text-sm">{error} <button type="button" className="underline" onClick={() => setAttempt(value => value + 1)}>Retry image</button></span>
         : <span role="status" className="text-xs">{near ? 'Loading image...' : 'Photo'}</span>}
   </span>
+}
+
+export async function attachmentBlob(token, id, signal) {
+  const key = `${token}:${id}`
+  const blob = cache.get(key) || await getAttachmentBlob(token, id, signal)
+  remember(key, blob)
+  return blob
 }
