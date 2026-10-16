@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import usePresence from '../hooks/usePresence.js'
+import PresenceLabel from '../components/chat/PresenceLabel.jsx'
 import useOptimisticMessages from '../hooks/useOptimisticMessages.js'
 import ChatPanel from '../components/ChatPanel.jsx'
 import { getUsers, getConversations } from '../services/api.js'
@@ -42,7 +44,8 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
   const [recentLoading, setRecentLoading] = useState(true)
   const [recentError, setRecentError] = useState('')
   const [conversationAttempt, setConversationAttempt] = useState(0)
-  const [onlineUserIds, setOnlineUserIds] = useState(new Set())
+  const presence = usePresence(token, onUnauthorized)
+  const onlineUserIds = presence.onlineIds
   const [pageVisible, setPageVisible] = useState(document.visibilityState === 'visible')
   const normalizedSearch = search.trim().toLowerCase()
   const messageListeners = useRef(new Set())
@@ -107,8 +110,9 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
 
   const onConversationOpened = useCallback((conversation) => {
     activeConversationId.current = conversation.id
+    presence.refresh()
     refreshRecent()
-  }, [refreshRecent])
+  }, [refreshRecent, presence.refresh])
 
   const subscribeToMutations = useCallback((listener) => {
     mutationListeners.current.add(listener)
@@ -160,21 +164,13 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
         for (const listener of statusListeners.current) listener(status)
         if (status.read_at) refreshRecent()
       },
-      onPresenceSnapshot: (ids) => {
-        setOnlineUserIds(new Set(ids))
-        refreshRecent()
-      },
-      onPresenceUpdate: ({ user_id, status }) => setOnlineUserIds((previous) => {
-        const next = new Set(previous)
-        if (status === 'online') next.add(user_id)
-        else next.delete(user_id)
-        return next
-      }),
+      onPresenceSnapshot: (ids) => { presence.snapshot(ids); refreshRecent() },
+      onPresenceUpdate: presence.update,
       onTyping: (event) => {
         for (const listener of typingListeners.current) listener(event)
       },
       onDisconnect: () => {
-        setOnlineUserIds(new Set())
+        presence.disconnect()
         for (const listener of typingListeners.current) listener(null)
       },
       onUnauthorized,
@@ -185,7 +181,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
       clearTimeout(recentTimer.current)
       realtime.current = null
     }
-  }, [token, onUnauthorized, user.id, acknowledge, updateRecentMessage, refreshRecent, handleMutation, wakeTimeline])
+  }, [token, onUnauthorized, user.id, acknowledge, updateRecentMessage, refreshRecent, handleMutation, wakeTimeline, presence.snapshot, presence.update, presence.disconnect])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -262,7 +258,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
                         </span>
                         <span className="flex items-center justify-between gap-2">
                           <span className={`text-[11px] ${onlineUserIds.has(conversation.other_user.id) ? 'text-emerald-700' : 'text-stone-500'}`}>
-                            {onlineUserIds.has(conversation.other_user.id) ? 'Online' : 'Offline'}
+                            <PresenceLabel online={onlineUserIds.has(conversation.other_user.id)} lastSeen={presence.lastSeen.get(conversation.other_user.id)} now={presence.now} />
                           </span>
                           {conversation.unread_count > 0 && !(selectedUser?.id === conversation.other_user.id && pageVisible) && (
                             <span aria-label={`${conversation.unread_count} unread ${conversation.unread_count === 1 ? 'message' : 'messages'}`} className="inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-[#b65339] px-1.5 py-0.5 text-[11px] font-semibold text-white">
@@ -312,7 +308,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
                       <span className="min-w-0 break-all font-medium">@{directoryUser.username}</span>
                       <span className={`flex shrink-0 items-center gap-1.5 text-xs ${onlineUserIds.has(directoryUser.id) ? 'text-emerald-700' : 'text-stone-500'}`}>
                         <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${onlineUserIds.has(directoryUser.id) ? 'bg-emerald-600' : 'bg-stone-300'}`} />
-                        {onlineUserIds.has(directoryUser.id) ? 'Online' : 'Offline'}
+                        {onlineUserIds.has(directoryUser.id) ? 'online' : 'offline'}
                       </span>
                     </button>
                   </li>
@@ -327,7 +323,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
           {selectedUser ? (
             <>
 
-              <ChatPanel optimistic={optimistic} onBack={() => setShowList(true)} key={`${selectedUser.id}:${conversationAttempt}`} user={user} selectedUser={selectedUser} initialConversation={selectedConversation} onConversationOpened={onConversationOpened} onMessageSent={updateRecentMessage} onMessageMutated={handleMutation} subscribeToMutations={subscribeToMutations} subscribeToSync={subscribeToSync} token={token} onUnauthorized={onUnauthorized} subscribeToMessages={subscribeToMessages} subscribeToStatus={subscribeToStatus} acknowledge={acknowledge} subscribeToTyping={subscribeToTyping} sendTyping={sendTyping} isOnline={onlineUserIds.has(selectedUser.id)} />
+              <ChatPanel lastSeen={presence.lastSeen.get(selectedUser.id)} now={presence.now} optimistic={optimistic} onBack={() => setShowList(true)} key={`${selectedUser.id}:${conversationAttempt}`} user={user} selectedUser={selectedUser} initialConversation={selectedConversation} onConversationOpened={onConversationOpened} onMessageSent={updateRecentMessage} onMessageMutated={handleMutation} subscribeToMutations={subscribeToMutations} subscribeToSync={subscribeToSync} token={token} onUnauthorized={onUnauthorized} subscribeToMessages={subscribeToMessages} subscribeToStatus={subscribeToStatus} acknowledge={acknowledge} subscribeToTyping={subscribeToTyping} sendTyping={sendTyping} isOnline={onlineUserIds.has(selectedUser.id)} />
             </>
           ) : (
             <div className="flex h-full flex-col justify-center p-6 sm:p-8">

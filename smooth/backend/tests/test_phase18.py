@@ -93,3 +93,37 @@ class Phase18Tests(unittest.TestCase):
         with legacy.connect() as c:
             self.assertEqual(c.execute(text('SELECT content, client_message_id FROM messages')).one(), ('Preserved', None))
         legacy.dispose()
+
+    def test_authorized_presence_snapshot_and_private_directory(self):
+        from app.services.presence import persist_seen
+        stamp = persist_seen(self.users['bob'])
+        snapshot = self.client.get('/api/users/presence', headers=self.headers('alice'))
+        self.assertEqual(snapshot.status_code, 200)
+        self.assertEqual([peer['user_id'] for peer in snapshot.json()['users']], [self.users['bob']])
+        self.assertEqual(snapshot.json()['users'][0]['last_seen_at'], stamp)
+        self.assertFalse(snapshot.json()['users'][0]['online'])
+        self.assertTrue(stamp.endswith('+00:00'))
+        self.assertEqual(self.client.get('/api/users/presence', headers=self.headers('charlie')).json()['users'], [])
+        self.assertEqual(self.client.get('/api/users/presence').status_code, 401)
+        directory = self.client.get('/api/users', headers=self.headers('charlie')).json()
+        self.assertTrue(all('last_seen_at' not in peer for peer in directory))
+
+    def test_last_seen_final_tab_and_detailed_event_capability(self):
+        from app.models.user import User
+        from datetime import datetime
+        receive = baseline.Phase8Tests.receive_type
+        with self.client.websocket_connect('/ws') as alice, self.client.websocket_connect('/ws') as bob:
+            alice.send_json({'type':'auth', 'token':self.tokens['alice'], 'presence_version':18})
+            self.assertEqual(alice.receive_json()['type'], 'auth:ok')
+            receive(self, alice, 'presence:snapshot')
+            baseline.Phase8Tests.authenticate(self, bob, 'bob')
+            receive(self, alice, 'presence:update')
+            with self.client.websocket_connect('/ws') as tab:
+                baseline.Phase8Tests.authenticate(self, tab, 'bob')
+                with SessionLocal() as db: first = db.get(User, self.users['bob']).last_seen_at
+                tab.send_json({'type':'presence:heartbeat'})
+                self.assertEqual(tab.receive_json()['type'], 'presence:alive')
+                with SessionLocal() as db: self.assertEqual(db.get(User, self.users['bob']).last_seen_at, first)
+            self.assertIn(self.users['bob'], self.client.get('/api/users/presence', headers=self.headers('alice')).json()['users'][0].values())
+        with SessionLocal() as db:
+            self.assertIsNotNone(db.get(User, self.users['bob']).last_seen_at)

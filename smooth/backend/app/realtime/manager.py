@@ -1,10 +1,13 @@
 import asyncio
+import logging
 from dataclasses import dataclass, field
-from time import time
+from time import time, monotonic
 from typing import Any
 
 from anyio import CancelScope
 from fastapi import WebSocket, WebSocketDisconnect
+from starlette.concurrency import run_in_threadpool
+from app.services.presence import persist_seen, presence_recipients
 
 
 @dataclass(eq=False)
@@ -12,27 +15,47 @@ class Connection:
     user_id: int
     socket: WebSocket
     expires_at: float
+    detailed_presence: bool = False
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 class ConnectionManager:
-    def __init__(self) -> None:
+    def __init__(self, durable=False) -> None:
+        self.durable = durable
+        self.last_persisted = {}
         self.connections: dict[int, set[Connection]] = {}
 
     def online_user_ids(self) -> list[int]:
         return sorted(self.connections)
 
-    async def presence_update(self, user_id: int, status: str) -> None:
-        await self.broadcast(
-            self.online_user_ids(),
-            {"type": "presence:update", "data": {"user_id": user_id, "status": status}},
-        )
+    async def touch(self, user_id: int, final=False):
+        if not self.durable:
+            return None
+        now = monotonic()
+        if not final and now - self.last_persisted.get(user_id, -60) < 60:
+            return None
+        self.last_persisted[user_id] = now
+        try:
+            return await run_in_threadpool(persist_seen, user_id)
+        except Exception:
+            logging.getLogger(__name__).exception("Unable to persist presence timestamp")
+            return None
 
-    async def register(self, user_id: int, socket: WebSocket, expires_at: float) -> Connection:
+    async def presence_update(self, user_id: int, status: str, last_seen_at=None) -> None:
+        peers = set(await run_in_threadpool(presence_recipients, user_id)) if last_seen_at else set()
+        for observer in tuple(self.connections):
+            for connection in tuple(self.connections.get(observer, ())):
+                data = {"user_id": user_id, "status": status}
+                if last_seen_at and observer in peers and connection.detailed_presence:
+                    data['last_seen_at'] = last_seen_at
+                await self._deliver(connection, {"type": "presence:update", "data": data})
+
+    async def register(self, user_id: int, socket: WebSocket, expires_at: float, detailed_presence=False) -> Connection:
         was_online = user_id in self.connections
-        connection = Connection(user_id, socket, expires_at)
+        connection = Connection(user_id, socket, expires_at, detailed_presence)
         self.connections.setdefault(user_id, set()).add(connection)
         try:
+            await self.touch(user_id)
             if not was_online:
                 await self.presence_update(user_id, "online")
             await self._deliver(connection, {
@@ -55,7 +78,11 @@ class ConnectionManager:
                 sockets.remove(connection)
                 if not sockets:
                     self.connections.pop(connection.user_id, None)
-                    await self.presence_update(connection.user_id, "offline")
+                    stamp = await self.touch(connection.user_id, final=True)
+                    # A new tab may authenticate while persistence awaits I/O.
+                    if connection.user_id not in self.connections:
+                        await self.presence_update(connection.user_id, "offline", stamp)
+                        self.last_persisted.pop(connection.user_id, None)
 
     async def expire(self, connection: Connection) -> None:
         async with connection.lock:
@@ -92,4 +119,4 @@ class ConnectionManager:
         await asyncio.gather(*(self.send_to_user(user_id, event) for user_id in set(user_ids)))
 
 
-manager = ConnectionManager()
+manager = ConnectionManager(durable=True)

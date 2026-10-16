@@ -231,3 +231,9 @@ export async function synchronize(token, conversationId, after, messageIds, sign
 export async function markConversationRead(token, conversationId, through, signal, read = true) {
   return request(`/api/conversations/${conversationId}/receipts`, { token, signal, body: { through, read } })
 }
+
+export async function getPresence(token, signal) {
+  const data = await request('/api/users/presence', { token, signal })
+  if (!Array.isArray(data?.users) || !Number.isFinite(Date.parse(data.server_time)) || !data.users.every(item => Number.isSafeInteger(item.user_id) && typeof item.online === 'boolean' && (item.last_seen_at === null || Number.isFinite(Date.parse(item.last_seen_at))))) throw apiError(GENERIC_ERROR)
+  return data
+}

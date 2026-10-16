@@ -15,7 +15,7 @@ from app.api.users import router as users_router
 from app.core.config import FRONTEND_ORIGIN
 from app.database.database import Base, engine
 from app.services.receipts import initialize_receipts
-from app.database.migrations import migrate_phase17
+from app.database.migrations import migrate_phase17, migrate_phase18
 from app.api.timeline import router as timeline_router
 
 
@@ -23,6 +23,7 @@ from app.api.timeline import router as timeline_router
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     Base.metadata.create_all(bind=engine)
     migrate_phase17(engine)
+    migrate_phase18(engine)
     initialize_receipts()
     try:
         yield

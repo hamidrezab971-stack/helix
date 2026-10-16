@@ -19,6 +19,7 @@ class User(Base):
         String(50), nullable=False, unique=True, index=True
     )
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.current_timestamp()
     )

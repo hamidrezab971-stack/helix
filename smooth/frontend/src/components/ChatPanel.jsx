@@ -10,7 +10,7 @@ import ChatComposer from './chat/ChatComposer.jsx'
 import { visiblePending } from '../utils/optimisticMessages.js'
 import useTimeline from '../hooks/useTimeline.js'
 
-export default function ChatPanel({ user, selectedUser, initialConversation, onConversationOpened, onMessageSent, onMessageMutated, subscribeToMutations, subscribeToSync, token, onUnauthorized, subscribeToMessages, subscribeToStatus, acknowledge, subscribeToTyping, sendTyping, isOnline, onBack, optimistic }) {
+export default function ChatPanel({ user, selectedUser, initialConversation, onConversationOpened, onMessageSent, onMessageMutated, subscribeToMutations, subscribeToSync, token, onUnauthorized, subscribeToMessages, subscribeToStatus, acknowledge, subscribeToTyping, sendTyping, isOnline, onBack, optimistic, lastSeen, now }) {
   const [retryAttempt, setRetryAttempt] = useState(0)
   const [content, setContent] = useState('')
   const sending = false
@@ -231,7 +231,7 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
 
   return (
     <section aria-labelledby="chat-title" className="chat-panel">
-      <ChatHeader selectedUser={selectedUser} isOnline={isOnline} otherTyping={otherTyping} onBack={onBack} />
+      <ChatHeader lastSeen={lastSeen} now={now} selectedUser={selectedUser} isOnline={isOnline} otherTyping={otherTyping} onBack={onBack} />
       {stage === 'opening' || stage === 'loading' ? (
         <p role="status" className="min-h-64 py-8 text-sm text-stone-500">{stage === 'opening' ? 'Opening conversation...' : 'Loading messages...'}</p>
       ) : stage === 'error' ? (

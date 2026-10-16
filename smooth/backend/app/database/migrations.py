@@ -25,5 +25,8 @@ def migrate_phase18(engine):
         if 'client_message_id' not in columns:
             connection.execute(text('ALTER TABLE messages ADD COLUMN client_message_id VARCHAR(36)'))
         connection.execute(text('CREATE UNIQUE INDEX IF NOT EXISTS ix_messages_client_id ON messages (sender_id, client_message_id)'))
+        user_columns = {column['name'] for column in inspect(connection).get_columns('users')}
+        if 'last_seen_at' not in user_columns:
+            connection.execute(text('ALTER TABLE users ADD COLUMN last_seen_at DATETIME'))
         MessageSendIntent.__table__.create(connection, checkfirst=True)
         connection.execute(text('INSERT OR IGNORE INTO smooth_schema_migrations (version) VALUES (18)'))

@@ -13,6 +13,7 @@ export function connectRealtime(token, { onMessage, onMutation, onReactions, onS
   let stopped = false
   let attempt = 0
   let stableTimer
+  let heartbeat
   let authTimer
   let authenticated = false
   const acknowledgements = new Map()
@@ -57,6 +58,7 @@ export function connectRealtime(token, { onMessage, onMutation, onReactions, onS
     clearTimeout(timer)
     clearTimeout(stableTimer)
     clearTimeout(authTimer)
+    clearInterval(heartbeat)
     window.removeEventListener('online', online)
     if (socket) socket.close(1000)
   }
@@ -89,7 +91,7 @@ export function connectRealtime(token, { onMessage, onMutation, onReactions, onS
     authTimer = setTimeout(() => current.close(), 10000)
     current.onopen = () => {
       if (stopped) return current.close(1000)
-      current.send(JSON.stringify({ type: 'auth', token }))
+      current.send(JSON.stringify({ type: 'auth', token, presence_version: 18 }))
     }
     current.onmessage = (event) => {
       if (stopped || current !== socket) return
@@ -102,6 +104,8 @@ export function connectRealtime(token, { onMessage, onMutation, onReactions, onS
       if (payload?.type === 'auth:error') return unauthorized()
       if (payload?.type === 'auth:ok') {
         authenticated = true
+        clearInterval(heartbeat)
+        heartbeat = setInterval(() => { if (current.readyState === WebSocket.OPEN) current.send(JSON.stringify({ type: 'presence:heartbeat' })) }, 30000)
         clearTimeout(authTimer)
         stableTimer = setTimeout(() => { attempt = 0 }, 10000)
         onWake?.()
@@ -134,7 +138,7 @@ export function connectRealtime(token, { onMessage, onMutation, onReactions, onS
       if (payload?.type === 'presence:snapshot' && Array.isArray(data?.online_user_ids) && data.online_user_ids.every(validId)) {
         onPresenceSnapshot(data.online_user_ids)
       } else if (payload?.type === 'presence:update' && validId(data?.user_id) && ['online', 'offline'].includes(data?.status)) {
-        onPresenceUpdate({ user_id: data.user_id, status: data.status })
+        onPresenceUpdate({ user_id: data.user_id, status: data.status, last_seen_at: typeof data.last_seen_at === 'string' && Number.isFinite(Date.parse(data.last_seen_at)) ? data.last_seen_at : null })
       } else if (['typing:start', 'typing:stop'].includes(payload?.type) && validId(data?.conversation_id) && validId(data?.user_id)) {
         onTyping({ type: payload.type, data: { conversation_id: data.conversation_id, user_id: data.user_id } })
       }
@@ -154,6 +158,7 @@ export function connectRealtime(token, { onMessage, onMutation, onReactions, onS
       authenticated = false
       clearTimeout(authTimer)
       clearTimeout(stableTimer)
+      clearInterval(heartbeat)
       onDisconnect()
       if (event.code === 4401) return unauthorized()
       reconnect()
