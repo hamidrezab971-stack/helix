@@ -2,6 +2,8 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } f
 import { sendMessage, sendImage, editMessage, deleteMessage } from '../services/api.js'
 import AttachmentImage from './AttachmentImage.jsx'
 import ReactionBar from './ReactionBar.jsx'
+import ChatHeader from './chat/ChatHeader.jsx'
+import ChatComposer from './chat/ChatComposer.jsx'
 import useTimeline from '../hooks/useTimeline.js'
 
 function replyPreview(message) {
@@ -12,14 +14,13 @@ function replyText(preview) {
   return preview.attachment_kind === 'image' ? `Photo${preview.content ? ` · ${preview.content}` : ''}` : preview.content
 }
 
-export default function ChatPanel({ user, selectedUser, initialConversation, onConversationOpened, onMessageSent, onMessageMutated, subscribeToMutations, subscribeToSync, token, onUnauthorized, subscribeToMessages, subscribeToStatus, acknowledge, subscribeToTyping, sendTyping, isOnline }) {
+export default function ChatPanel({ user, selectedUser, initialConversation, onConversationOpened, onMessageSent, onMessageMutated, subscribeToMutations, subscribeToSync, token, onUnauthorized, subscribeToMessages, subscribeToStatus, acknowledge, subscribeToTyping, sendTyping, isOnline, onBack }) {
   const [retryAttempt, setRetryAttempt] = useState(0)
   const [content, setContent] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState('')
   const [selectedImage, setSelectedImage] = useState(null)
   const [imagePreview, setImagePreview] = useState('')
-  const imageInput = useRef(null)
   const pending = useRef(false)
   const sendController = useRef(null)
   const history = useRef(null)
@@ -256,12 +257,8 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
   }
 
   return (
-    <section aria-labelledby="chat-title" className="flex min-w-0 flex-col p-6 sm:p-8">
-      <header className="border-b border-stone-200/80 pb-5">
-        <h2 id="chat-title" className="break-all text-xl font-semibold tracking-tight text-stone-900">@{selectedUser.username}</h2>
-        <p className={`mt-1 text-xs ${isOnline ? 'text-emerald-700' : 'text-stone-500'}`} aria-label="Contact presence">{isOnline ? 'Online' : 'Offline'}</p>
-        <p role="status" aria-label="Typing indicator" className="mt-1 min-h-4 text-xs text-stone-500">{otherTyping ? `${selectedUser.username} is typing...` : ''}</p>
-      </header>
+    <section aria-labelledby="chat-title" className="chat-panel">
+      <ChatHeader selectedUser={selectedUser} isOnline={isOnline} otherTyping={otherTyping} onBack={onBack} />
       {stage === 'opening' || stage === 'loading' ? (
         <p role="status" className="min-h-64 py-8 text-sm text-stone-500">{stage === 'opening' ? 'Opening conversation...' : 'Loading messages...'}</p>
       ) : stage === 'error' ? (
@@ -332,35 +329,7 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
             {(timeline.newCount > 0 || timeline.hasNewer) && <button type="button" className="secondary-button text-sm" disabled={timeline.busy} onClick={timeline.jumpLatest}>{timeline.newCount > 0 ? `${timeline.newCount} new ${timeline.newCount === 1 ? 'message' : 'messages'} · ` : ''}Jump to latest</button>}
           </div>
           {actionError && <p role="alert" className="form-error mb-3">{actionError}</p>}
-          <form onSubmit={handleSend} aria-busy={sending} className="border-t border-stone-200/80 pt-5">
-            {replyTarget && <div aria-label="Reply composer" className="mb-3 flex min-w-0 items-start justify-between gap-3 rounded-lg border-l-2 border-[#b65339] bg-stone-100 p-3 text-xs text-stone-600">
-              <span className="min-w-0"><span className="block font-semibold">Replying to {replyName(replyTarget)}</span><span className="block truncate">{replyText(replyTarget)}</span></span>
-              <button type="button" aria-label="Cancel reply" className="text-button min-h-8 shrink-0" disabled={sending} onClick={() => setReplyTarget(null)}>Cancel</button>
-            </div>}
-            <input ref={imageInput} type="file" accept="image/jpeg,image/png,image/webp" aria-label="Choose image" className="hidden" onChange={(event) => { chooseImage(event.target.files?.[0]); event.target.value = '' }} />
-            <button type="button" className="secondary-button mb-3" disabled={sending} onClick={() => imageInput.current?.click()}>Image</button>
-            {imagePreview && <div className="mb-3 space-y-2">
-              <img src={imagePreview} alt="Selected image preview" className="max-h-40 max-w-full rounded-lg object-contain" />
-              <p className="break-all text-xs text-stone-500">{selectedImage?.name}</p>
-              <button type="button" className="secondary-button" disabled={sending} onClick={() => setSelectedImage(null)}>Remove image</button>
-            </div>}
-            <label htmlFor="message-content" className="text-sm font-medium text-stone-800">{selectedImage ? 'Caption (optional)' : 'Message'}</label>
-            <textarea
-              id="message-content" className="auth-input min-h-24 resize-y" rows={3}
-              placeholder="Write a message..." maxLength={2000} disabled={sending}
-              aria-describedby="message-hint" value={content}
-              onChange={(event) => handleContentChange(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                  event.preventDefault()
-                  event.currentTarget.form.requestSubmit()
-                }
-              }}
-            />
-            <p id="message-hint" className="mt-2 text-xs leading-5 text-stone-500">Up to 2000 characters. Enter to send; Shift+Enter for a new line.</p>
-            {sendError && <p role="alert" className="form-error mt-3">{sendError}</p>}
-            <button type="submit" className="primary-button mt-4 w-full" disabled={sending || (!content.trim() && !selectedImage)}>{sending ? (selectedImage ? 'Uploading...' : 'Sending...') : 'Send'}</button>
-          </form>
+          <ChatComposer content={content} onChange={handleContentChange} onSubmit={handleSend} sending={sending} error={sendError} image={selectedImage} imagePreview={imagePreview} onImage={chooseImage} onRemoveImage={() => setSelectedImage(null)} replyTarget={replyTarget} replyName={replyName} replyText={replyText} onCancelReply={() => setReplyTarget(null)} />
         </>
       )}
     </section>

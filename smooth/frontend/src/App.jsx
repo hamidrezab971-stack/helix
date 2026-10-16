@@ -139,6 +139,8 @@ export default function App() {
     }} />
   }
 
+  if (user && !checking && !restoreError) return <main className="messaging-app">{content}</main>
+
   return (
     <div className="app-shell flex min-h-svh flex-col px-5 sm:px-8">
       <header className="mx-auto flex w-full max-w-5xl items-center justify-between py-7 sm:py-9">

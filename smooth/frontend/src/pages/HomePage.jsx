@@ -29,6 +29,7 @@ function previewText(message) {
 }
 
 export default function HomePage({ user, token, error, onLogout, onUnauthorized }) {
+  const [showList, setShowList] = useState(true)
   const [search, setSearch] = useState('')
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
@@ -215,8 +216,9 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
   }, [token, normalizedSearch, retryAttempt, onUnauthorized])
 
   return (
-    <section aria-labelledby="directory-title" className="w-full max-w-5xl overflow-hidden rounded-3xl border border-stone-200/80 bg-white shadow-[0_16px_64px_-32px_rgba(56,40,25,0.2)]">
-      <header className="flex flex-col gap-5 border-b border-stone-200/80 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
+    <section aria-labelledby="directory-title" className="chat-shell" data-chat-open={selectedUser && !showList ? true : false}>
+      <div className="chat-sidebar">
+      <header className="sidebar-header">
         <div className="min-w-0">
           <h1 id="directory-title" className="text-2xl font-semibold tracking-tight text-stone-900">Your conversations.</h1>
           <p className="mt-2 text-sm text-stone-500">Recent chats and people.</p>
@@ -226,9 +228,8 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
           <button type="button" className="secondary-button shrink-0" onClick={onLogout}>Log out</button>
         </div>
       </header>
-      {error && <p role="alert" className="form-error m-6">{error}</p>}
-      <div className="grid md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-        <div className={`min-w-0 p-6 sm:p-8 ${selectedUser ? 'hidden md:block' : 'block'}`}>
+      {error && <p role="alert" className="form-error m-3">{error}</p>}
+      <div className="sidebar-content">
           <section aria-labelledby="recent-title" className="mb-8">
             <h2 id="recent-title" className="text-sm font-semibold text-stone-800">Chats</h2>
             {recentError && <div className="mt-3 space-y-3">
@@ -242,6 +243,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
                   <li key={conversation.id}>
                     <button type="button" className="recent-row" aria-pressed={selectedUser?.id === conversation.other_user.id}
                       onClick={() => {
+                        setShowList(false)
                         setSelectedUser(conversation.other_user)
                         setSelectedConversation(conversation)
                         activeConversationId.current = conversation.id
@@ -297,6 +299,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
                       type="button" className="user-row"
                       aria-pressed={selectedUser?.id === directoryUser.id}
                       onClick={() => {
+                        setShowList(false)
                         setSelectedUser(directoryUser)
                         setSelectedConversation(null)
                         activeConversationId.current = null
@@ -316,11 +319,12 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
           </div>
         </section>
         </div>
-        <aside aria-label="Conversation" className={`min-w-0 border-t border-stone-200/80 bg-[#fcfbf9] md:border-t-0 md:border-l ${selectedUser ? 'block' : 'hidden md:block'}`}>
+        </div>
+        <aside aria-label="Conversation" className="conversation-pane">
           {selectedUser ? (
             <>
-              <button type="button" className="secondary-button mx-6 mt-5 md:hidden" onClick={() => { setSelectedUser(null); setSelectedConversation(null); activeConversationId.current = null }}>Back to chats</button>
-              <ChatPanel key={`${selectedUser.id}:${conversationAttempt}`} user={user} selectedUser={selectedUser} initialConversation={selectedConversation} onConversationOpened={onConversationOpened} onMessageSent={updateRecentMessage} onMessageMutated={handleMutation} subscribeToMutations={subscribeToMutations} subscribeToSync={subscribeToSync} token={token} onUnauthorized={onUnauthorized} subscribeToMessages={subscribeToMessages} subscribeToStatus={subscribeToStatus} acknowledge={acknowledge} subscribeToTyping={subscribeToTyping} sendTyping={sendTyping} isOnline={onlineUserIds.has(selectedUser.id)} />
+
+              <ChatPanel onBack={() => setShowList(true)} key={`${selectedUser.id}:${conversationAttempt}`} user={user} selectedUser={selectedUser} initialConversation={selectedConversation} onConversationOpened={onConversationOpened} onMessageSent={updateRecentMessage} onMessageMutated={handleMutation} subscribeToMutations={subscribeToMutations} subscribeToSync={subscribeToSync} token={token} onUnauthorized={onUnauthorized} subscribeToMessages={subscribeToMessages} subscribeToStatus={subscribeToStatus} acknowledge={acknowledge} subscribeToTyping={subscribeToTyping} sendTyping={sendTyping} isOnline={onlineUserIds.has(selectedUser.id)} />
             </>
           ) : (
             <div className="flex h-full flex-col justify-center p-6 sm:p-8">
@@ -330,7 +334,6 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
             </div>
           )}
         </aside>
-      </div>
     </section>
   )
 }
