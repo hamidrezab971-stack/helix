@@ -1,17 +1,24 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import useChatViewport from '../hooks/useChatViewport.js'
 import useMediaQuery from '../hooks/useMediaQuery.js'
 import usePresence from '../hooks/usePresence.js'
-import PresenceLabel from '../components/chat/PresenceLabel.jsx'
+import { flushSync } from 'react-dom'
+import useAppNavigation from '../hooks/useAppNavigation.js'
+import useUserDirectory from '../hooks/useUserDirectory.js'
+import { matchingConversations } from '../utils/navigation.js'
+import BottomNavigation from '../components/navigation/BottomNavigation.jsx'
+import PeopleList from '../components/navigation/PeopleList.jsx'
+import { ProfilePage, SettingsPage } from '../components/navigation/AccountPages.jsx'
+import ConversationListItem from '../components/chat/ConversationListItem.jsx'
+import EmptyState from '../components/chat/EmptyState.jsx'
+import ConnectionStatus from '../components/chat/ConnectionStatus.jsx'
+import Icon, { HelixMark } from '../components/ui/Icon.jsx'
 import useOptimisticMessages from '../hooks/useOptimisticMessages.js'
 import ChatPanel from '../components/ChatPanel.jsx'
-import { getUsers, getConversations } from '../services/api.js'
+import { getConversations } from '../services/api.js'
 import { connectRealtime } from '../services/realtime.js'
-
-function newerMessage(incoming, current) {
-  return incoming && (!current || Date.parse(incoming.created_at) > Date.parse(current.created_at)
-    || (Date.parse(incoming.created_at) === Date.parse(current.created_at) && incoming.id > current.id))
-}
+import { ProfileSurface } from '../components/profile/ProfilePanel.jsx'
+import { useIdentity } from '../components/profile/IdentityProvider.jsx'
 
 function sortRecent(conversations) {
   return [...conversations].sort((a, b) => {
@@ -20,30 +27,26 @@ function sortRecent(conversations) {
   }).slice(0, 50)
 }
 
-function recentTime(timestamp) {
-  // SQLite stores UTC datetimes without an offset; format in the viewer's zone.
-  const date = new Date(/(Z|[+-]\d\d:\d\d)$/.test(timestamp) ? timestamp : `${timestamp}Z`)
-  const today = new Date()
-  return new Intl.DateTimeFormat(undefined, date.toDateString() === today.toDateString()
-    ? { hour: '2-digit', minute: '2-digit' } : { month: 'short', day: 'numeric' }).format(date)
-}
-
-function previewText(message) {
-  const text = message.content.replace(/\s+/g, ' ')
-  return message.attachment ? `Photo${text ? ` · ${text}` : ''}` : text
-}
-
-export default function HomePage({ user, token, error, onLogout, onUnauthorized }) {
+export default function HomePage({ user, token, error, onLogout, onUnauthorized, theme, onToggleTheme }) {
   useChatViewport()
+  const identity = useIdentity()
+  const updateIdentity = identity?.update
   const desktop = useMediaQuery('(min-width: 768px)')
-  const [showList, setShowList] = useState(true)
-  const chatVisible = desktop || !showList
+  const [connectionState, setConnectionState] = useState('connecting')
+  const navigation = useAppNavigation()
+  const { route } = navigation
+  const chatVisible = desktop || (route.chat !== null && !route.search)
   const [search, setSearch] = useState('')
-  const [users, setUsers] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState('')
-  const [retryAttempt, setRetryAttempt] = useState(0)
+  const [contactSearch, setContactSearch] = useState('')
+  const [searchTab, setSearchTab] = useState('chats')
+  const searchInput = useRef(null)
+  const searchButton = useRef(null)
+  const panels = useRef({})
+  const scrollPositions = useRef({})
+  const peers = useRef(new Map())
   const [selectedUser, setSelectedUser] = useState(null)
+  const [profilePeer, setProfilePeer] = useState(null)
+  const closeProfile = useCallback(() => setProfilePeer(null), [])
   const [selectedConversation, setSelectedConversation] = useState(null)
   const [recent, setRecent] = useState([])
   const [recentLoading, setRecentLoading] = useState(true)
@@ -52,7 +55,10 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
   const presence = usePresence(token, onUnauthorized)
   const onlineUserIds = presence.onlineIds
   const [pageVisible, setPageVisible] = useState(document.visibilityState === 'visible')
-  const normalizedSearch = search.trim().toLowerCase()
+  const directory = useUserDirectory({ token, userId: user.id,
+    enabled: route.search ? searchTab === 'people' : route.screen === 'contacts',
+    query: route.search ? search : contactSearch, onUnauthorized })
+  const filteredRecent = matchingConversations(recent, search)
   const messageListeners = useRef(new Set())
   const syncListeners = useRef(new Set())
   const mutationListeners = useRef(new Set())
@@ -72,6 +78,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
     try {
       const loaded = await getConversations(token, controller.signal)
       if (controller.signal.aborted) return
+      for (const item of loaded) { peers.current.set(item.other_user.id, { peer: item.other_user, conversation: item }); updateIdentity?.(item.other_user) }
       setRecent(sortRecent(loaded))
     } catch (error) {
       if (controller.signal.aborted || error.name === 'AbortError') return
@@ -80,7 +87,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
     } finally {
       if (!controller.signal.aborted) setRecentLoading(false)
     }
-  }, [token, onUnauthorized])
+  }, [token, onUnauthorized, updateIdentity])
 
   useEffect(() => {
     refreshRecent()
@@ -157,6 +164,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
   useEffect(() => {
     if (!token) return
     const connection = connectRealtime(token, {
+      onProfile: updateIdentity,
       onWake: wakeTimeline,
       onReactions: () => {},
       onMutation: handleMutation,
@@ -169,12 +177,13 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
         for (const listener of statusListeners.current) listener(status)
         if (status.read_at) refreshRecent()
       },
-      onPresenceSnapshot: (ids) => { presence.snapshot(ids); refreshRecent() },
+      onPresenceSnapshot: (ids) => { setConnectionState('connected'); presence.snapshot(ids); refreshRecent() },
       onPresenceUpdate: presence.update,
       onTyping: (event) => {
         for (const listener of typingListeners.current) listener(event)
       },
       onDisconnect: () => {
+        setConnectionState('reconnecting')
         presence.disconnect()
         for (const listener of typingListeners.current) listener(null)
       },
@@ -186,160 +195,123 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
       clearTimeout(recentTimer.current)
       realtime.current = null
     }
-  }, [token, onUnauthorized, user.id, acknowledge, updateRecentMessage, refreshRecent, handleMutation, wakeTimeline, presence.snapshot, presence.update, presence.disconnect])
+  }, [token, onUnauthorized, user.id, acknowledge, updateRecentMessage, refreshRecent, handleMutation, wakeTimeline, presence.snapshot, presence.update, presence.disconnect, updateIdentity])
+
+  // Search and each destination have independent, retained scroll containers.
+  const visiblePanel = route.search ? `search-${searchTab}` : route.screen
+  useLayoutEffect(() => {
+    const panel = panels.current[visiblePanel]
+    if (panel) panel.scrollTop = scrollPositions.current[visiblePanel] || 0
+  }, [visiblePanel, route.chat, directory.pending])
 
   useEffect(() => {
-    const controller = new AbortController()
-    let active = true
-    setLoading(true)
-    setLoadError('')
-    setUsers([])
+    if (!route.chat || route.chat === selectedUser?.id) return
+    const remembered = peers.current.get(route.chat)
+    if (!remembered) return
+    setSelectedUser(remembered.peer)
+    setSelectedConversation(remembered.conversation)
+    activeConversationId.current = remembered.conversation?.id || null
+    setConversationAttempt(attempt => attempt + 1)
+  }, [route.chat, selectedUser?.id])
 
-    async function loadUsers() {
-      try {
-        const directory = await getUsers(token, normalizedSearch, controller.signal)
-        if (active) setUsers(directory)
-      } catch (error) {
-        if (!active || error.name === 'AbortError') return
-        if (error.status === 401) {
-          onUnauthorized()
-        } else {
-          setLoadError('Unable to load users.')
-        }
-      } finally {
-        if (active) setLoading(false)
-      }
+  useEffect(() => {
+    function escape(event) {
+      if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented || document.querySelector('[role="dialog"]')) return
+      if (route.chat && !desktop) navigation.back()
+      else if (route.search || route.screen !== 'chats') navigation.back()
     }
+    document.addEventListener('keydown', escape)
+    return () => document.removeEventListener('keydown', escape)
+  }, [route, desktop, navigation.back])
 
-    const timeout = setTimeout(loadUsers, normalizedSearch ? 300 : 0)
-    return () => {
-      active = false
-      clearTimeout(timeout)
-      controller.abort()
-    }
-  }, [token, normalizedSearch, retryAttempt, onUnauthorized])
+  function openSearch() {
+    setSearch('')
+    setSearchTab('chats')
+    // Focus inside the tap handler so Android can open its keyboard naturally.
+    flushSync(() => navigation.navigate({ ...route, search: true }))
+    searchInput.current?.focus({ preventScroll: true })
+  }
+  const wasSearching = useRef(false)
+  useLayoutEffect(() => {
+    if (wasSearching.current && !route.search && (desktop || !route.chat)) searchButton.current?.focus({ preventScroll: true })
+    wasSearching.current = route.search
+  }, [route.search, route.chat, desktop])
+
+  function selectConversation(peer, conversation = null) {
+    if (peer.id === user.id) return
+    const existing = conversation || recent.find(item => item.other_user.id === peer.id) || null
+    peers.current.set(peer.id, { peer, conversation: existing })
+    if (!navigation.navigate({ screen: 'chats', search: false, chat: peer.id }, route.chat !== null && !route.search)) return
+    if (selectedUser?.id === peer.id) return
+    setSelectedUser(peer)
+    setSelectedConversation(existing)
+    activeConversationId.current = existing?.id || null
+    setConversationAttempt(attempt => attempt + 1)
+  }
+  function backToChats() { navigation.back() }
+
+  function conversationList(items, searching = false) {
+    return <>
+      {recentError && <div className="sidebar-error"><p role="alert">{recentError}</p><button type="button" className="text-button" onClick={refreshRecent}>Retry conversations</button></div>}
+      {recentLoading && recent.length === 0 ? <div className="conversation-skeleton" role="status" aria-label="Loading conversations"><span /><span /><span /></div>
+        : !recentError && items.length === 0 ? <EmptyState compact title={searching ? 'No matching chats.' : 'No conversations yet.'}>{searching ? 'Try another username or search People.' : 'Tap New chat to start a conversation.'}</EmptyState>
+        : <ul aria-label={searching ? 'Matching conversations' : 'Recent conversations'} className="conversation-list">
+          {items.map(conversation => <ConversationListItem key={conversation.id} conversation={conversation} userId={user.id} selected={selectedUser?.id === conversation.other_user.id} active={selectedUser?.id === conversation.other_user.id && pageVisible && chatVisible} online={onlineUserIds.has(conversation.other_user.id)} onSelect={selectConversation} onProfile={setProfilePeer} />)}
+        </ul>}
+    </>
+  }
+  function panelProps(name) {
+    return { ref: element => { panels.current[name] = element }, hidden: visiblePanel !== name,
+      onScroll: event => { if (event.currentTarget.clientHeight > 0) scrollPositions.current[name] = event.currentTarget.scrollTop }, className: 'sidebar-content navigation-surface' }
+  }
+  const titles = { chats: 'Chats', contacts: 'Contacts', settings: 'Settings', profile: 'Profile' }
 
   return (
-    <section aria-labelledby="directory-title" className="chat-shell" data-chat-open={selectedUser && !showList ? true : false}>
+    <section aria-labelledby="directory-title" className="chat-shell" data-chat-open={route.chat !== null && !route.search}>
       <div className="chat-sidebar">
-      <header className="sidebar-header">
-        <div className="min-w-0">
-          <h1 id="directory-title" className="text-2xl font-semibold tracking-tight text-stone-900">Your conversations.</h1>
-          <p className="mt-2 text-sm text-stone-500">Recent chats and people.</p>
-        </div>
-        <div className="flex min-w-0 items-center justify-between gap-4">
-          <span className="min-w-0 break-all text-sm font-medium text-stone-700">@{user.username}</span>
-          <button type="button" className="secondary-button shrink-0" onClick={onLogout}>Log out</button>
-        </div>
-      </header>
-      {error && <p role="alert" className="form-error m-3">{error}</p>}
-      <div className="sidebar-content">
-          <section aria-labelledby="recent-title" className="mb-8">
-            <h2 id="recent-title" className="text-sm font-semibold text-stone-800">Chats</h2>
-            {recentError && <div className="mt-3 space-y-3">
-              <p role="alert" className="form-error">{recentError}</p>
-              <button type="button" className="secondary-button" onClick={refreshRecent}>Retry conversations</button>
-            </div>}
-            {recentLoading && recent.length === 0 ? <p role="status" className="mt-3 text-sm text-stone-500">Loading conversations...</p>
-              : !recentError && recent.length === 0 ? <p className="mt-3 text-sm leading-6 text-stone-500">No conversations yet.<br />Find someone to start chatting.</p>
-              : <ul aria-label="Recent conversations" className="mt-3 space-y-2">
-                {recent.map((conversation) => (
-                  <li key={conversation.id}>
-                    <button type="button" className="recent-row" aria-pressed={selectedUser?.id === conversation.other_user.id}
-                      onClick={() => {
-                        setShowList(false)
-                        if (!desktop && showList && selectedUser?.id === conversation.other_user.id) return
-                        setSelectedUser(conversation.other_user)
-                        setSelectedConversation(conversation)
-                        activeConversationId.current = conversation.id
-                        setConversationAttempt((attempt) => attempt + 1)
-                      }}>
-                      <span className="flex min-w-0 flex-1 flex-col gap-1.5">
-                        <span className="flex min-w-0 items-center justify-between gap-2">
-                          <span className="truncate font-medium">@{conversation.other_user.username}</span>
-                          {conversation.last_message && <time className="shrink-0 text-[11px] text-stone-500" dateTime={conversation.last_message.created_at} title={conversation.last_message.created_at}>{recentTime(conversation.last_message.created_at)}</time>}
-                        </span>
-                        <span className="block truncate text-xs text-stone-500" aria-label="Last message preview">
-                          {conversation.last_message ? `${conversation.last_message.sender_id === user.id ? 'You: ' : ''}${previewText(conversation.last_message)}` : 'No messages yet.'}
-                        </span>
-                        <span className="flex items-center justify-between gap-2">
-                          <span className={`text-[11px] ${onlineUserIds.has(conversation.other_user.id) ? 'text-emerald-700' : 'text-stone-500'}`}>
-                            <PresenceLabel online={onlineUserIds.has(conversation.other_user.id)} lastSeen={presence.lastSeen.get(conversation.other_user.id)} now={presence.now} />
-                          </span>
-                          {conversation.unread_count > 0 && !(selectedUser?.id === conversation.other_user.id && pageVisible && chatVisible) && (
-                            <span aria-label={`${conversation.unread_count} unread ${conversation.unread_count === 1 ? 'message' : 'messages'}`} className="inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-[#b65339] px-1.5 py-0.5 text-[11px] font-semibold text-white">
-                              {conversation.unread_count > 99 ? '99+' : conversation.unread_count}
-                            </span>
-                          )}
-                        </span>
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>}
-          </section>
-        <section aria-label="User directory">
-          <h2 className="mb-3 text-sm font-semibold text-stone-800">People</h2>
-          <label htmlFor="user-search" className="text-sm font-medium text-stone-800">Search by username</label>
-          <input
-            id="user-search" type="search" className="auth-input" placeholder="Search users..."
-            autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false}
-            value={search} onChange={(event) => setSearch(event.target.value)}
-          />
-          <div className="mt-6 min-h-48" aria-busy={loading}>
-            {loading ? (
-              <p role="status" className="py-6 text-sm text-stone-500">Loading users...</p>
-            ) : loadError ? (
-              <div className="space-y-4 py-6">
-                <p role="alert" className="form-error">{loadError}</p>
-                <button type="button" className="secondary-button" onClick={() => setRetryAttempt((attempt) => attempt + 1)}>Try again</button>
-              </div>
-            ) : users.length === 0 ? (
-              <p role="status" className="py-6 text-sm text-stone-500">{normalizedSearch ? 'No users found.' : 'No users yet.'}</p>
-            ) : (
-              <ul className="space-y-2">
-                {users.map((directoryUser) => (
-                  <li key={directoryUser.id}>
-                    <button
-                      type="button" className="user-row"
-                      aria-pressed={selectedUser?.id === directoryUser.id}
-                      onClick={() => {
-                        setShowList(false)
-                        if (!desktop && showList && selectedUser?.id === directoryUser.id) return
-                        setSelectedUser(directoryUser)
-                        setSelectedConversation(null)
-                        activeConversationId.current = null
-                        setConversationAttempt((attempt) => attempt + 1)
-                      }}
-                    >
-                      <span className="min-w-0 break-all font-medium">@{directoryUser.username}</span>
-                      <span className={`flex shrink-0 items-center gap-1.5 text-xs ${onlineUserIds.has(directoryUser.id) ? 'text-emerald-700' : 'text-stone-500'}`}>
-                        <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${onlineUserIds.has(directoryUser.id) ? 'bg-emerald-600' : 'bg-stone-300'}`} />
-                        {onlineUserIds.has(directoryUser.id) ? 'online' : 'offline'}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+        <header className="sidebar-header navigation-header" data-searching={route.search}>
+          <div className="navigation-titlebar" hidden={route.search}>
+            {route.screen === 'chats' ? <span className="brand-mark"><HelixMark /></span> : <button type="button" className="icon-button" aria-label="Back" onClick={navigation.back}><Icon name="back" /></button>}
+            <h1 id="directory-title">{route.screen === 'chats' ? <><span className="navigation-brand">helix<span className="brand-period">.</span></span><span className="sr-only"> Chats</span></> : titles[route.screen]}</h1>
+            {route.screen === 'chats' && <button ref={searchButton} type="button" className="icon-button" aria-label="Search" onClick={openSearch}><Icon name="search" /></button>}
           </div>
-        </section>
-        </div>
-        </div>
-        <aside aria-label="Conversation" className="conversation-pane">
-          {selectedUser ? (
-            <>
-
-              <ChatPanel active={chatVisible} lastSeen={presence.lastSeen.get(selectedUser.id)} now={presence.now} optimistic={optimistic} onBack={() => setShowList(true)} key={`${selectedUser.id}:${conversationAttempt}`} user={user} selectedUser={selectedUser} initialConversation={selectedConversation} onConversationOpened={onConversationOpened} onMessageSent={updateRecentMessage} onMessageMutated={handleMutation} subscribeToMutations={subscribeToMutations} subscribeToSync={subscribeToSync} token={token} onUnauthorized={onUnauthorized} subscribeToMessages={subscribeToMessages} subscribeToStatus={subscribeToStatus} acknowledge={acknowledge} subscribeToTyping={subscribeToTyping} sendTyping={sendTyping} isOnline={onlineUserIds.has(selectedUser.id)} />
-            </>
-          ) : (
-            <div className="flex h-full flex-col justify-center p-6 sm:p-8">
-              <p className="text-xs font-semibold uppercase tracking-widest text-stone-500">A little more connection</p>
-              <p className="mt-3 text-2xl font-semibold tracking-tight text-stone-900">Select a user.</p>
-              <p className="mt-3 text-sm leading-6 text-stone-500">Choose someone from the directory to open a conversation.</p>
+          <div className="navigation-searchbar" hidden={!route.search}>
+            <button type="button" className="icon-button" aria-label="Close search" onClick={navigation.back}><Icon name="back" /></button>
+            <div className="search-field">
+              <label htmlFor="chat-search" className="sr-only">Search by username</label>
+              <input ref={searchInput} id="chat-search" type="search" placeholder="Search usernames" autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} value={search} onChange={event => { scrollPositions.current["search-chats"] = 0; scrollPositions.current["search-people"] = 0; setSearch(event.target.value) }} />
+              {search && <button type="button" className="icon-button" aria-label="Clear search" onClick={() => { setSearch(''); searchInput.current?.focus() }}><Icon name="close" size={17} /></button>}
             </div>
-          )}
-        </aside>
+          </div>
+          {route.search && <div className="search-tabs" role="tablist" aria-label="Search in">{['chats', 'people'].map(tab => <button type="button" key={tab} id={`tab-${tab}`} role="tab" aria-controls={`results-${tab}`} aria-selected={searchTab === tab} tabIndex={searchTab === tab ? 0 : -1} onClick={() => setSearchTab(tab)} onKeyDown={event => {
+            if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const next = ['Home', 'End'].includes(event.key) ? (event.key === 'Home' ? 'chats' : 'people') : tab === 'chats' ? 'people' : 'chats'; setSearchTab(next); document.getElementById(`tab-${next}`)?.focus() }
+          }}>{tab === 'chats' ? 'Chats' : 'People'}</button>)}</div>}
+          {!route.search && route.screen === 'contacts' && <div className="search-field contacts-search">
+            <Icon name="search" size={18} /><label htmlFor="user-search" className="sr-only">Search contacts by username</label>
+            <input id="user-search" type="search" placeholder="Find someone…" autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} value={contactSearch} onChange={event => { scrollPositions.current.contacts = 0; setContactSearch(event.target.value) }} />
+            {contactSearch && <button type="button" className="icon-button" aria-label="Clear contacts search" onClick={() => { setContactSearch(''); document.getElementById('user-search')?.focus() }}><Icon name="close" size={17} /></button>}
+          </div>}
+        </header>
+        <ConnectionStatus state={connectionState} />
+        {error && <p role="alert" className="form-error m-3">{error}</p>}
+        <div className="navigation-body">
+          <div {...panelProps('chats')} aria-label="Chats">{conversationList(recent)}</div>
+          <div {...panelProps('contacts')} aria-label="User directory">{visiblePanel === 'contacts' && <PeopleList directory={directory} onlineIds={onlineUserIds} selectedId={selectedUser?.id} onSelect={selectConversation} onProfile={setProfilePeer} query={contactSearch} />}</div>
+          <div {...panelProps('search-chats')} id="results-chats" role="tabpanel" aria-labelledby="tab-chats">{route.search && conversationList(filteredRecent, true)}</div>
+          <div {...panelProps('search-people')} id="results-people" role="tabpanel" aria-labelledby="tab-people">{visiblePanel === 'search-people' && <PeopleList directory={directory} onlineIds={onlineUserIds} selectedId={selectedUser?.id} onSelect={selectConversation} onProfile={setProfilePeer} query={search} />}</div>
+          <div {...panelProps('settings')}>{visiblePanel === 'settings' && <SettingsPage theme={theme} onToggleTheme={onToggleTheme} />}</div>
+          <div {...panelProps('profile')}>{visiblePanel === 'profile' && <ProfilePage user={user} onLogout={onLogout} />}</div>
+          {route.screen === 'chats' && !route.search && <button type="button" className="new-chat-button" aria-label="New chat" title="New chat" onClick={() => navigation.tab('contacts')}><Icon name="compose" size={22} /></button>}
+        </div>
+        <BottomNavigation screen={route.screen} onNavigate={navigation.tab} />
+      </div>
+      <aside aria-label="Conversation" className="conversation-pane">
+        {selectedUser ? <>
+          <ConnectionStatus state={connectionState} />
+          <ChatPanel active={chatVisible} lastSeen={presence.lastSeen.get(selectedUser.id)} now={presence.now} optimistic={optimistic} onBack={backToChats} onProfile={setProfilePeer} key={`${selectedUser.id}:${conversationAttempt}`} user={user} selectedUser={selectedUser} initialConversation={selectedConversation} onConversationOpened={onConversationOpened} onMessageSent={updateRecentMessage} onMessageMutated={handleMutation} subscribeToMutations={subscribeToMutations} subscribeToSync={subscribeToSync} token={token} onUnauthorized={onUnauthorized} subscribeToMessages={subscribeToMessages} subscribeToStatus={subscribeToStatus} acknowledge={acknowledge} subscribeToTyping={subscribeToTyping} sendTyping={sendTyping} isOnline={onlineUserIds.has(selectedUser.id)} />
+        </> : <EmptyState title="Good conversations start with hello.">Choose a chat or find someone to talk to.</EmptyState>}
+      </aside>
+      {profilePeer && <ProfileSurface user={profilePeer} online={onlineUserIds.has(profilePeer.id)} lastSeen={presence.lastSeen.get(profilePeer.id)} onClose={closeProfile} onChat={selectConversation} />}
     </section>
   )
 }

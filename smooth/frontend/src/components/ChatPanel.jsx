@@ -7,10 +7,12 @@ import { replyPreview, replyText } from './chat/MessageBubble.jsx'
 import useMessageActions from '../hooks/useMessageActions.js'
 import ChatHeader from './chat/ChatHeader.jsx'
 import ChatComposer from './chat/ChatComposer.jsx'
+import EmptyState from './chat/EmptyState.jsx'
+import Icon from './ui/Icon.jsx'
 import { visiblePending } from '../utils/optimisticMessages.js'
 import useTimeline from '../hooks/useTimeline.js'
 
-export default function ChatPanel({ user, selectedUser, initialConversation, onConversationOpened, onMessageSent, onMessageMutated, subscribeToMutations, subscribeToSync, token, onUnauthorized, subscribeToMessages, subscribeToTyping, sendTyping, isOnline, onBack, optimistic, lastSeen, now, active = true }) {
+export default function ChatPanel({ user, selectedUser, initialConversation, onConversationOpened, onMessageSent, onMessageMutated, subscribeToMutations, subscribeToSync, token, onUnauthorized, subscribeToMessages, subscribeToTyping, sendTyping, isOnline, onBack, onProfile, optimistic, lastSeen, now, active = true }) {
   const [retryAttempt, setRetryAttempt] = useState(0)
   const [content, setContent] = useState('')
   const [draftId, setDraftId] = useState(null)
@@ -155,6 +157,7 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
     const observer = new ResizeObserver(() => { if (isActive.current && atBottom.current) element.scrollTop = element.scrollHeight })
     const list = element.querySelector('ol')
     if (list) observer.observe(list)
+    observer.observe(element)
     return () => observer.disconnect()
   }, [stage, active, Boolean(messages.length || pendingMessages.length)])
 
@@ -273,21 +276,21 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
 
   return (
     <section aria-labelledby="chat-title" className="chat-panel">
-      <ChatHeader lastSeen={lastSeen} now={now} selectedUser={selectedUser} isOnline={isOnline} otherTyping={otherTyping} onBack={onBack} />
+      <ChatHeader lastSeen={lastSeen} now={now} selectedUser={selectedUser} isOnline={isOnline} otherTyping={otherTyping} onBack={onBack} onProfile={onProfile} />
       {stage === 'opening' || stage === 'loading' ? (
-        <p role="status" className="min-h-64 py-8 text-sm text-stone-500">{stage === 'opening' ? 'Opening conversation...' : 'Loading messages...'}</p>
+        <p role="status" className="chat-loading"><span className="loading-spinner" aria-hidden="true" />{stage === 'opening' ? 'Opening conversation…' : 'Loading messages…'}</p>
       ) : stage === 'error' ? (
-        <div className="min-h-64 space-y-4 py-8">
+        <div className="chat-load-error">
           <p role="alert" className="form-error">{loadError}</p>
           <button type="button" className="secondary-button" onClick={() => setRetryAttempt((attempt) => attempt + 1)}>Try again</button>
         </div>
       ) : (
         <>
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="timeline-toolbar">
             {timeline.hasOlder && <button type="button" className="text-button min-h-9 text-sm" disabled={timeline.busy} onClick={timeline.loadOlder}>Load older messages</button>}
-            {timeline.busy && <span role="status" className="text-xs text-stone-500">Updating messages...</span>}
+            {timeline.busy && <span role="status" className="sr-only">Updating messages...</span>}
           </div>
-          {timeline.syncError && <p role="alert" className="mb-2 text-sm text-stone-600">{timeline.syncError} <button type="button" className="text-button" onClick={timeline.retrySync}>Retry messages</button></p>}
+          {timeline.syncError && <p role="alert" className="timeline-error">{timeline.syncError} <button type="button" className="text-button" onClick={timeline.retrySync}>Retry messages</button></p>}
           <div ref={history} tabIndex={0} onScroll={() => {
             const element = history.current
             if (!isActive.current) return
@@ -296,15 +299,15 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
             if (atBottom.current) timeline.clearNew()
           }} role="log" aria-label="Message history" className="chat-history">
             {messages.length === 0 && pendingMessages.length === 0 ? (
-              <p className="py-8 text-center text-sm leading-6 text-stone-500">No messages yet.<br />Start the conversation.</p>
+              <EmptyState compact title="A fresh conversation.">Send a hello to get started.</EmptyState>
             ) : (
               <MessageList actionId={actions.target?.id} reactionRequests={reactionRequests.current} enterIds={enterIds} pending={pendingMessages} onRetry={optimistic.retry} onDismiss={optimistic.dismiss} messages={messages} user={user} selectedUser={selectedUser} timeline={timeline} highlightId={highlightId} token={token} onUnauthorized={onUnauthorized} onOpen={actions.open} onPhoto={setPhoto} />
             )}
           </div>
-          <div className="my-2 flex flex-wrap items-center justify-end gap-3">
+          <div className="timeline-navigation"><div>
             {timeline.hasNewer && <button type="button" className="text-button min-h-9 text-sm" disabled={timeline.busy} onClick={timeline.loadNewer}>Load newer messages</button>}
-            {(timeline.newCount > 0 || timeline.hasNewer) && <button type="button" className="secondary-button text-sm" disabled={timeline.busy} onClick={timeline.jumpLatest}>{timeline.newCount > 0 ? `${timeline.newCount} new ${timeline.newCount === 1 ? 'message' : 'messages'} · ` : ''}Jump to latest</button>}
-          </div>
+            {(timeline.newCount > 0 || timeline.hasNewer) && <button type="button" className="jump-latest" disabled={timeline.busy} onClick={timeline.jumpLatest}><Icon name="down" size={16} />{timeline.newCount > 0 ? `${timeline.newCount} new ${timeline.newCount === 1 ? 'message' : 'messages'} · ` : ''}Jump to latest</button>}
+          </div></div>
           <ChatComposer editing={editingId !== null} onCancelEdit={() => { setEditingId(null); setActionError('') }} content={editingId !== null ? editContent : content} onChange={editingId !== null ? setEditContent : handleContentChange} onSubmit={editingId !== null ? event => performAction(messages.find(message => message.id === editingId) || { id: editingId }, false, event) : handleSend} sending={sending || actionBusy} error={editingId !== null ? actionError : sendError} image={selectedImage} imagePreview={imagePreview} onImage={chooseImage} onRemoveImage={() => { detachDraft(); setSelectedImage(null) }} replyTarget={replyTarget} replyName={replyName} replyText={replyText} onCancelReply={() => { detachDraft(); setReplyTarget(null) }} />
         </>
       )}

@@ -12,7 +12,7 @@ export default function PendingMessage({ entry, onRetry, onDismiss }) {
     <div className={`message-bubble ${url ? 'media-bubble' : ''} ${url && !entry.content ? 'photo-only' : ''}`} data-own="true">
       {entry.reply_to && <span className="message-quote">Replying to {entry.reply_to.content || 'Photo'}</span>}
       {url && <img className="pending-photo" style={dimensions ? { width: dimensions.width * scale, height: dimensions.height * scale } : undefined} src={url} alt="Pending message photo" />}
-      {entry.content && <span className="message-text">{entry.content}</span>}
+      {entry.content && <span dir="auto" className="message-text">{entry.content}</span>}
       <span className="message-metadata" role="status">{entry.state === 'failed' ? 'Failed' : entry.state === 'sent' ? 'Sent' : entry.file ? 'Uploading…' : 'Sending…'}</span>
     </div>
     {entry.state === 'failed' && <div className="pending-error"><p role="alert">{entry.error}</p>{!entry.terminal && <button type="button" className="text-button" onClick={() => onRetry(entry.localId)}>Retry message</button>}<button type="button" className="text-button" onClick={() => onDismiss(entry.localId)}>Dismiss message</button></div>}

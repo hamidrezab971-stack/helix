@@ -5,7 +5,7 @@ export default function useDialog(ref, onClose) {
   useEffect(() => {
     const previous = document.activeElement
     const modal = ref.current
-    const focusable = () => [...modal.querySelectorAll('button:not(:disabled), [href], textarea, [tabindex="0"]')]
+    const focusable = () => [...modal.querySelectorAll('button:not(:disabled), [href], textarea:not(:disabled), input:not(:disabled):not([type="file"]):not([type="hidden"]), [tabindex="0"]')].filter(element => element.closest('[role="dialog"]')===modal)
     focusable()[0]?.focus({ preventScroll: true })
     const mobile = matchMedia('(max-width: 767px)').matches
     const marker = crypto.randomUUID()
@@ -14,6 +14,7 @@ export default function useDialog(ref, onClose) {
     let popped = false
     function pop() { if (pushed && history.state?.smoothOverlay !== marker) { popped = true; onClose() } }
     function key(event) {
+      if (event.defaultPrevented || [...document.querySelectorAll('[role="dialog"]')].at(-1)!==modal) return
       if (event.key === 'Escape') { event.preventDefault(); onClose() }
       const items = focusable()
       if (event.key === 'Tab' && items.length) {
@@ -21,7 +22,7 @@ export default function useDialog(ref, onClose) {
         if (event.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))) { event.preventDefault(); last.focus() }
         else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
       }
-      if (['ArrowDown', 'ArrowUp'].includes(event.key)) {
+      if (['ArrowDown', 'ArrowUp'].includes(event.key) && !event.target.matches('input, textarea, [role="region"]')) {
         event.preventDefault()
         const i = items.indexOf(document.activeElement)
         items[(i + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus()

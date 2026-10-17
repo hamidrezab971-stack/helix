@@ -7,7 +7,7 @@ function websocketUrl() {
   return url.toString()
 }
 
-export function connectRealtime(token, { onMessage, onMutation, onReactions, onStatus, onUnauthorized, onPresenceSnapshot, onPresenceUpdate, onTyping, onDisconnect, onWake }) {
+export function connectRealtime(token, { onMessage, onMutation, onReactions, onStatus, onUnauthorized, onPresenceSnapshot, onPresenceUpdate, onTyping, onDisconnect, onWake, onProfile }) {
   let socket
   let timer
   let stopped = false
@@ -116,6 +116,7 @@ export function connectRealtime(token, { onMessage, onMutation, onReactions, onS
       const data = payload?.data
       if (payload.type?.startsWith('message:') || payload.type === 'conversation:receipts') onWake?.(data?.conversation_id)
       const validId = (id) => Number.isSafeInteger(id) && id > 0
+      if (payload.type === 'profile:update' && validId(data?.id) && (data.primary_photo_id === null || validId(data.primary_photo_id)) && Number.isSafeInteger(data.profile_version) && data.profile_version >= 0) onProfile?.(data)
       if (payload?.type === 'message:reactions' && validId(data?.message_id) && validId(data?.conversation_id)) {
         onReactions({ message_id: data.message_id, conversation_id: data.conversation_id })
       }

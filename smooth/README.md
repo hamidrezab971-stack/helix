@@ -1,3 +1,5 @@
+Phase 20 authentication requires a local ALTCHA solution on login and registration. See [PHASE20.md](PHASE20.md) for the API, migration and release gates.
+
 # Smooth
 
 Smooth is a lightweight web-based messaging application. Native FastAPI/browser
@@ -15,6 +17,10 @@ message history, stable scroll navigation, and durable realtime recovery.
 
 The backend uses the existing SQLAlchemy and python-dotenv dependencies for
 database setup and environment configuration.
+
+For a production container, persistent storage, and an HTTPS app domain, see
+[Deploy Smooth](DEPLOYMENT.md). The deployment image serves the frontend, API,
+and WebSockets together on one origin.
 
 ## Project structure
 

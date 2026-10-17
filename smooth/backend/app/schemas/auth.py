@@ -18,11 +18,13 @@ class RegistrationRequest(BaseModel):
         min_length=3, max_length=30, pattern="^[a-z0-9_]+$"
     )
     password: SecretStr = Field(min_length=8, max_length=128)
+    altcha: str = Field(min_length=1, max_length=8192)
 
 
 class LoginRequest(BaseModel):
-    username: NormalizedUsername
-    password: SecretStr
+    username: NormalizedUsername = Field(min_length=1, max_length=50)
+    password: SecretStr = Field(min_length=1, max_length=128)
+    altcha: str = Field(min_length=1, max_length=8192)
 
 
 class TokenResponse(BaseModel):
@@ -36,3 +38,5 @@ class UserResponse(BaseModel):
     id: int
     username: str
     created_at: datetime
+    primary_photo_id: int | None = None
+    profile_version: int = 0

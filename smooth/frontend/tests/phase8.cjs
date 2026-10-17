@@ -5,6 +5,7 @@ const { spawn, execFileSync } = require('node:child_process')
 const path = require('node:path')
 const fs = require('node:fs')
 const os = require('node:os')
+const assertPortFree = require('./ports.cjs')
 
 const backendDirectory = path.resolve(__dirname, '../../backend')
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'smooth-phase8-'))
@@ -14,9 +15,10 @@ const suffix = Date.now()
 const names = { alice: `alice_${suffix}`, bob: `bob_${suffix}`, charlie: `charlie_${suffix}` }
 
 async function startBackend() {
+  await assertPortFree(8000)
   server = spawn(path.join(backendDirectory, '.venv/bin/python'), ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000'], {
     cwd: backendDirectory,
-    env: { ...process.env, DATABASE_URL: `sqlite:///${temporary}/test.db`, SECRET_KEY: 'phase8-browser-test-only-secret-123456789', ACCESS_TOKEN_EXPIRE_MINUTES: '60', FRONTEND_ORIGIN: 'http://127.0.0.1:5173', UPLOAD_DIR: `${temporary}/uploads` },
+    env: { ...process.env, DATABASE_URL: `sqlite:///${temporary}/test.db`, SECRET_KEY: 'phase8-browser-test-only-secret-123456789', ACCESS_TOKEN_EXPIRE_MINUTES: '60', FRONTEND_ORIGIN: 'http://127.0.0.1:5173', UPLOAD_DIR: `${temporary}/uploads`, FRONTEND_DIST_DIR: '', PYTHON_DOTENV_DISABLED: '1' },
     stdio: 'ignore',
   })
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -81,19 +83,44 @@ async function registerAndLogin(page, name) {
   await page.locator('#register-username').fill(name)
   await page.locator('#register-password').fill('password123')
   await page.locator('#register-confirmation').fill('password123')
+  await require('./captcha.cjs').ready(page)
   await page.getByRole('button', { name: 'Create account', exact: true }).click()
   await page.locator('#login-password').fill('password123')
+  await require('./captcha.cjs').ready(page)
   await page.getByRole('button', { name: 'Log in', exact: true }).click()
   await page.waitForFunction(() => window.realtimeTest.authenticated === 1)
 }
 
+async function navigate(page, destination) {
+  const nav = page.getByRole('navigation', { name: 'Main navigation' })
+  if (!await nav.isVisible()) {
+    await page.getByRole('button', { name: 'Back', exact: true }).click()
+    await expect(nav).toBeVisible()
+  }
+  await nav.getByRole('button', { name: destination, exact: true }).click()
+  await expect(nav.getByRole('button', { name: destination, exact: true })).toHaveAttribute('aria-current', 'page')
+}
+
 async function select(page, name) {
-  // Search fetches the current directory, including users registered after
-  // this browser's initial directory request.
+  await navigate(page, 'Contacts')
   await page.locator('#user-search').fill(name)
   await directoryRow(page, name).click()
   await expect(page.locator('#message-content')).toBeEnabled()
-  await page.locator('#user-search').fill('')
+  if (!await page.evaluate(() => matchMedia('(max-width: 767px)').matches)) {
+    await expect(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Chats', exact: true })).toHaveAttribute('aria-current', 'page')
+  }
+}
+
+async function directoryPresence(page, name, state) {
+  await navigate(page, 'Contacts')
+  await page.locator('#user-search').fill(name)
+  await expect(directoryRow(page, name)).toContainText(state)
+  await navigate(page, 'Chats')
+}
+
+async function logout(page) {
+  await navigate(page, 'Profile')
+  await page.getByRole('button', { name: 'Log out', exact: true }).click()
 }
 
 function directoryRow(page, name) {
@@ -105,6 +132,7 @@ function recentRow(page, name) {
 }
 
 async function openRecent(page, name) {
+  await navigate(page, 'Chats')
   let creates = 0
   const observe = request => { if (request.method() === 'POST' && request.url().includes('/api/conversations/with/')) creates++ }
   page.on('request', observe)
@@ -258,6 +286,7 @@ async function main() {
   await expect(alice.getByText('No conversations yet.')).toBeVisible()
   await registerAndLogin(bob, names.bob)
   await registerAndLogin(charlie, names.charlie)
+  await navigate(alice, 'Contacts')
   await alice.locator('#user-search').fill(names.bob.toUpperCase())
   await expect(directoryRow(alice, names.bob)).toBeVisible()
   await alice.locator('#user-search').fill('')
@@ -267,8 +296,8 @@ async function main() {
   const bobTab = await newPage(bobContext)
   await bobTab.waitForFunction(() => window.realtimeTest.authenticated === 1)
   await select(bobTab, names.alice)
-  await expect(directoryRow(alice, names.bob)).toContainText('online')
-  await expect(directoryRow(bob, names.alice)).toContainText('online')
+  await directoryPresence(alice, names.bob, 'online')
+  await directoryPresence(bob, names.alice, 'online')
   for (const page of [alice, bob]) await expect(page.getByLabel('Contact presence')).toHaveText('online')
   const aliceId = await bob.evaluate(() => window.realtimeTest.received.find(e => e.type === 'presence:snapshot').data.online_user_ids[0])
   assert.ok(aliceId > 0)
@@ -306,12 +335,12 @@ async function main() {
   await alice.locator('#message-content').fill('closing draft')
   await expect(typing).not.toHaveText('')
   await alice.close()
-  await expect(directoryRow(bob, names.alice)).toContainText('offline')
+  await directoryPresence(bob, names.alice, 'offline')
   await expect(typing).toHaveText('', { timeout: 5500 })
   alice = await newPage(aliceContext)
   await alice.waitForFunction(() => window.realtimeTest.authenticated === 1)
   await select(alice, names.bob)
-  await expect(directoryRow(bob, names.alice)).toContainText('online')
+  await directoryPresence(bob, names.alice, 'online')
   await expect(alice.getByLabel('Contact presence')).toHaveText('online')
   console.log('PASS presence snapshot, typing start/stop, throttling, continued typing, clear input, switching, stale expiry, unexpected tab close/reconnect')
   await select(bob, names.charlie)
@@ -333,7 +362,7 @@ async function main() {
   await status(alice, 'hello bob', 'Delivered')
   await expect(recentRow(alice, names.bob).getByLabel('Last message preview')).toHaveText('You: hello bob')
   await expect(recentRow(alice, names.bob).locator('time')).toHaveText(/\S/)
-  await expect(recentRow(alice, names.bob)).toContainText('online')
+  await expect(recentRow(alice, names.bob).locator('.avatar-presence')).toHaveAttribute('data-online', 'true')
   await select(bob, names.alice)
   await status(alice, 'hello bob', 'Read')
   await select(bobTab, names.alice)
@@ -372,7 +401,7 @@ async function main() {
   await bobTab.close()
   await expect(alice.getByLabel('Contact presence')).toHaveText('online')
   assert.equal(await alice.evaluate(() => window.realtimeTest.received.filter(e => e.type === 'presence:update' && e.data.status === 'offline').length), 0)
-  await bob.getByRole('button', { name: 'Log out' }).click()
+  await logout(bob)
   await bob.waitForFunction(() => window.realtimeTest.closed >= 1)
   await expect(alice.getByLabel('Contact presence')).toHaveText(/last seen just now|last seen \d+ minutes? ago/)
   const logoutEvents = await bob.evaluate(() => window.realtimeTest.events.length)
@@ -386,6 +415,7 @@ async function main() {
   assert.equal(await bob.evaluate(() => window.realtimeTest.events.length), logoutEvents)
   await bob.locator('#login-username').fill(names.bob)
   await bob.locator('#login-password').fill('password123')
+  await require('./captcha.cjs').ready(bob)
   await bob.getByRole('button', { name: 'Log in', exact: true }).click()
   await select(bob, names.alice)
   await once(bob, 'offline recipient')
@@ -442,15 +472,15 @@ async function main() {
   // Mobile switches between full-width list and chat; rows remain keyboard buttons.
   await alice.setViewportSize({ width: 375, height: 812 })
   await expect(alice.getByLabel('Recent conversations')).toBeHidden()
-  await expect(alice.getByRole('button', { name: 'Back to chats' })).toBeVisible()
-  await alice.getByRole('button', { name: 'Back to chats' }).click()
+  await expect(alice.getByRole('button', { name: 'Back' })).toBeVisible()
+  await alice.getByRole('button', { name: 'Back' }).click()
   await expect(alice.getByLabel('Recent conversations')).toBeVisible()
-  await expect(alice.locator('#message-content')).toHaveCount(0)
+  await expect(alice.locator('#message-content')).toBeHidden()
   await recentRow(alice, names.bob).focus()
   await alice.keyboard.press('Enter')
   await expect(alice.locator('#chat-title')).toHaveText(`@${names.bob}`)
   assert.equal(await alice.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
-  await alice.getByRole('button', { name: 'Back to chats' }).click()
+  await alice.getByRole('button', { name: 'Back' }).click()
   await alice.setViewportSize({ width: 1280, height: 800 })
 
   // Unread counts while on the list, with replay protection and a second tab.
@@ -505,11 +535,12 @@ async function main() {
   await status(bob, 'switched conversation unread', 'Read')
   await unread(aliceTab, names.bob, 0)
   await aliceTab.close()
-  await alice.getByRole('button', { name: 'Log out' }).click()
-  await expect(directoryRow(bob, names.alice)).toContainText('offline')
+  await logout(alice)
+  await directoryPresence(bob, names.alice, 'offline')
   for (let index = 1; index <= 4; index++) await send(bob, `offline unread ${index}`)
   await alice.locator('#login-username').fill(names.alice)
   await alice.locator('#login-password').fill('password123')
+  await require('./captcha.cjs').ready(alice)
   await alice.getByRole('button', { name: 'Log in', exact: true }).click()
   await unread(alice, names.bob, 4)
   await alice.setViewportSize({ width: 375, height: 812 })
@@ -517,7 +548,7 @@ async function main() {
   assert.equal(await alice.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
   await openRecent(alice, names.bob)
   await status(bob, 'offline unread 4', 'Read')
-  await alice.getByRole('button', { name: 'Back to chats' }).click()
+  await alice.getByRole('button', { name: 'Back' }).click()
   await unread(alice, names.bob, 0)
   await alice.setViewportSize({ width: 1280, height: 800 })
   console.log('PASS unread 1/3, duplicate delivery, read clear across tabs, active/hidden chats, switching, refresh/restart, offline four-message recovery, mobile badges')
@@ -571,12 +602,13 @@ async function main() {
   await select(bob, names.alice)
   await expect(bob.locator('.message-bubble').filter({ hasText: 'Repeated edit mutation' })).toHaveCount(0)
 
-  await bob.getByRole('button', { name: 'Log out' }).click()
+  await logout(bob)
   await edit(alice, 'offline recipient', 'Offline edit persists')
   await send(alice, 'Removed while offline')
   await remove(alice, 'Removed while offline')
   await bob.locator('#login-username').fill(names.bob)
   await bob.locator('#login-password').fill('password123')
+  await require('./captcha.cjs').ready(bob)
   await bob.getByRole('button', { name: 'Log in', exact: true }).click()
   await select(bob, names.alice)
   await once(bob, 'Offline edit persists')
@@ -671,11 +703,12 @@ async function main() {
   await remove(alice, 'Unread photo')
   await expect(recentRow(alice, names.bob).getByLabel('Last message preview')).toHaveText('You: Photo · WEBP photo')
   assert.equal(fs.readdirSync(path.join(temporary, 'uploads/images')).length, 2)
-  await bob.getByRole('button', { name: 'Log out' }).click()
+  await logout(bob)
   const offlinePhoto = await sendPhoto(alice, jpeg, 'Offline photo')
   await status(alice, 'Offline photo', 'Sent')
   await bob.locator('#login-username').fill(names.bob)
   await bob.locator('#login-password').fill('password123')
+  await require('./captcha.cjs').ready(bob)
   await bob.getByRole('button', { name: 'Log in', exact: true }).click()
   await unread(bob, names.alice, 1)
   await openRecent(bob, names.alice)
@@ -869,13 +902,14 @@ async function main() {
   await expect(rowById(historyTab, reactionTarget.id)).toContainText('Reaction Hello edited while loading')
   await reaction(historyTab, reactionTarget.id, 'heart', 1, true)
   await historyTab.close()
-  await bob.getByRole('button', { name: 'Log out' }).click()
+  await logout(bob)
   await chooseReaction(alice, offlinePhoto.id, 'heart')
   await reaction(alice, offlinePhoto.id, 'heart', 1, true)
   await chooseReaction(alice, photoAnswer.id, 'laughing')
   await reaction(alice, photoAnswer.id, 'laughing', 1, true)
   await bob.locator('#login-username').fill(names.bob)
   await bob.locator('#login-password').fill('password123')
+  await require('./captcha.cjs').ready(bob)
   await bob.getByRole('button', { name: 'Log in', exact: true }).click()
   await openRecent(bob, names.alice)
   await reaction(bob, offlinePhoto.id, 'heart', 1, false)
@@ -942,4 +976,4 @@ if (require.main === module) main().catch(error => { console.error(error); proce
 })
 
 module.exports = { startBackend, stopBackend, newPage, registerAndLogin, select, openRecent,
-  send, status, rowById, openMenu, action, reply, chooseReaction, reaction, visiblePhoto, names, temporary, backendDirectory, errors }
+  send, status, rowById, openMenu, action, reply, chooseReaction, reaction, visiblePhoto, navigate, logout, names, temporary, backendDirectory, errors }

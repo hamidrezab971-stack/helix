@@ -81,6 +81,9 @@ c.commit()`, cid, aliceId, bobId)
       if (response.url().endsWith('/context')) contextSizes.push((await response.json()).items.length)
     } catch {}
   })
+  // Direct SQL fixtures have no sync events. Reload explicitly; selecting the
+  // already-active chat now preserves its mounted timeline and scroll position.
+  await alice.reload()
   await h.select(alice, h.names.bob)
   await expect(rows(alice)).toHaveCount(30)
   assert.equal(await rows(alice).first().getAttribute('data-message-id'), '9971')
@@ -187,6 +190,7 @@ c.commit()`, cid, aliceId, bobId)
   await expect(h.rowById(historyTab, 10000)).toContainText('Changed during initial reconnect')
   await historyTab.unroute('**/api/conversations/*/messages/page?*')
   // A held, obsolete Bob snapshot must never appear in Charlie's conversation.
+  await h.select(historyTab, h.names.charlie)
   let releaseSwitch, capturedSwitch
   const heldSwitch = new Promise(resolve => { releaseSwitch = resolve })
   const switchCaptured = new Promise(resolve => { capturedSwitch = resolve })

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { createPortal } from 'react-dom'
 import useDialog from '../../hooks/useDialog.js'
 import MessageReactionStrip from './MessageReactionStrip.jsx'
+import Icon from '../ui/Icon.jsx'
+import { positionMessageMenu } from '../../utils/messageInteractions.js'
 
 export default function MessageActionMenu({ target, message, own, onClose, onReply, onEdit, onDelete, token, onChanged, onUnauthorized, reactionRequests }) {
   const ref = useRef(null)
@@ -23,16 +25,17 @@ export default function MessageActionMenu({ target, message, own, onClose, onRep
   }, [onClose])
   useDialog(ref, requestClose)
   useLayoutEffect(() => {
-    const box = ref.current.getBoundingClientRect(), rect = target.rect
-    const viewport = window.visualViewport
-    const height = viewport?.height || innerHeight
-    const offset = viewport?.offsetTop || 0
-    const mobile = innerWidth < 768
-    const above = rect.top - box.height - 8
-    const below = rect.bottom + 8
-    const cramped = mobile && (height < innerHeight * 0.8 || (above < offset + 12 && below + box.height > offset + height - 12))
-    setPosition({ maxHeight: Math.max(100, height - 24), left: cramped ? 12 : Math.max(12, Math.min(innerWidth - box.width - 12, rect.left)), top: cramped ? Math.max(offset + 12, offset + height - box.height - 12) : above >= offset + 12 ? above : Math.min(offset + height - box.height - 12, below) })
-  }, [target, confirm, error])
+    const element = ref.current
+    function place() {
+      const viewport = window.visualViewport
+      const next = positionMessageMenu(target.rect, { width: element.offsetWidth, height: element.offsetHeight }, { width: viewport?.width || innerWidth, height: viewport?.height || innerHeight, left: viewport?.offsetLeft || 0, top: viewport?.offsetTop || 0 })
+      setPosition(current => Object.keys(next).every(key => current[key] === next[key]) ? current : next)
+    }
+    place()
+    const observer = new ResizeObserver(place)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [target])
   async function copy() {
     try { await navigator.clipboard.writeText(message.content); requestClose() }
     catch { setError('Unable to copy. Select the message text to copy it.') }
@@ -43,14 +46,14 @@ export default function MessageActionMenu({ target, message, own, onClose, onRep
     try { await onDelete(message); requestClose() }
     catch (error) { setError(error.displayMessage || 'Unable to delete your message. Please try again.'); setBusy(false) }
   }
-  return createPortal(<div className="chat-overlay" onPointerDown={event => { if (event.target === event.currentTarget && !busy) requestClose() }}>
+  return createPortal(<div className="chat-overlay" onWheel={event => { if (!ref.current?.contains(event.target) && !busy) requestClose() }} onPointerDown={event => { if (event.target === event.currentTarget && !busy) requestClose() }}>
     <div ref={ref} style={position} role="dialog" aria-modal="true" aria-label={confirm ? 'Delete this message?' : 'Message actions'} className="message-menu" aria-busy={busy}>
       {confirm ? <><p className="p-3 text-sm">Delete this message?</p><button type="button" disabled={busy} className="danger" onClick={remove}>{busy ? 'Deleting...' : 'Delete message'}</button><button type="button" disabled={busy} onClick={() => setConfirm(false)}>Cancel</button></> : <>
         <MessageReactionStrip requests={reactionRequests} picker message={message} token={token} onChanged={onChanged} onUnauthorized={onUnauthorized} onComplete={requestClose} />
-        <button type="button" onClick={() => requestClose(() => onReply(message))}>Reply</button>
-        {message.content && <button type="button" onClick={copy}>Copy</button>}
-        {own && !message.attachment && <button type="button" onClick={() => requestClose(() => onEdit(message))}>Edit</button>}
-        {own && <button type="button" className="danger" onClick={() => setConfirm(true)}>Delete</button>}
+        <button type="button" onClick={() => requestClose(() => onReply(message))}><Icon name="reply" />Reply</button>
+        {message.content && <button type="button" onClick={copy}><Icon name="copy" />Copy</button>}
+        {own && !message.attachment && <button type="button" onClick={() => requestClose(() => onEdit(message))}><Icon name="edit" />Edit</button>}
+        {own && <button type="button" className="danger" onClick={() => setConfirm(true)}><Icon name="trash" />Delete</button>}
       </>}
       {error && <p role="alert" className="form-error">{error}</p>}
       <button type="button" className="menu-close" onClick={() => requestClose()}>Close message actions</button>

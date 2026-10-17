@@ -3,11 +3,15 @@ import { AuthCard } from './components/AuthCard.jsx'
 import HomePage from './pages/HomePage.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import RegisterPage from './pages/RegisterPage.jsx'
+import useTheme from './hooks/useTheme.js'
+import Icon, { HelixMark } from './components/ui/Icon.jsx'
 import { getCurrentUser, login } from './services/api.js'
+import { IdentityProvider } from './components/profile/IdentityProvider.jsx'
 
 const TOKEN_KEY = 'smooth_access_token'
 
 export default function App() {
+  const [theme, toggleTheme] = useTheme()
   const [page, setPage] = useState('login')
   const [user, setUser] = useState(null)
   const [token, setToken] = useState(null)
@@ -56,9 +60,9 @@ export default function App() {
     }
   }, [restoreAttempt])
 
-  async function handleLogin(username, password) {
+  async function handleLogin(username, password, altcha) {
     setNotice('')
-    const { access_token: token } = await login(username, password)
+    const { access_token: token } = await login(username, password, altcha)
     try {
       localStorage.setItem(TOKEN_KEY, token)
     } catch {
@@ -109,9 +113,9 @@ export default function App() {
   let content
   if (checking) {
     content = (
-      <div role="status" className="flex items-center gap-3 text-sm text-stone-600">
-        <span aria-hidden="true" className="h-4 w-4 animate-spin rounded-full border-2 border-stone-200 border-t-[#b65339] motion-reduce:animate-none" />
-        Loading Smooth...
+      <div role="status" className="auth-loading">
+        <span aria-hidden="true" className="loading-spinner" />
+        Opening Helix…
       </div>
     )
   } else if (restoreError) {
@@ -125,7 +129,7 @@ export default function App() {
       </AuthCard>
     )
   } else if (user) {
-    content = <HomePage user={user} token={token} error={logoutError} onLogout={handleLogout} onUnauthorized={handleUnauthorized} />
+    content = <HomePage theme={theme} onToggleTheme={toggleTheme} user={user} token={token} error={logoutError} onLogout={handleLogout} onUnauthorized={handleUnauthorized} />
   } else if (page === 'register') {
     content = <RegisterPage onLogin={() => setPage('login')} onRegistered={(registeredUser) => {
       setLoginUsername(registeredUser.username)
@@ -139,23 +143,16 @@ export default function App() {
     }} />
   }
 
-  if (user && !checking && !restoreError) return <main className="messaging-app">{content}</main>
+  if (user && !checking && !restoreError) return <IdentityProvider token={token} onUnauthorized={handleUnauthorized}><main className="messaging-app">{content}</main></IdentityProvider>
 
   return (
-    <div className="app-shell flex min-h-svh flex-col px-5 sm:px-8">
-      <header className="mx-auto flex w-full max-w-5xl items-center justify-between py-7 sm:py-9">
-        <div className="flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#b65339] shadow-sm">
-            <svg aria-hidden="true" viewBox="0 0 32 32" fill="none" className="h-7 w-7 text-white">
-              <path d="M23 9c-3-4-13-3-13 2s13 3 13 9-10 7-15 2" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" />
-            </svg>
-          </span>
-          <span className="text-xl font-semibold tracking-tight text-stone-900">Smooth</span>
-        </div>
-        <p className="hidden text-sm text-stone-500 sm:block">A modern messaging application.</p>
+    <div className="app-shell">
+      <header className="auth-header">
+        <a className="brand" href="#" aria-label="Helix home" onClick={event => { event.preventDefault(); setPage('login') }}><span className="brand-mark"><HelixMark /></span><span>helix<span className="brand-period">.</span></span></a>
+        <button type="button" className="icon-button" aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} onClick={toggleTheme}><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button>
       </header>
-      <main className="flex flex-1 items-center justify-center py-8 sm:py-12">{content}</main>
-      <footer className="py-7 text-center text-xs tracking-wide text-stone-500">Simple by design.</footer>
+      <main className="auth-main">{content}</main>
+      <footer className="auth-footer">A little closer. A little simpler.</footer>
     </div>
   )
 }

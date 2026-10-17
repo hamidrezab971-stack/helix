@@ -20,6 +20,7 @@ export default function AttachmentImage({ attachment, token, onUnauthorized, onO
   const [url, setUrl] = useState('')
   const [error, setError] = useState('')
   const [attempt, setAttempt] = useState(0)
+  const [decoded, setDecoded] = useState(false)
   const scale = Math.min(1, 320 / attachment.width, 360 / attachment.height)
 
   useEffect(() => {
@@ -36,6 +37,7 @@ export default function AttachmentImage({ attachment, token, onUnauthorized, onO
     let active = true
     let objectUrl
     setError('')
+    setDecoded(false)
     async function load() {
       try {
         const blob = await attachmentBlob(token, attachment.id, controller.signal)
@@ -58,9 +60,9 @@ export default function AttachmentImage({ attachment, token, onUnauthorized, onO
 
   return <span ref={element} data-attachment-placeholder={attachment.id} className="message-media relative block max-w-full overflow-hidden bg-black/5"
     style={{ width: attachment.width * scale, aspectRatio: `${attachment.width} / ${attachment.height}` }}>
-    {url ? <button type="button" className="absolute inset-0 h-full w-full" aria-label="Open photo" onClick={() => onOpen?.(attachment)}><img src={url} alt="Message photo" data-attachment-id={attachment.id} width={attachment.width} height={attachment.height} className="absolute inset-0 h-full w-full object-contain" /></button>
-      : error ? <span className="block text-sm">{error} <button type="button" className="underline" onClick={() => setAttempt(value => value + 1)}>Retry image</button></span>
-        : <span role="status" className="text-xs">{near ? 'Loading image...' : 'Photo'}</span>}
+    {error ? <span className="media-status">{error} <button type="button" className="text-button" onClick={() => { setUrl(''); setAttempt(value => value + 1) }}>Retry image</button></span>
+      : url ? <button type="button" className="absolute inset-0 h-full w-full" aria-label="Open photo" onClick={() => onOpen?.(attachment)}><img src={url} alt="Message photo" decoding="async" data-decoded={decoded} onLoad={() => setDecoded(true)} onError={() => setError('Unable to display image.')} data-attachment-id={attachment.id} width={attachment.width} height={attachment.height} className="absolute inset-0 h-full w-full object-contain" /></button>
+        : <span role="status" className="media-status">{near ? <><span className="loading-spinner" aria-hidden="true" /><span>Loading image…</span></> : 'Photo'}</span>}
   </span>
 }
 

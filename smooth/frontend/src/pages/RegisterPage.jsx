@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { AuthCard, FormField } from '../components/AuthCard.jsx'
 import { register } from '../services/api.js'
+import Captcha from '../components/Captcha.jsx'
 
 export default function RegisterPage({ onRegistered, onLogin }) {
   const [username, setUsername] = useState('')
@@ -10,6 +11,8 @@ export default function RegisterPage({ onRegistered, onLogin }) {
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const pending = useRef(false)
+  const [solution, setSolution] = useState('')
+  const [captchaAttempt, setCaptchaAttempt] = useState(0)
 
   async function handleSubmit(event) {
     event.preventDefault()
@@ -27,17 +30,20 @@ export default function RegisterPage({ onRegistered, onLogin }) {
     if (password !== confirmation) nextErrors.confirmation = 'Passwords do not match.'
     setErrors(nextErrors)
     if (Object.keys(nextErrors).length) return
+    if (!solution) { setError('Please complete verification.'); return }
 
     pending.current = true
     setSubmitting(true)
     try {
-      const user = await register(normalizedUsername, password)
+      const user = await register(normalizedUsername, password, solution)
       onRegistered(user)
     } catch (error) {
       setError(error.displayMessage || 'Something went wrong. Please try again.')
     } finally {
       pending.current = false
       setSubmitting(false)
+      setSolution('')
+      setCaptchaAttempt(v => v+1)
     }
   }
 
@@ -62,12 +68,13 @@ export default function RegisterPage({ onRegistered, onLogin }) {
           value={confirmation} onChange={(event) => setConfirmation(event.target.value)}
           error={errors.confirmation} disabled={submitting}
         />
+        <Captcha purpose="register" onSolution={setSolution} resetKey={captchaAttempt} />
         {error && <p role="alert" className="form-error">{error}</p>}
         <button type="submit" className="primary-button w-full" disabled={submitting}>
           {submitting ? 'Creating account...' : 'Create account'}
         </button>
       </form>
-      <p className="mt-7 text-center text-sm leading-6 text-stone-500">
+      <p className="auth-alternate">
         Already have an account?{' '}
         <button type="button" className="text-button" onClick={onLogin} disabled={submitting}>Log in</button>
       </p>

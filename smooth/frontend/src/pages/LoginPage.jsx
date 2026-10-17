@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { AuthCard, FormField } from '../components/AuthCard.jsx'
+import Captcha from '../components/Captcha.jsx'
 
 export default function LoginPage({ initialUsername, notice, onLogin, onRegister }) {
   const [username, setUsername] = useState(initialUsername)
@@ -8,6 +9,8 @@ export default function LoginPage({ initialUsername, notice, onLogin, onRegister
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const pending = useRef(false)
+  const [solution, setSolution] = useState('')
+  const [captchaAttempt, setCaptchaAttempt] = useState(0)
 
   async function handleSubmit(event) {
     event.preventDefault()
@@ -18,22 +21,25 @@ export default function LoginPage({ initialUsername, notice, onLogin, onRegister
     if (!password) nextErrors.password = 'Enter your password.'
     setErrors(nextErrors)
     if (Object.keys(nextErrors).length) return
+    if (!solution) { setError('Please complete verification.'); return }
 
     pending.current = true
     setSubmitting(true)
     try {
-      await onLogin(username, password)
+      await onLogin(username, password, solution)
     } catch (error) {
       setError(error.displayMessage || 'Something went wrong. Please try again.')
     } finally {
       pending.current = false
       setSubmitting(false)
+      setSolution('')
+      setCaptchaAttempt(v => v+1)
     }
   }
 
   return (
-    <AuthCard title="Welcome back." description="Log in to your Smooth account.">
-      {notice && <p role="status" className="mb-6 rounded-xl bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-800">{notice}</p>}
+    <AuthCard title="Welcome back." description="Log in to your Helix account.">
+      {notice && <p role="status" className="form-notice">{notice}</p>}
       <form onSubmit={handleSubmit} noValidate aria-busy={submitting} className="space-y-5">
         <FormField
           id="login-username" label="Username" type="text" autoComplete="username"
@@ -46,12 +52,13 @@ export default function LoginPage({ initialUsername, notice, onLogin, onRegister
           value={password} onChange={(event) => setPassword(event.target.value)}
           error={errors.password} disabled={submitting}
         />
+        <Captcha purpose="login" onSolution={setSolution} resetKey={captchaAttempt} />
         {error && <p role="alert" className="form-error">{error}</p>}
         <button type="submit" className="primary-button w-full" disabled={submitting}>
           {submitting ? 'Logging in...' : 'Log in'}
         </button>
       </form>
-      <p className="mt-7 text-center text-sm leading-6 text-stone-500">
+      <p className="auth-alternate">
         Don’t have an account?{' '}
         <button type="button" className="text-button" onClick={onRegister} disabled={submitting}>Create one</button>
       </p>

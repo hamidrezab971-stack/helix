@@ -15,6 +15,7 @@ from app.core.config import UPLOAD_DIR
 class Phase18Tests(unittest.TestCase):
     setUp = baseline.Phase8Tests.setUp
     headers = baseline.Phase8Tests.headers
+    receive_type = baseline.Phase8Tests.receive_type
     image_bytes = baseline.Phase8Tests.image_bytes
 
     def send(self, key, content='Original', **extra):

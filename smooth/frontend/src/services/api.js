@@ -1,4 +1,4 @@
-export const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '')
+export const API_URL = (import.meta.env?.VITE_API_URL || '').replace(/\/+$/, '')
 const GENERIC_ERROR = 'Something went wrong. Please try again.'
 
 function apiError(message, status) {
@@ -8,7 +8,7 @@ function apiError(message, status) {
   return error
 }
 
-async function request(path, { body, token, signal, method, binary = false } = {}) {
+export async function request(path, { body, token, signal, method, binary = false } = {}) {
   const headers = {}
   const multipart = body instanceof FormData
   if (body && !multipart) headers['Content-Type'] = 'application/json'
@@ -42,6 +42,12 @@ async function request(path, { body, token, signal, method, binary = false } = {
       message = path.endsWith('/login')
         ? 'Invalid username or password'
         : 'Your sign-in has expired. Please log in again.'
+    } else if (response.status === 429) {
+      message = `Please wait ${response.headers.get('Retry-After') || 'a few'} seconds before trying again.`
+    } else if (path.startsWith('/api/auth/') && [400, 503].includes(response.status)) {
+      message = response.status === 400 ? 'Verification expired or invalid. Please verify again.' : 'Verification is busy. Please try again shortly.'
+    } else if (path.startsWith('/api/profiles')) {
+      message = response.status === 413 ? 'Choose a photo of 2 MB or smaller.' : response.status === 422 ? 'Use a valid JPEG, PNG or WebP, and a biography up to 1000 characters.' : response.status === 409 ? 'Your photo gallery is full.' : 'Unable to update this profile. Please try again.'
     } else if (path.startsWith('/api/messages') && [403, 404].includes(response.status)) {
       message = 'This message is unavailable or you don’t have permission to change it.'
     } else if (path.startsWith('/api/conversations') && [403, 404].includes(response.status)) {
@@ -51,7 +57,7 @@ async function request(path, { body, token, signal, method, binary = false } = {
     } else if (path.startsWith('/api/conversations') && response.status === 400) {
       message = 'Choose another user to start a conversation.'
     } else if (response.status === 409) {
-      message = path.startsWith('/api/conversations') ? 'This send ID belongs to a different message.' : 'Username already exists'
+      message = path.startsWith('/api/conversations') ? 'This send ID belongs to a different message.' : 'Unable to create an account with these details. Try another username or sign in.'
     } else if (path.endsWith('/messages/image') && [413, 422].includes(response.status)) {
       message = response.status === 413 ? 'Choose an image of 8 MB or smaller.' : 'Choose a valid JPEG, PNG, or WEBP image with safe dimensions and a caption up to 2000 characters.'
     } else if (response.status === 422) {
@@ -79,15 +85,15 @@ function safeUser(data) {
   if (!Number.isInteger(data?.id) || typeof data.username !== 'string' || typeof data.created_at !== 'string') {
     throw apiError(GENERIC_ERROR)
   }
-  return { id: data.id, username: data.username, created_at: data.created_at }
+  return { id: data.id, username: data.username, created_at: data.created_at, primary_photo_id: Number.isSafeInteger(data.primary_photo_id) ? data.primary_photo_id : null, profile_version: Number.isSafeInteger(data.profile_version) ? data.profile_version : 0 }
 }
 
-export async function register(username, password) {
-  return safeUser(await request('/api/auth/register', { body: { username, password } }))
+export async function register(username, password, altcha) {
+  return safeUser(await request('/api/auth/register', { body: { username, password, altcha } }))
 }
 
-export async function login(username, password) {
-  const data = await request('/api/auth/login', { body: { username, password } })
+export async function login(username, password, altcha) {
+  const data = await request('/api/auth/login', { body: { username, password, altcha } })
   if (typeof data?.access_token !== 'string' || !data.access_token || data.token_type !== 'bearer') {
     throw apiError(GENERIC_ERROR)
   }
