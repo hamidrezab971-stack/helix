@@ -57,7 +57,8 @@ async function captureFailure(browser, error) {
             lastPresence: rt.received.filter(e => ['presence:snapshot', 'presence:update'].includes(e.type)).slice(-12)
               .map(e => ({ type: e.type, online_user_ids: e.data?.online_user_ids, user_id: e.data?.user_id, status: e.data?.status })),
             typingSent: rt.sentTyping.length, messagesReceived: rt.events.length,
-            clearEvents: rt.received.filter(e => e.type === 'conversation:cleared').length } }
+            clearEvents: rt.cleared.length,
+            lastClearBoundaries: rt.cleared.slice(-8).map(e => ({ conversation_id: e.conversation_id, cleared_through_id: e.cleared_through_id })) } }
       })
       const { dom, ...state } = snapshot
       Object.assign(result, state)

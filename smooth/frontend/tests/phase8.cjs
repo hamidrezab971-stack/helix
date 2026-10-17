@@ -42,7 +42,7 @@ async function newPage(context) {
   observe(page)
   page.on('pageerror', error => errors.push(error.message))
   await page.addInitScript(() => {
-    window.realtimeTest = { authenticated: 0, closed: 0, events: [], received: [], sentTyping: [], statuses: [], mutations: [] }
+    window.realtimeTest = { authenticated: 0, closed: 0, events: [], received: [], sentTyping: [], statuses: [], mutations: [], cleared: [] }
     window.imageUrls = { created: [], revoked: [] }
     const originalCreate = URL.createObjectURL.bind(URL), originalRevoke = URL.revokeObjectURL.bind(URL)
     URL.createObjectURL = blob => { const url = originalCreate(blob); window.imageUrls.created.push(url); return url }
@@ -62,6 +62,7 @@ async function newPage(context) {
             if (data.type === 'message:new' && window.realtimeTest.dropNewMessage) event.stopImmediatePropagation()
             if (data.type === 'message:status') window.realtimeTest.statuses.push(data.data)
             if (data.type === 'message:updated') window.realtimeTest.mutations.push(data.data)
+            if (data.type === 'conversation:cleared') window.realtimeTest.cleared.push(data.data)
             if (data.type.startsWith('presence:') || data.type.startsWith('typing:')) window.realtimeTest.received.push(data)
           } catch {}
         })
