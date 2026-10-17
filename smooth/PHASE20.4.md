@@ -95,7 +95,7 @@ before closing browser contexts. Only transport response headers (content type,
 length, cache control, date, server, connection and transfer encoding) are allowed;
 bodies, auth/cookie headers, auth frames, storage and query strings are excluded.
 Request finish/failure timestamps and errors distinguish completed responses
-from aborted requests. Socket open/close/error timestamps and isolated backend
+from aborted requests. Socket request/close/error timestamps and isolated backend
 logs correlate proxy resets with intentional page closure and backend restarts.
 The host browser gate retains evidence outside
 the disposable workspace and prints its location. CI uploads that evidence

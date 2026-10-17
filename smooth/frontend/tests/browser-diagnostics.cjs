@@ -47,7 +47,7 @@ function observe(page) {
     const pathname = new URL(socket.url()).pathname
     if (pathname !== '/ws') return
     // No frame listeners: credentials and message payloads stay out of logs.
-    console.log(`${new Date().toISOString()} websocket open ${pathname}`)
+    console.log(`${new Date().toISOString()} websocket request ${pathname}`)
     socket.on('close', () => console.log(`${new Date().toISOString()} websocket close ${pathname}`))
     socket.on('socketerror', error => console.log(`${new Date().toISOString()} websocket error ${pathname}: ${redact(error)}`))
   })
