@@ -91,10 +91,43 @@ both presence states and the separate profile/chat/actions buttons.
 
 All seven browser phases capture sanitized HTML, masked screenshots, recent
 API method/path/status metadata and presence/connection summaries on failure,
-before closing browser contexts. Headers, bodies, auth frames, storage and
-query strings are excluded. The host browser gate retains evidence outside
+before closing browser contexts. Only transport response headers (content type,
+length, cache control, date, server, connection and transfer encoding) are allowed;
+bodies, auth/cookie headers, auth frames, storage and query strings are excluded.
+Request finish/failure timestamps and errors distinguish completed responses
+from aborted requests. Socket open/close/error timestamps and isolated backend
+logs correlate proxy resets with intentional page closure and backend restarts.
+The host browser gate retains evidence outside
 the disposable workspace and prints its location. CI uploads that evidence
 on failure. These diagnostics do not change assertions or release gates.
+
+## Presence response lifecycle investigation
+
+Run `20261017T223516Z-b089d0` passed the first two Phase 8 checkpoint groups,
+then failed at the former line 459 in Chromium's `Network.getResponseBody`.
+The selected response was a 200 for `/api/users/presence`, fulfilled by the
+test's missing-timestamp route. The hook refreshes on mount and again on the
+WebSocket snapshot, aborting the previous refresh. Selecting the first response
+headers and later asking CDP for that request's body depends on a resource that
+may already be cancelled. Playwright 1.51.1 already waits for response completion
+inside `Response.body()`, so adding `response.finished()` is insufficient.
+
+Presence checks now perform a dedicated authenticated GET and consume its body
+inside browser Fetch with a five-second abort bound. Status 200, JSON content
+type, the exact persisted peer timestamp and the resulting UI are all asserted.
+The missing-timestamp case seeds only the offline peer's row in the disposable
+test DB, uses the same real endpoint and asserts null plus the rendered `offline`.
+The original stored value is restored in `finally`, then the real API timestamp
+and last-seen UI are asserted again. No presence request is intercepted or
+fulfilled; parsing/network errors fail the suite. No production DB is touched.
+
+The saved host browser evidence is unreadable in the restricted agent session;
+old backend output was discarded by the fixture. Therefore the original
+response headers and precise cancellation/fulfillment timing remain unverified.
+Proxy ECONNRESET before the first checkpoint and EPIPE during final cleanup
+are consistent with intentional socket closure, not proof of application
+failure or proof that every reset was harmless. Full Chromium and live host
+gates remain mandatory, with all seven phases and checksum checks retained.
 
 ## Last-seen reference clock and ordered presence
 

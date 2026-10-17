@@ -5,15 +5,36 @@ const path = require('node:path')
 const os = require('node:os')
 const { observe, captureFailure, redact } = require('./browser-diagnostics.cjs')
 
-test('Failure diagnostics redact credentials and never record response bodies, headers or queries', () => {
+test('Failure diagnostics redact credentials and observe lifecycle without reading bodies or credentials', async () => {
   const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature'
   assert.ok(!redact(`Bearer private-token ${jwt} password123`).includes('private-token'))
   assert.ok(!redact(jwt).includes(jwt))
-  let response
-  observe({ on: (name, callback) => { assert.equal(name, 'response'); response = callback } })
-  response({ url: () => 'http://127.0.0.1/api/conversations?token=private',
-    request: () => ({ method: () => 'GET' }), status: () => 200,
+  const handlers = {}, page = { on: (name, callback) => { handlers[name] = callback } }
+  observe(page)
+  const request = { method: () => 'GET', failure: () => ({ errorText: 'net::ERR_ABORTED' }) }
+  handlers.response({ url: () => 'http://127.0.0.1/api/conversations?token=private',
+    request: () => request, status: () => 200,
+    headers: () => ({ 'content-type': 'application/json', 'content-length': '123', 'set-cookie': 'private-cookie', authorization: 'Bearer private-token' }),
     body: () => assert.fail('bodies must not be read'), allHeaders: () => assert.fail('headers must not be read') })
+  handlers.requestfailed(request)
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'diagnostics-lifecycle-'))
+  const saved = process.env.HELIX_BROWSER_ARTIFACTS
+  process.env.HELIX_BROWSER_ARTIFACTS = root
+  page.evaluate = async () => { throw new Error('closed fixture') }
+  try {
+    const directory = await captureFailure({ version: () => 'fixture', contexts: () => [{ pages: () => [page] }] }, new Error('fixture'))
+    const report = JSON.parse(fs.readFileSync(path.join(directory, 'failure.json')))
+    const entry = report.pages[0].responses[0]
+    assert.equal(entry.path, '/api/conversations')
+    assert.equal(entry.lifecycle, 'requestfailed')
+    assert.equal(entry.failure, 'net::ERR_ABORTED')
+    assert.deepEqual(entry.headers, { 'content-type': 'application/json', 'content-length': '123' })
+    assert.ok(!JSON.stringify(report).includes('private'))
+  } finally {
+    if (saved === undefined) delete process.env.HELIX_BROWSER_ARTIFACTS
+    else process.env.HELIX_BROWSER_ARTIFACTS = saved
+    fs.rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test('Failure evidence survives browser cleanup, masks inputs and strips secrets from the report', async () => {
@@ -26,7 +47,8 @@ test('Failure evidence survives browser cleanup, masks inputs and strips secrets
         assert.deepEqual(options.mask, ['input,textarea,altcha-widget'])
         fs.writeFileSync(options.path, 'fixture image')
       }, on: (name, callback) => {
-        callback({ url: () => 'http://127.0.0.1/api/conversations?token=secret',
+        if (name !== 'response') return
+        callback({ url: () => 'http://127.0.0.1/api/conversations?token=secret', headers: () => ({}),
           request: () => ({ method: () => 'GET' }), status: () => 503 })
       } }
     observe(page)

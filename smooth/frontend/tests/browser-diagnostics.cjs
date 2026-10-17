@@ -13,13 +13,43 @@ function redact(value) {
 
 function observe(page) {
   const recent = []
+  const requests = new WeakMap()
   responses.set(page, recent)
   page.on('response', response => {
     const url = new URL(response.url())
     if (!url.pathname.startsWith('/api/')) return
-    // No headers, query strings, request/response bodies or auth frames.
-    recent.push({ method: response.request().method(), path: url.pathname, status: response.status() })
+    // Only explicitly allowed response headers; never auth/cookies or bodies.
+    const all = response.headers(), headers = {}
+    for (const name of ['content-type', 'content-length', 'cache-control', 'date', 'server', 'connection', 'transfer-encoding']) {
+      if (all[name] !== undefined) headers[name] = redact(all[name])
+    }
+    const entry = { at: new Date().toISOString(), method: response.request().method(), path: url.pathname,
+      status: response.status(), headers, lifecycle: 'response headers received' }
+    requests.set(response.request(), entry)
+    recent.push(entry)
     if (recent.length > 80) recent.shift()
+  })
+  for (const event of ['requestfinished', 'requestfailed']) page.on(event, request => {
+    let entry = requests.get(request)
+    if (!entry && event === 'requestfailed') {
+      const url = new URL(request.url())
+      if (!url.pathname.startsWith('/api/')) return
+      entry = { method: request.method(), path: url.pathname }
+      recent.push(entry)
+      if (recent.length > 80) recent.shift()
+    }
+    if (!entry) return
+    entry.completedAt = new Date().toISOString()
+    entry.lifecycle = event
+    if (event === 'requestfailed') entry.failure = redact(request.failure()?.errorText)
+  })
+  page.on('websocket', socket => {
+    const pathname = new URL(socket.url()).pathname
+    if (pathname !== '/ws') return
+    // No frame listeners: credentials and message payloads stay out of logs.
+    console.log(`${new Date().toISOString()} websocket open ${pathname}`)
+    socket.on('close', () => console.log(`${new Date().toISOString()} websocket close ${pathname}`))
+    socket.on('socketerror', error => console.log(`${new Date().toISOString()} websocket error ${pathname}: ${redact(error)}`))
   })
 }
 

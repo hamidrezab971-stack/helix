@@ -20,7 +20,7 @@ async function startBackend() {
   server = spawn(path.join(backendDirectory, '.venv/bin/python'), ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000'], {
     cwd: backendDirectory,
     env: { ...process.env, DATABASE_URL: `sqlite:///${temporary}/test.db`, SECRET_KEY: 'phase8-browser-test-only-secret-123456789', ACCESS_TOKEN_EXPIRE_MINUTES: '60', FRONTEND_ORIGIN: 'http://127.0.0.1:5173', UPLOAD_DIR: `${temporary}/uploads`, FRONTEND_DIST_DIR: '', PYTHON_DOTENV_DISABLED: '1' },
-    stdio: 'ignore',
+    stdio: backendLog(),
   })
   for (let attempt = 0; attempt < 100; attempt++) {
     if (server.exitCode !== null) throw new Error('Test backend could not start; port 8000 must be free')
@@ -30,11 +30,69 @@ async function startBackend() {
   throw new Error('Backend startup timed out')
 }
 
+function backendLog() {
+  if (!process.env.HELIX_BROWSER_ARTIFACTS) return 'ignore'
+  const directory = path.join(process.env.HELIX_BROWSER_ARTIFACTS, path.basename(process.argv[1], '.cjs'))
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 })
+  const log = fs.openSync(path.join(directory, 'backend.log'), 'a', 0o600)
+  // spawn duplicates these descriptors; close the parent's copy after spawn.
+  queueMicrotask(() => fs.closeSync(log))
+  console.log(`${new Date().toISOString()} backend start`)
+  return ['ignore', log, log]
+}
+
 async function stopBackend() {
   if (!server || server.exitCode !== null) return
+  console.log(`${new Date().toISOString()} backend stop`)
   const exited = new Promise(resolve => server.once('exit', resolve))
   server.kill('SIGTERM')
   await exited
+}
+
+async function presenceBody(page) {
+  // Read this dedicated real GET inside Fetch, while its document is alive.
+  // The hook aborts its initial refresh when the WS snapshot refreshes again;
+  // waitForResponse can select that cancelled request after its 200 headers.
+  const result = await page.evaluate(async () => {
+    const response = await fetch('/api/users/presence', {
+      headers: { Authorization: `Bearer ${localStorage.getItem('smooth_access_token')}` },
+      signal: AbortSignal.timeout(5000),
+    })
+    const headers = {}
+    for (const name of ['content-type', 'content-length', 'cache-control', 'date', 'server', 'connection', 'transfer-encoding']) {
+      const value = response.headers.get(name)
+      if (value !== null) headers[name] = value
+    }
+    return { status: response.status, headers, body: await response.text() }
+  })
+  // Never print tokens, bodies, peer identities or message contents.
+  console.log('Presence API ' + JSON.stringify({ method: 'GET', path: '/api/users/presence',
+    status: result.status, headers: result.headers, lifecycle: 'body consumed by browser Fetch' }))
+  assert.equal(result.status, 200)
+  assert.match(result.headers['content-type'], /^application\/json\b/)
+  const body = JSON.parse(result.body)
+  assert.ok(Array.isArray(body.users))
+  return body
+}
+
+async function withMissingLastSeen(userId, verify) {
+  // Seed the disposable DB, so the fallback uses a real API response too.
+  // Do not intercept/fulfill the request or change production data.
+  const python = path.join(backendDirectory, '.venv/bin/python')
+  const database = `${temporary}/test.db`
+  const previous = execFileSync(python, ['-c', `import sqlite3,sys,json
+db=sqlite3.connect(sys.argv[1])
+row=db.execute('SELECT last_seen_at FROM users WHERE id=?',(int(sys.argv[2]),)).fetchone()
+assert row is not None and row[0] is not None
+assert db.execute('UPDATE users SET last_seen_at=NULL WHERE id=?',(int(sys.argv[2]),)).rowcount==1
+db.commit()
+print(json.dumps(row[0]))`, database, String(userId)], { encoding: 'utf8' }).trim()
+  try { await verify() } finally {
+    execFileSync(python, ['-c', `import sqlite3,sys,json
+db=sqlite3.connect(sys.argv[1])
+assert db.execute('UPDATE users SET last_seen_at=? WHERE id=?',(json.loads(sys.argv[3]),int(sys.argv[2]))).rowcount==1
+db.commit()`, database, String(userId), previous])
+  }
 }
 
 async function newPage(context) {
@@ -438,11 +496,10 @@ async function main() {
   }, offlinePresence)
   await expect(alice.getByLabel('Contact presence')).toHaveText(/last seen just now|last seen \d+ minutes? ago/)
   // Refresh obtains the same persisted timestamp, without an offline WS event.
-  const persistedPresenceResponse = alice.waitForResponse(response => response.url().endsWith('/api/users/presence') && response.status() === 200)
   await alice.reload()
-  const persistedPresenceBody = await (await persistedPresenceResponse).json()
-  assert.ok(persistedPresenceBody.users.some(peer => peer.user_id === offlinePresence.user_id && peer.last_seen_at === offlinePresence.last_seen_at))
   await alice.waitForFunction(() => window.realtimeTest.authenticated === 1)
+  const persistedPresenceBody = await presenceBody(alice)
+  assert.ok(persistedPresenceBody.users.some(peer => peer.user_id === offlinePresence.user_id && peer.last_seen_at === offlinePresence.last_seen_at))
   await select(alice, names.bob)
   await expect(alice.getByLabel('Contact presence')).toHaveText(/last seen just now|last seen \d+ minutes? ago/)
   const beforePresenceReconnect = await alice.evaluate(() => window.realtimeTest.authenticated)
@@ -450,20 +507,18 @@ async function main() {
   await alice.waitForFunction(previous => window.realtimeTest.authenticated > previous, beforePresenceReconnect)
   await expect(alice.getByLabel('Contact presence')).toHaveText(/last seen just now|last seen \d+ minutes? ago/)
   // A separate explicit missing-data fixture must render the honest fallback.
-  await alice.route('**/api/users/presence', async route => {
-    const response = await route.fetch(), body = await response.json()
-    await route.fulfill({ response, json: { ...body, users: body.users.map(peer => ({ ...peer, last_seen_at: null })) } })
+  await withMissingLastSeen(offlinePresence.user_id, async () => {
+    await alice.reload()
+    await alice.waitForFunction(() => window.realtimeTest.authenticated === 1)
+    const missingPresenceBody = await presenceBody(alice)
+    assert.ok(missingPresenceBody.users.some(peer => peer.user_id === offlinePresence.user_id && peer.last_seen_at === null))
+    await select(alice, names.bob)
+    await expect(alice.getByLabel('Contact presence')).toHaveText('offline')
   })
-  const missingPresenceResponse = alice.waitForResponse(response => response.url().endsWith('/api/users/presence') && response.status() === 200)
-  await alice.reload()
-  const missingPresenceBody = await (await missingPresenceResponse).json()
-  assert.ok(missingPresenceBody.users.some(peer => peer.user_id === offlinePresence.user_id && peer.last_seen_at === null))
-  await alice.waitForFunction(() => window.realtimeTest.authenticated === 1)
-  await select(alice, names.bob)
-  await expect(alice.getByLabel('Contact presence')).toHaveText('offline')
-  await alice.unroute('**/api/users/presence')
   await alice.reload()
   await alice.waitForFunction(() => window.realtimeTest.authenticated === 1)
+  const restoredPresenceBody = await presenceBody(alice)
+  assert.ok(restoredPresenceBody.users.some(peer => peer.user_id === offlinePresence.user_id && peer.last_seen_at === offlinePresence.last_seen_at))
   await select(alice, names.bob)
   await expect(alice.getByLabel('Contact presence')).toHaveText(/last seen just now|last seen \d+ minutes? ago/)
   console.log('PASS immediate last seen, persisted refresh, observer reconnect, stale online event and missing-timestamp fallback')
