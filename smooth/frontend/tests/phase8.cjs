@@ -430,12 +430,18 @@ async function main() {
   assert.ok(Number.isFinite(Date.parse(offlinePresence.last_seen_at)))
   assert.ok(Date.parse(offlinePresence.server_time) >= Date.parse(offlinePresence.last_seen_at))
   // Exercise the real WebSocket parser with a delayed event from BEFORE logout.
-  await alice.evaluate(data => window.realtimeTest.socket.dispatchEvent(new MessageEvent('message', {
-    data: JSON.stringify({ type: 'presence:update', data: { ...data, status: 'online', revision: data.revision - 1 } }),
-  })), offlinePresence)
+  await alice.evaluate(async data => {
+    window.realtimeTest.socket.dispatchEvent(new MessageEvent('message', {
+      data: JSON.stringify({ type: 'presence:update', data: { ...data, status: 'online', revision: data.revision - 1 } }),
+    }))
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  }, offlinePresence)
   await expect(alice.getByLabel('Contact presence')).toHaveText(/last seen just now|last seen \d+ minutes? ago/)
   // Refresh obtains the same persisted timestamp, without an offline WS event.
+  const persistedPresenceResponse = alice.waitForResponse(response => response.url().endsWith('/api/users/presence') && response.status() === 200)
   await alice.reload()
+  const persistedPresenceBody = await (await persistedPresenceResponse).json()
+  assert.ok(persistedPresenceBody.users.some(peer => peer.user_id === offlinePresence.user_id && peer.last_seen_at === offlinePresence.last_seen_at))
   await alice.waitForFunction(() => window.realtimeTest.authenticated === 1)
   await select(alice, names.bob)
   await expect(alice.getByLabel('Contact presence')).toHaveText(/last seen just now|last seen \d+ minutes? ago/)
@@ -448,7 +454,10 @@ async function main() {
     const response = await route.fetch(), body = await response.json()
     await route.fulfill({ response, json: { ...body, users: body.users.map(peer => ({ ...peer, last_seen_at: null })) } })
   })
+  const missingPresenceResponse = alice.waitForResponse(response => response.url().endsWith('/api/users/presence') && response.status() === 200)
   await alice.reload()
+  const missingPresenceBody = await (await missingPresenceResponse).json()
+  assert.ok(missingPresenceBody.users.some(peer => peer.user_id === offlinePresence.user_id && peer.last_seen_at === null))
   await alice.waitForFunction(() => window.realtimeTest.authenticated === 1)
   await select(alice, names.bob)
   await expect(alice.getByLabel('Contact presence')).toHaveText('offline')
@@ -473,9 +482,10 @@ async function main() {
   await bob.getByRole('button', { name: 'Log in', exact: true }).click()
   await select(bob, names.alice)
   await expect(alice.getByLabel('Contact presence')).toHaveText('online')
-  await alice.evaluate(data => window.realtimeTest.socket.dispatchEvent(new MessageEvent('message', {
-    data: JSON.stringify({ type: 'presence:update', data }),
-  })), offlinePresence)
+  await alice.evaluate(async data => {
+    window.realtimeTest.socket.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ type: 'presence:update', data }) }))
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  }, offlinePresence)
   await expect(alice.getByLabel('Contact presence')).toHaveText('online')
   await once(bob, 'offline recipient')
   await status(alice, 'offline recipient', 'Read')
