@@ -3,7 +3,7 @@ on:
   pull_request:
     paths: ['smooth/**', '.github/workflows/smooth-phase18.yml']
   push:
-    branches: [main, 'phase18-*']
+    branches: [main, 'phase18-*', 'phase20.4-*']
     paths: ['smooth/**', '.github/workflows/smooth-phase18.yml']
 permissions:
   contents: read
@@ -39,7 +39,7 @@ jobs:
         run: |
           npm install --prefix /tmp/smooth-browser-check playwright@1.51.1
           /tmp/smooth-browser-check/node_modules/.bin/playwright install --with-deps chromium
-      - name: Phase 8, 17 and 18 browser regressions
+      - name: Complete browser regressions including Phase 20.4
         working-directory: smooth/frontend
         env:
           NODE_PATH: /tmp/smooth-browser-check/node_modules

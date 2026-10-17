@@ -1,5 +1,7 @@
 import Avatar from './Avatar.jsx'
 import { utcDate } from '../../utils/formatLastSeen.js'
+import useConversationGesture from '../../hooks/useConversationGesture.js'
+import Icon from '../ui/Icon.jsx'
 
 function recentTime(timestamp) {
   const date = utcDate(timestamp), today = new Date()
@@ -10,14 +12,17 @@ function recentTime(timestamp) {
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date)
 }
 
-export default function ConversationListItem({ conversation, userId, selected, active, online, onSelect, onProfile }) {
+export default function ConversationListItem({ conversation, userId, selected, active, online, onSelect, onProfile, onActions, removing = false }) {
+  const gesture = useConversationGesture(element => onActions?.(conversation, element))
   const peer = conversation.other_user, message = conversation.last_message
   const text = message?.content.replace(/\s+/g, ' ') || ''
   const preview = message ? `${message.sender_id === userId ? 'You: ' : ''}${message.attachment ? `Photo${text ? ` · ${text}` : ''}` : text}` : 'No messages yet.'
   const unread = !active && conversation.unread_count > 0 ? conversation.unread_count : 0
-  return <li className="identity-row">
+  return <li className="identity-row conversation-item" data-conversation-id={conversation.id} data-removing={removing} inert={removing ? true : undefined}>
     <button type="button" className="row-profile-button" aria-label={`View ${peer.username}'s profile`} onClick={() => onProfile?.(peer)}><Avatar user={peer} online={online} /></button>
-    <button type="button" className="recent-row" aria-pressed={selected} onClick={() => onSelect(peer, conversation)}>
+    <button type="button" className="recent-row" aria-pressed={selected} {...gesture} onKeyDown={event => {
+      if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); onActions?.(conversation, event.currentTarget) }
+    }} onClick={() => onSelect(peer, conversation)}>
       <span className="conversation-summary">
         <span className="conversation-topline"><span className="conversation-name">@{peer.username}</span>{message && <time dateTime={message.created_at} title={message.created_at}>{recentTime(message.created_at)}</time>}</span>
         <span className="conversation-bottomline"><span className="conversation-preview" aria-label="Last message preview" dir="auto">{preview}</span>
@@ -25,5 +30,6 @@ export default function ConversationListItem({ conversation, userId, selected, a
         </span>
       </span>
     </button>
+    {onActions && <button type="button" className="conversation-more" aria-label={`Chat actions for ${peer.username}`} onClick={event => onActions(conversation, event.currentTarget.closest('li'))}><Icon name="more" size={18} /></button>}
   </li>
 }

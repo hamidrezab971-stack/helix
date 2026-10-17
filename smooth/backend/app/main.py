@@ -21,6 +21,7 @@ from app.database.migrations import migrate_phase17, migrate_phase18
 from app.api.timeline import router as timeline_router
 from app.api.profiles import router as profiles_router
 from app.database.phase20 import migrate_phase20
+from app.database.phase204 import migrate_phase204
 from app.core.body_limits import IdentityBodyLimit
 from app.services.profile_images import collect
 
@@ -31,6 +32,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     migrate_phase17(engine)
     migrate_phase18(engine)
     migrate_phase20(engine)
+    migrate_phase204(engine)
     collect()
     initialize_receipts()
     try:

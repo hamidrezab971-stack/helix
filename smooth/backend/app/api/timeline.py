@@ -14,6 +14,8 @@ from app.models.conversation_event import ConversationEvent
 from app.models.message import Message
 from app.models.message_receipt import MessageReceipt
 from app.models.user import User
+from app.models.conversation_visibility import ConversationVisibility
+from app.services.visibility import visible_message
 from app.realtime.manager import manager
 from app.services.sync import (boundary, cursor, decode_cursor, message_cursor, message_query,
                                newer_than, older_than, page_response, record_event, serialize_rows,
@@ -44,7 +46,7 @@ def get_page(conversation_id: ConversationId, user: Authenticated, db: Database,
     require_membership(conversation_id, user.id, db)
     if before is not None and after is not None:
         raise HTTPException(422, detail='Choose one history direction')
-    query = message_query().where(Message.conversation_id == conversation_id)
+    query = message_query().where(Message.conversation_id == conversation_id, visible_message(user.id))
     if before is not None or after is not None:
         timestamp, message_id, _ = boundary(before if before is not None else after, conversation_id)
         query = query.where(older_than(timestamp, message_id) if before is not None else newer_than(timestamp, message_id))
@@ -64,10 +66,10 @@ def get_context(conversation_id: ConversationId, message_id: Annotated[int, Path
                 user: Authenticated, db: Database):
     snapshot(db)
     require_membership(conversation_id, user.id, db)
-    target = db.scalar(select(Message).where(Message.id == message_id, Message.conversation_id == conversation_id))
+    target = db.scalar(select(Message).where(Message.id == message_id, Message.conversation_id == conversation_id, visible_message(user.id)))
     if target is None:
         raise HTTPException(404, detail='Reply target unavailable')
-    base = message_query().where(Message.conversation_id == conversation_id)
+    base = message_query().where(Message.conversation_id == conversation_id, visible_message(user.id))
     older = list(db.execute(base.where(older_than(target.created_at, target.id)).order_by(timeline_timestamp.desc(), Message.id.desc()).limit(15)))
     newer = list(db.execute(base.where(newer_than(target.created_at, target.id)).order_by(timeline_timestamp.asc(), Message.id.asc()).limit(15)))
     middle = list(db.execute(base.where(Message.id == target.id)))
@@ -83,6 +85,9 @@ def replay(conversation_id: ConversationId, data: SyncRequest, user: Authenticat
     token = decode_cursor(after, 'sync', conversation_id)
     position = token.get('s')
     head, floor = state_bounds(db, conversation_id)
+    visibility = db.get(ConversationVisibility, (conversation_id, user.id))
+    if visibility:
+        floor = max(floor, visibility.cleared_event_id)
     if type(position) is not int or not 0 <= position <= head:
         raise HTTPException(422, detail='Invalid synchronization position')
     if position < floor:
@@ -92,13 +97,15 @@ def replay(conversation_id: ConversationId, data: SyncRequest, user: Authenticat
         ConversationEvent.id <= head).order_by(ConversationEvent.id).limit(limit + 1)))
     has_more = len(events) > limit
     events = events[:limit]
-    ids = set(data.message_ids) | {event.message_id for event in events if event.message_id is not None}
-    rows = list(db.execute(message_query().where(Message.conversation_id == conversation_id, Message.id.in_(ids)))) if ids else []
+    cutoff = visibility.cleared_through_id if visibility else 0
+    public_events = [event for event in events if event.message_id is None or event.message_id > cutoff]
+    ids = set(data.message_ids) | {event.message_id for event in public_events if event.message_id is not None}
+    rows = list(db.execute(message_query().where(Message.conversation_id == conversation_id, Message.id.in_(ids), visible_message(user.id)))) if ids else []
     present = {row[0].id for row in rows}
     # Missing IDs reveal no foreign message state: hydration always checks the
     # conversation, so foreign and nonexistent requested IDs are both missing.
     next_position = events[-1].id if has_more else head
-    return {'events': [{'id': event.id, 'kind': event.kind, 'message_id': event.message_id} for event in events],
+    return {'events': [{'id': event.id, 'kind': event.kind, 'message_id': event.message_id} for event in public_events],
             'items': serialize_rows(db, rows, user.id), 'missing_ids': sorted(ids - present),
             'cursors': {row[0].id: message_cursor(row[0]) for row in rows},
             'has_more': has_more, 'next_cursor': cursor('sync', conversation_id, s=next_position),
@@ -112,7 +119,7 @@ def acknowledge_range(conversation_id: ConversationId, data: ReceiptRangeRequest
     timestamp, message_id, token = boundary(data.through, conversation_id, 'read')
     if token.get('u') != user.id:
         raise HTTPException(422, detail='Invalid receipt boundary')
-    eligible = select(Message.id).where(Message.conversation_id == conversation_id, Message.sender_id != user.id,
+    eligible = select(Message.id).where(Message.conversation_id == conversation_id, Message.sender_id != user.id, visible_message(user.id),
         ~newer_than(timestamp, message_id))
     now = datetime.now(UTC).replace(tzinfo=None)
     values = {'delivered_at': func.coalesce(MessageReceipt.delivered_at, now)}

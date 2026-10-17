@@ -117,6 +117,11 @@ class ConnectionManager:
                 pass
 
     async def send_to_user(self, user_id: int, event: dict[str, Any]) -> None:
+        if self.durable and event.get('type', '').startswith('message:'):
+            from app.services.visibility import private_message_event
+            event = await run_in_threadpool(private_message_event, user_id, event)
+            if event is None:
+                return
         # Snapshot the set: disconnects may happen during a send.
         sockets = tuple(self.connections.get(user_id, ()))
         await asyncio.gather(*(self._deliver(connection, event) for connection in sockets))

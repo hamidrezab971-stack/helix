@@ -27,6 +27,7 @@ from app.services.sync import record_event
 from app.services.idempotency import fingerprint, replay, remember
 from app.services.images import IMAGE_MESSAGE_SENTINEL, MAX_IMAGE_BYTES, image_path, remove_image, store_image
 from app.services.messages import allocate_message_id, effective_message, reply_previews, validate_reply_target
+from app.services.visibility import require_visible
 
 router = APIRouter(prefix="/api", tags=["images"])
 
@@ -46,7 +47,7 @@ def create_image_message(conversation_id: int, user_id: int, caption: str, file:
     duplicate = replay(db, user_id, client_message_id, digest)
     if duplicate is not None:
         return duplicate, []
-    validate_reply_target(db, conversation_id, reply_to_message_id)
+    validate_reply_target(db, conversation_id, reply_to_message_id, user_id)
     stored = store_image(file)
     try:
         message = Message(id=allocate_message_id(db), conversation_id=conversation_id, sender_id=user_id, content=caption or IMAGE_MESSAGE_SENTINEL, client_message_id=client_message_id)
@@ -58,7 +59,7 @@ def create_image_message(conversation_id: int, user_id: int, caption: str, file:
         if reply_to_message_id is not None:
             db.add(MessageReply(message_id=message.id, reply_to_message_id=reply_to_message_id))
         db.flush()
-        saved = effective_message(message, receipt, None, attachment, reply_previews(db, [message]).get(message.id))
+        saved = effective_message(message, receipt, None, attachment, reply_previews(db, [message], user_id).get(message.id))
         remember(db, message, digest)
         record_event(db, conversation_id, 'new', message.id)
         db.commit()
@@ -144,6 +145,7 @@ def download_image(
     if message is None:
         raise HTTPException(status_code=404, detail="Attachment not found")
     require_membership(message.conversation_id, user.id, db)
+    require_visible(db, message, user.id)
     path = image_path(attachment.storage_name)
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Attachment not found")

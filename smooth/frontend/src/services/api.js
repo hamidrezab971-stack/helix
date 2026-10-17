@@ -173,6 +173,10 @@ export async function getConversations(token, signal) {
   })
 }
 
+export async function deleteConversation(token, conversationId, signal) {
+  return request(`/api/conversations/${conversationId}`, { token, signal, method: 'DELETE' })
+}
+
 export async function getMessages(token, conversationId, signal) {
   const data = await request(`/api/conversations/${conversationId}/messages`, { token, signal })
   if (!Array.isArray(data)) throw apiError(GENERIC_ERROR)

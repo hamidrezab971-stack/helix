@@ -22,7 +22,8 @@ def replay(db, sender_id, client_id, digest):
         raise HTTPException(409, detail='Client message ID was reused for a different message')
     # Return current authoritative state, preserving edits, replies and receipts.
     from app.services.sync import message_query, serialize_rows
-    rows = list(db.execute(message_query().where(Message.id == intent.message_id)))
+    from app.services.visibility import visible_message
+    rows = list(db.execute(message_query().where(Message.id == intent.message_id, visible_message(sender_id))))
     if not rows:
         raise HTTPException(410, detail='This message was already sent and deleted')
     return MessageResponse.model_validate(serialize_rows(db, rows, sender_id)[0])

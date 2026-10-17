@@ -45,3 +45,14 @@
 @media (hover: hover) { .new-chat-button:hover { background: var(--accent-strong); } .account-action:hover { background: var(--surface-hover); } }
 @media (max-width: 767px) { .chat-shell[data-chat-open="true"] .new-chat-button { display: none; } }
 @media (max-height: 450px) { .navigation-header { padding-top: max(6px, env(safe-area-inset-top)); padding-bottom: 6px; } .bottom-navigation button { min-height: 46px; } }
+
+.conversation-item { max-height: 100px; opacity: 1; transform-origin: center left; transition: max-height 190ms var(--ease-out), opacity 160ms, transform 190ms var(--ease-out); }
+.conversation-item[data-removing="true"] { max-height: 0; opacity: 0; transform: scale(.98); overflow: hidden; pointer-events: none; }
+.navigation-body .conversation-item > .recent-row { padding-right: 44px; touch-action: pan-y; user-select: none; -webkit-touch-callout: none; }
+.conversation-more { position: absolute; right: 0; top: 14px; width: 44px; min-height: 44px; display: grid; place-items: center; color: var(--text-muted); border-radius: 12px; }
+.conversation-more:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.conversation-actions { width: min(288px, calc(100vw - 24px)); animation-duration: 180ms; }
+.conversation-actions h2 { margin: 10px 12px; font-size: 15px; font-weight: 600; }
+.conversation-actions p { margin: 8px 12px 12px; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+.conversation-actions-overlay { background: #0004; }
+@media (prefers-reduced-motion: reduce) { .conversation-item, .conversation-actions { transition: none; animation: none; } }

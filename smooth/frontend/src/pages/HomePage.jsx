@@ -10,12 +10,13 @@ import BottomNavigation from '../components/navigation/BottomNavigation.jsx'
 import PeopleList from '../components/navigation/PeopleList.jsx'
 import { ProfilePage, SettingsPage } from '../components/navigation/AccountPages.jsx'
 import ConversationListItem from '../components/chat/ConversationListItem.jsx'
+import ConversationActions from '../components/chat/ConversationActions.jsx'
 import EmptyState from '../components/chat/EmptyState.jsx'
 import ConnectionStatus from '../components/chat/ConnectionStatus.jsx'
 import Icon, { HelixMark } from '../components/ui/Icon.jsx'
 import useOptimisticMessages from '../hooks/useOptimisticMessages.js'
 import ChatPanel from '../components/ChatPanel.jsx'
-import { getConversations } from '../services/api.js'
+import { getConversations, deleteConversation } from '../services/api.js'
 import { connectRealtime } from '../services/realtime.js'
 import { ProfileSurface } from '../components/profile/ProfilePanel.jsx'
 import { useIdentity } from '../components/profile/IdentityProvider.jsx'
@@ -68,6 +69,13 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized,
   const recentController = useRef(null)
   const activeConversationId = useRef(null)
   const recentTimer = useRef(null)
+  const [chatActions, setChatActions] = useState(null), [removing, setRemoving] = useState(new Set())
+  const removalTimers = useRef(new Map()), selection = useRef(null)
+  selection.current = selectedUser ? { id: activeConversationId.current, other_user: selectedUser } : null
+  const closeChatActions = useCallback(() => setChatActions(null), [])
+  const openChatActions = useCallback((conversation, element) => {
+    setChatActions({ conversation, rect: element.getBoundingClientRect() })
+  }, [])
 
   const refreshRecent = useCallback(async () => {
     recentController.current?.abort()
@@ -160,10 +168,35 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized,
 
   const optimistic = useOptimisticMessages({ token, userId: user.id, onUnauthorized, onChanged: updateRecentMessage, subscribeToMessages })
 
+  const clearConversationView = useCallback(({ conversation_id }) => {
+    recentController.current?.abort()
+    if (selection.current?.id === conversation_id) {
+      peers.current.delete(selection.current.other_user.id)
+      setSelectedUser(null); setSelectedConversation(null); activeConversationId.current = null
+      navigation.navigate({ screen: 'chats', search: false, chat: null }, true)
+    }
+    if (removalTimers.current.has(conversation_id)) return
+    setRemoving(current => new Set([...current, conversation_id]))
+    const timer = setTimeout(() => {
+      removalTimers.current.delete(conversation_id)
+      setRecent(current => current.filter(item => item.id !== conversation_id))
+      setRemoving(current => { const next = new Set(current); next.delete(conversation_id); return next })
+      // Read authoritative state again: a concurrent new message may revive it.
+      refreshRecent()
+    }, matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 190)
+    removalTimers.current.set(conversation_id, timer)
+  }, [refreshRecent, navigation.navigate])
+  useEffect(() => () => { for (const timer of removalTimers.current.values()) clearTimeout(timer); removalTimers.current.clear() }, [])
+  async function removeConversation(conversation) {
+    try { clearConversationView(await deleteConversation(token, conversation.id)) }
+    catch (error) { if (error.status === 401) onUnauthorized(); throw error }
+  }
+
 
   useEffect(() => {
     if (!token) return
     const connection = connectRealtime(token, {
+      onConversationCleared: clearConversationView,
       onProfile: updateIdentity,
       onWake: wakeTimeline,
       onReactions: () => {},
@@ -195,7 +228,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized,
       clearTimeout(recentTimer.current)
       realtime.current = null
     }
-  }, [token, onUnauthorized, user.id, acknowledge, updateRecentMessage, refreshRecent, handleMutation, wakeTimeline, presence.snapshot, presence.update, presence.disconnect, updateIdentity])
+  }, [token, onUnauthorized, user.id, acknowledge, updateRecentMessage, refreshRecent, handleMutation, wakeTimeline, presence.snapshot, presence.update, presence.disconnect, updateIdentity, clearConversationView])
 
   // Search and each destination have independent, retained scroll containers.
   const visiblePanel = route.search ? `search-${searchTab}` : route.screen
@@ -256,7 +289,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized,
       {recentLoading && recent.length === 0 ? <div className="conversation-skeleton" role="status" aria-label="Loading conversations"><span /><span /><span /></div>
         : !recentError && items.length === 0 ? <EmptyState compact title={searching ? 'No matching chats.' : 'No conversations yet.'}>{searching ? 'Try another username or search People.' : 'Tap New chat to start a conversation.'}</EmptyState>
         : <ul aria-label={searching ? 'Matching conversations' : 'Recent conversations'} className="conversation-list">
-          {items.map(conversation => <ConversationListItem key={conversation.id} conversation={conversation} userId={user.id} selected={selectedUser?.id === conversation.other_user.id} active={selectedUser?.id === conversation.other_user.id && pageVisible && chatVisible} online={onlineUserIds.has(conversation.other_user.id)} onSelect={selectConversation} onProfile={setProfilePeer} />)}
+          {items.map(conversation => <ConversationListItem key={conversation.id} conversation={conversation} userId={user.id} selected={selectedUser?.id === conversation.other_user.id} active={selectedUser?.id === conversation.other_user.id && pageVisible && chatVisible} online={onlineUserIds.has(conversation.other_user.id)} onSelect={selectConversation} onProfile={setProfilePeer} onActions={openChatActions} removing={removing.has(conversation.id)} />)}
         </ul>}
     </>
   }
@@ -312,6 +345,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized,
         </> : <EmptyState title="Good conversations start with hello.">Choose a chat or find someone to talk to.</EmptyState>}
       </aside>
       {profilePeer && <ProfileSurface user={profilePeer} online={onlineUserIds.has(profilePeer.id)} lastSeen={presence.lastSeen.get(profilePeer.id)} onClose={closeProfile} onChat={selectConversation} />}
+      {chatActions && <ConversationActions target={chatActions} onClose={closeChatActions} onDelete={removeConversation} />}
     </section>
   )
 }

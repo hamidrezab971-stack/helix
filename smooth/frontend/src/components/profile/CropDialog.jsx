@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import useDialog from '../../hooks/useDialog.js'
-import { cropGeometry, pinchCrop, exportCrop } from '../../utils/crop.js'
+import { cropGeometry, pinchCrop, exportCrop, cropErrorMessage } from '../../utils/crop.js'
 
 export default function CropDialog({ image, onClose, onSave }) {
   const dialog = useRef(null), stage = useRef(null), pending = useRef(false)
@@ -39,7 +39,7 @@ export default function CropDialog({ image, onClose, onSave }) {
     if (pending.current) return
     pending.current = true; setBusy(true); setError('')
     try { await onSave(await exportCrop(image, geometry)) }
-    catch (error) { setError(error.displayMessage || error.message || 'Unable to save photo.') }
+    catch (error) { setError(error.displayMessage || cropErrorMessage(error)) }
     finally { pending.current = false; setBusy(false) }
   }
   const pan = (x,y) => update({ ...crop, x:geometry.x+x/geometry.scale, y:geometry.y+y/geometry.scale })

@@ -5,7 +5,7 @@ import Icon from '../ui/Icon.jsx'
 import { ProfileImage, useIdentity } from './IdentityProvider.jsx'
 import CropDialog from './CropDialog.jsx'
 import { getProfile, saveBiography, uploadPhoto, setPrimaryPhoto, deletePhoto, codePointLength } from '../../services/profiles.js'
-import { prepareCropImage } from '../../utils/crop.js'
+import { prepareCropImage, cropErrorMessage } from '../../utils/crop.js'
 
 export function BiographyEditor({ biography, onClose, onSave }) {
   const ref = useRef(null), pending = useRef(false)
@@ -91,19 +91,24 @@ export function ProfileSurface({ user, own = false, online = false, lastSeen, on
   const [selected,setSelected] = useState(null), [menu,setMenu] = useState(false), [deleting,setDeleting] = useState(false)
   const [crop,setCrop] = useState(null), [busy,setBusy] = useState(false), [error,setError] = useState('')
   const [editing,setEditing] = useState(false)
-  const input = useRef(null), pending = useRef(false), alive = useRef(true), imageRef = useRef(null)
-  useEffect(() => { alive.current=true; return () => { alive.current=false; if(imageRef.current) URL.revokeObjectURL(imageRef.current.url) } }, [])
-  const closeCrop = useCallback(() => { const image=imageRef.current; imageRef.current=null; if(image) URL.revokeObjectURL(image.url); setCrop(null) }, [])
+  const input = useRef(null), pending = useRef(false), alive = useRef(true), imageRef = useRef(null), loading = useRef(null)
+  useEffect(() => { alive.current=true; return () => { alive.current=false; loading.current?.abort(); imageRef.current?.dispose() } }, [])
+  const closeCrop = useCallback(() => { imageRef.current?.dispose(); imageRef.current=null; setCrop(null) }, [])
   const closeEdit = useCallback(() => setEditing(false),[]), closeDelete = useCallback(() => setDeleting(false),[])
   function update(profile) { state.update(profile); onUpdated?.(profile); setMenu(false) }
   const profile=state.profile
   async function selectFile(event) {
-    const file=event.target.files?.[0]; event.target.value=''
+    const element=event.currentTarget, file=element.files?.[0]
     if (!file || pending.current) return
+    const controller = new AbortController(); loading.current=controller
     pending.current=true;setBusy(true);setError('')
-    try { const prepared=await prepareCropImage(file); if(!alive.current) {URL.revokeObjectURL(prepared.url);return} imageRef.current=prepared;setCrop(prepared) }
-    catch(error) { if(alive.current) setError(error.message) }
-    finally { pending.current=false;if(alive.current)setBusy(false) }
+    try {
+      const prepared=await prepareCropImage(file,{signal:controller.signal,onRead:() => {element.value=''}})
+      if(!alive.current) {prepared.dispose();return}
+      imageRef.current?.dispose(); imageRef.current=prepared;setCrop(prepared)
+    }
+    catch(error) { if(alive.current && error.name!=='AbortError') setError(cropErrorMessage(error)) }
+    finally { element.value=''; loading.current=null; pending.current=false;if(alive.current)setBusy(false) }
   }
   return <div className="identity-overlay"><section ref={ref} role="dialog" aria-modal="true" aria-labelledby="profile-view-title" className="profile-dialog">
     <header className="identity-toolbar"><button type="button" onClick={onClose} aria-label="Close profile"><Icon name="back" /></button><h2 id="profile-view-title">{own?'Your photos':'Profile'}</h2>{own && profile && <button type="button" aria-label="Photo options" onClick={() => setMenu(v => !v)} disabled={busy}>•••</button>}</header>
