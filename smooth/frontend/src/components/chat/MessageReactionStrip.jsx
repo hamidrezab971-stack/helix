@@ -2,26 +2,30 @@ import { useEffect, useRef, useState } from 'react'
 import { changeReaction } from '../../services/api.js'
 export const choices = [['👍', 'thumbs up'], ['❤️', 'heart'], ['😂', 'laughing'], ['😮', 'surprised'], ['😢', 'sad'], ['👎', 'thumbs down']]
 
-export default function MessageReactionStrip({ message, token, onChanged, onUnauthorized, picker = false, onComplete }) {
+export default function MessageReactionStrip({ message, token, onChanged, onUnauthorized, picker = false, onComplete, requests }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const controller = useRef(null)
-  const pending = useRef(false)
-  useEffect(() => () => controller.current?.abort(), [])
+  const pending = useRef(false), active = useRef(false)
+  useEffect(() => {
+    active.current = true
+    return () => { active.current = false; if (!picker) controller.current?.abort() }
+  }, [picker])
   async function toggle(emoji) {
     if (pending.current) return
     pending.current = true; setBusy(true); setError('')
     const request = new AbortController(); controller.current = request
+    requests?.add(request)
     try {
       await changeReaction(token, message.id, emoji, Boolean(message.reactions.find(item => item.emoji === emoji)?.reacted_by_me), request.signal)
       if (request.signal.aborted) return
       // The serialized personalized timeline wins over delayed action responses.
-      onChanged(); onComplete?.()
+      onChanged(); if (active.current) onComplete?.()
     } catch (error) {
-      if (request.signal.aborted) return
+      if (request.signal.aborted || !active.current) return
       if (error.status === 401) onUnauthorized()
       else setError('Unable to change reaction. Please try again.')
-    } finally { pending.current = false; if (!request.signal.aborted) setBusy(false) }
+    } finally { requests?.delete(request); pending.current = false; if (active.current && !request.signal.aborted) setBusy(false) }
   }
   const items = picker ? choices.map(([emoji]) => ({ emoji, reacted_by_me: Boolean(message.reactions.find(item => item.emoji === emoji)?.reacted_by_me) })) : message.reactions
   if (!items.length) return null

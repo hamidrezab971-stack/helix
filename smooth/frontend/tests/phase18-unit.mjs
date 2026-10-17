@@ -36,12 +36,20 @@ test('Grouping respects sender, calendar day, five minute boundary, gaps and bac
   assert.ok(!sameGroup(a, {...a, created_at:'2026-10-16T23:57:00Z'}))
 })
 test('Pending presentation reconciles once without temporary canonical IDs or local-clock sorting', () => {
-  const entries = [{localId:'uuid-a', client_message_id:'uuid-a', conversation_id:1}, {localId:'uuid-b', client_message_id:'uuid-b', conversation_id:2}]
-  const server = [{id:23, client_message_id:'uuid-a', created_at:'2001-01-01T00:00:00Z'}]
+  const entries = [{localId:'uuid-a', sender_id:1, client_message_id:'uuid-a', conversation_id:1}, {localId:'uuid-b', sender_id:1, client_message_id:'uuid-b', conversation_id:2}]
+  const server = [{id:23, sender_id:1, conversation_id:1, client_message_id:'uuid-a', created_at:'2001-01-01T00:00:00Z'}]
   assert.deepEqual(visiblePending(entries, [], 1), [entries[0]])
   assert.deepEqual(visiblePending(entries, server, 1), [])
   assert.deepEqual(reconcilePending(entries, server), [entries[1]])
   assert.deepEqual(reconcilePending(reconcilePending(entries, server), server), [entries[1]])
   assert.deepEqual(reconcilePending([{...entries[0], serverId:23}], [], [23]), [])
   assert.equal('id' in entries[0], false)
+})
+
+test('Another sender or conversation cannot reconcile this sender’s pending UUID', () => {
+  const entry = {sender_id:1, conversation_id:7, client_message_id:'same-id'}
+  for (const message of [{...entry, sender_id:2}, {...entry, conversation_id:8}]) {
+    assert.deepEqual(reconcilePending([entry], [message]), [entry])
+    assert.deepEqual(visiblePending([entry], [message], 7), [entry])
+  }
 })

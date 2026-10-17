@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { sendMessage, sendImage } from '../services/api.js'
 import { reconcilePending } from '../utils/optimisticMessages.js'
 
@@ -49,8 +50,8 @@ export default function useOptimisticMessages({ token, userId, onUnauthorized, o
   const enqueue = useCallback(intent => {
     if (store.current.length >= 20) throw new Error('Retry or dismiss pending messages before sending more.')
     const id = crypto.randomUUID()
-    const entry = { ...intent, sender_id: userId, localId: id, client_message_id: id, state: 'queued' }
-    publish([...store.current, entry])
+    const entry = { ...intent, sender_id: userId, localId: id, client_message_id: id, state: 'queued', enteredAt: performance.now() }
+    flushSync(() => publish([...store.current, entry]))
     // Publish the queued bubble before starting transport work.
     queueMicrotask(() => { if (active.current) transmit(entry) })
     return id

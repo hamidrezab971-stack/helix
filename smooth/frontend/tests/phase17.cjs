@@ -140,7 +140,7 @@ c.commit()`, cid, aliceId, bobId)
 
   await latest(alice)
   await settled(alice)
-  await h.rowById(alice, 10000).getByRole('button', { name: 'Reply', exact: true }).click()
+  await h.reply(alice, 10000)
   const authBefore = await alice.evaluate(() => window.realtimeTest.authenticated)
   await alice.route('**/api/conversations/*/sync?*', route => route.abort())
   await alice.evaluate(() => { window.realtimeTest.pauseRealtime = true; window.realtimeTest.socket.close() })
@@ -284,7 +284,7 @@ c.commit()`, cid, aliceId, bobId)
   // A retained composer target stays current even after its row is evicted and
   // its mutation frame is missed; recovery requests its state with the window.
   await latest(alice)
-  await h.rowById(alice, 10000).getByRole('button', { name: 'Reply', exact: true }).click()
+  await h.reply(alice, 10000)
   for (let i = 0; i < 7; i++) { await top(alice); await loadOlder(alice) }
   await expect(h.rowById(alice, 10000)).toHaveCount(0)
   await alice.route('**/api/conversations/*/sync?*', route => route.abort())

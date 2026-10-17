@@ -42,7 +42,13 @@ class ConnectionManager:
             return None
 
     async def presence_update(self, user_id: int, status: str, last_seen_at=None) -> None:
-        peers = set(await run_in_threadpool(presence_recipients, user_id)) if last_seen_at else set()
+        peers = set()
+        if last_seen_at:
+            try:
+                peers = set(await run_in_threadpool(presence_recipients, user_id))
+            except Exception:
+                # Membership lookup failures may suppress details, never expand them.
+                logging.getLogger(__name__).exception("Unable to scope presence update")
         for observer in tuple(self.connections):
             for connection in tuple(self.connections.get(observer, ())):
                 data = {"user_id": user_id, "status": status}

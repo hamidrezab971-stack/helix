@@ -4,16 +4,25 @@ import MessageList from './chat/MessageList.jsx'
 import MessageActionMenu from './chat/MessageActionMenu.jsx'
 import ImageViewer from './chat/ImageViewer.jsx'
 import { replyPreview, replyText } from './chat/MessageBubble.jsx'
-import useMessageActions from '../hooks/useMessageActions.js' 
+import useMessageActions from '../hooks/useMessageActions.js'
 import ChatHeader from './chat/ChatHeader.jsx'
 import ChatComposer from './chat/ChatComposer.jsx'
 import { visiblePending } from '../utils/optimisticMessages.js'
 import useTimeline from '../hooks/useTimeline.js'
 
-export default function ChatPanel({ user, selectedUser, initialConversation, onConversationOpened, onMessageSent, onMessageMutated, subscribeToMutations, subscribeToSync, token, onUnauthorized, subscribeToMessages, subscribeToStatus, acknowledge, subscribeToTyping, sendTyping, isOnline, onBack, optimistic, lastSeen, now }) {
+export default function ChatPanel({ user, selectedUser, initialConversation, onConversationOpened, onMessageSent, onMessageMutated, subscribeToMutations, subscribeToSync, token, onUnauthorized, subscribeToMessages, subscribeToTyping, sendTyping, isOnline, onBack, optimistic, lastSeen, now, active = true }) {
   const [retryAttempt, setRetryAttempt] = useState(0)
   const [content, setContent] = useState('')
-  const sending = false
+  const [draftId, setDraftId] = useState(null)
+  const draft = optimistic.entries.find(entry => entry.localId === draftId)
+  const sending = draft?.state === 'sending' || draft?.state === 'queued'
+  useEffect(() => {
+    if (draftId && (!draft || draft.state === 'sent')) { setDraftId(null); setContent(''); setSelectedImage(null); setReplyTarget(null) }
+  }, [draftId, draft])
+  function detachDraft() {
+    if (draft?.state === 'failed') optimistic.dismiss(draftId)
+    setDraftId(null)
+  }
   const [sendError, setSendError] = useState('')
   const [selectedImage, setSelectedImage] = useState(null)
   const [imagePreview, setImagePreview] = useState('')
@@ -30,6 +39,7 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
   const [actionBusy, setActionBusy] = useState(false)
   const actionPending = useRef(false)
   const actionController = useRef(null)
+  const reactionRequests = useRef(new Set())
   const [replyTarget, setReplyTarget] = useState(null)
   const [photo, setPhoto] = useState(null)
   const closePhoto = useCallback(() => setPhoto(null), [])
@@ -51,18 +61,25 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
       setSendError('Choose a JPEG, PNG, or WEBP image of 8 MB or smaller.')
       return
     }
+    detachDraft()
     setSelectedImage(file)
     setSendError('')
   }
 
+  const isActive = useRef(active)
+  isActive.current = active
   const atBottom = useRef(true)
   const scrollAnchor = useRef(null)
   const navigationTimer = useRef(null)
   const positioned = useRef(false)
+  const rememberedScrollTop = useRef(0)
+  const [enterIds, setEnterIds] = useState(new Set())
+  const knownIds = useRef(new Set())
+  const animationTimers = useRef(new Set())
   const [highlightId, setHighlightId] = useState(null)
   const captureScroll = useCallback((reason) => {
     const element = history.current
-    if (!element) return null
+    if (!element || !isActive.current) return null
     const rect = element.getBoundingClientRect()
     const visible = [...element.querySelectorAll('[data-message-id]')].filter(row => row.getBoundingClientRect().bottom > rect.top)
     const anchors = visible.slice(0, 3).map(row => ({ id: Number(row.dataset.messageId), top: row.getBoundingClientRect().top - rect.top }))
@@ -82,17 +99,29 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
   }, [optimistic.reconcile])
   const timeline = useTimeline({ token, selectedUser, initialConversation, onConversationOpened,
     onUnauthorized, subscribeToSync, beforeChange: captureScroll, atBottom,
-    onPersistedRead: onMessageSent, retryAttempt, onReconciled: reconcileComposer,
-    trackedIds: [replyTarget?.id, editingId, ...optimistic.entries.map(entry => entry.serverId)].filter(id => id != null) })
+    visible: active, onPersistedRead: onMessageSent, retryAttempt, onReconciled: reconcileComposer,
+    trackedIds: [replyTarget?.id, editingId, ...optimistic.entries.filter(entry => entry.peer_id === selectedUser.id).map(entry => entry.serverId)].filter(id => id != null) })
   const { messages, conversation, stage, loadError } = timeline
+  useEffect(() => {
+    for (const message of messages) knownIds.current.add(message.id)
+    while (knownIds.current.size > 400) knownIds.current.delete(knownIds.current.values().next().value)
+  }, [messages])
+  useEffect(() => subscribeToMessages(message => {
+    if (message.sender_id === user.id || message.conversation_id !== conversationId.current || knownIds.current.has(message.id) || !atBottom.current || !isActive.current || document.visibilityState !== 'visible') return
+    knownIds.current.add(message.id)
+    setEnterIds(previous => new Set(previous).add(message.id))
+    const timer = setTimeout(() => { setEnterIds(previous => { const next = new Set(previous); next.delete(message.id); return next }); animationTimers.current.delete(timer) }, 1500)
+    animationTimers.current.add(timer)
+  }), [subscribeToMessages, user.id])
   const pendingMessages = visiblePending(optimistic.entries, messages, conversation?.id)
   useEffect(() => optimistic.reconcile(messages), [messages, optimistic.reconcile])
+  useEffect(() => { if (photo && !messages.some(message => message.attachment?.id === photo.id)) closePhoto() }, [messages, photo, closePhoto])
   const actions = useMessageActions(messages, history)
   conversationId.current = conversation?.id || null
 
   useLayoutEffect(() => {
     const element = history.current
-    if (!element) return
+    if (!element || !active) return
     const anchor = scrollAnchor.current
     if (timeline.navigationId) {
       const target = element.querySelector(`[data-message-id="${timeline.navigationId}"]`)
@@ -104,7 +133,7 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
         navigationTimer.current = setTimeout(() => setHighlightId(null), 1800)
         timeline.clearNavigation()
       }
-    } else if ((!anchor && !positioned.current) || anchor?.bottom) element.scrollTop = element.scrollHeight
+    } else if ((!anchor && (!positioned.current || atBottom.current)) || anchor?.bottom) element.scrollTop = element.scrollHeight
     else if (anchor) {
       const rect = element.getBoundingClientRect()
       const candidate = anchor.anchors.find(item => element.querySelector(`[data-message-id="${item.id}"]`))
@@ -112,20 +141,22 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
       if (row) element.scrollTop += row.getBoundingClientRect().top - rect.top - candidate.top
       else element.scrollTop = anchor.scrollTop
     }
+    else if (!atBottom.current) element.scrollTop = rememberedScrollTop.current
+    rememberedScrollTop.current = element.scrollTop
     positioned.current = true
     scrollAnchor.current = null
     atBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 64 && !timeline.hasNewer
-  }, [messages, stage, timeline.navigationId, optimistic.entries])
+  }, [messages, stage, timeline.navigationId, optimistic.entries, active])
 
   useEffect(() => {
     // Heights can change after image decoding, reaction updates, or a resize.
     const element = history.current
-    if (!element || stage !== 'ready') return
-    const observer = new ResizeObserver(() => { if (atBottom.current) element.scrollTop = element.scrollHeight })
+    if (!element || stage !== 'ready' || !active) return
+    const observer = new ResizeObserver(() => { if (isActive.current && atBottom.current) element.scrollTop = element.scrollHeight })
     const list = element.querySelector('ol')
     if (list) observer.observe(list)
     return () => observer.disconnect()
-  }, [stage])
+  }, [stage, active, Boolean(messages.length || pendingMessages.length)])
 
   useEffect(() => subscribeToMutations((event) => {
     if (event.data.conversation_id !== conversationId.current) return
@@ -141,7 +172,13 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
     localTyping.current = false
   }, [sendTyping])
 
+  useEffect(() => {
+    if (!active) { stopTyping(); actions.close(); closePhoto() }
+    timeline.retrySync()
+  }, [active, stopTyping, actions.close, closePhoto])
+
   function handleContentChange(value) {
+    if (value !== content) detachDraft()
     setContent(value)
     if (!value.trim()) return stopTyping()
     if (stage !== 'ready') return
@@ -178,6 +215,8 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
 
   useEffect(() => () => {
     actionController.current?.abort()
+    for (const request of reactionRequests.current) request.abort()
+    for (const timer of animationTimers.current) clearTimeout(timer)
     clearTimeout(navigationTimer.current)
   }, [])
 
@@ -202,13 +241,13 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
         const saved = await editMessage(token, message.id, trimmed, controller.signal)
         if (!controller.signal.aborted) {
           onMessageMutated({ type: 'message:updated', data: saved })
-          setEditingId(null)
+          setEditingId(null); setActionError('')
         }
       }
     } catch (error) {
       if (controller.signal.aborted || error.name === 'AbortError') return
       if (error.status === 401) onUnauthorized()
-      else { setActionError(error.displayMessage || `Unable to ${deleting ? 'delete' : 'edit'} your message. Please try again.`); if (deleting) throw error }
+      else { if (deleting) throw error; setActionError(error.displayMessage || 'Unable to edit your message. Please try again.') }
     } finally {
       actionPending.current = false
       if (!controller.signal.aborted) setActionBusy(false)
@@ -217,15 +256,18 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
 
   function handleSend(event) {
     event.preventDefault()
-    if (stage !== 'ready' || !conversation) return
+    if (sending || stage !== 'ready' || !conversation) return
+    if (draft?.state === 'failed') { optimistic.retry(draftId); stopTyping(); return }
     const trimmed = content.trim()
     if (!trimmed && !selectedImage) return
     if (Array.from(trimmed).length > 2000) { setSendError('Use a message between 1 and 2000 characters.'); return }
     try {
       captureScroll('pending')
-      optimistic.enqueue({ conversation_id: conversation.id, content: trimmed, file: selectedImage, reply_to: replyTarget })
+      const preview = document.getElementById('composer-image-preview')
+      const dimensions = preview?.naturalWidth ? { width: preview.naturalWidth, height: preview.naturalHeight } : null
+      const id = optimistic.enqueue({ peer_id: selectedUser.id, conversation_id: conversation.id, content: trimmed, file: selectedImage, dimensions, reply_to: replyTarget })
       stopTyping()
-      setContent(''); setSelectedImage(null); setReplyTarget(null); setSendError('')
+      setDraftId(id); setSendError('')
     } catch (error) { setSendError(error.message) }
   }
 
@@ -248,24 +290,25 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
           {timeline.syncError && <p role="alert" className="mb-2 text-sm text-stone-600">{timeline.syncError} <button type="button" className="text-button" onClick={timeline.retrySync}>Retry messages</button></p>}
           <div ref={history} tabIndex={0} onScroll={() => {
             const element = history.current
+            if (!isActive.current) return
+            rememberedScrollTop.current = element.scrollTop
             atBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 64 && !timeline.hasNewer
             if (atBottom.current) timeline.clearNew()
           }} role="log" aria-label="Message history" className="chat-history">
             {messages.length === 0 && pendingMessages.length === 0 ? (
               <p className="py-8 text-center text-sm leading-6 text-stone-500">No messages yet.<br />Start the conversation.</p>
             ) : (
-              <MessageList pending={pendingMessages} onRetry={optimistic.retry} onDismiss={optimistic.dismiss} messages={messages} user={user} selectedUser={selectedUser} timeline={timeline} highlightId={highlightId} token={token} onUnauthorized={onUnauthorized} onOpen={actions.open} onPhoto={setPhoto} />
+              <MessageList actionId={actions.target?.id} reactionRequests={reactionRequests.current} enterIds={enterIds} pending={pendingMessages} onRetry={optimistic.retry} onDismiss={optimistic.dismiss} messages={messages} user={user} selectedUser={selectedUser} timeline={timeline} highlightId={highlightId} token={token} onUnauthorized={onUnauthorized} onOpen={actions.open} onPhoto={setPhoto} />
             )}
           </div>
           <div className="my-2 flex flex-wrap items-center justify-end gap-3">
             {timeline.hasNewer && <button type="button" className="text-button min-h-9 text-sm" disabled={timeline.busy} onClick={timeline.loadNewer}>Load newer messages</button>}
             {(timeline.newCount > 0 || timeline.hasNewer) && <button type="button" className="secondary-button text-sm" disabled={timeline.busy} onClick={timeline.jumpLatest}>{timeline.newCount > 0 ? `${timeline.newCount} new ${timeline.newCount === 1 ? 'message' : 'messages'} · ` : ''}Jump to latest</button>}
           </div>
-          {actionError && <p role="alert" className="form-error mb-3">{actionError}</p>}
-          <ChatComposer editing={editingId !== null} onCancelEdit={() => setEditingId(null)} content={editingId !== null ? editContent : content} onChange={editingId !== null ? setEditContent : handleContentChange} onSubmit={editingId !== null ? event => performAction(messages.find(message => message.id === editingId) || { id: editingId }, false, event) : handleSend} sending={sending || actionBusy} error={sendError || actionError} image={selectedImage} imagePreview={imagePreview} onImage={chooseImage} onRemoveImage={() => setSelectedImage(null)} replyTarget={replyTarget} replyName={replyName} replyText={replyText} onCancelReply={() => setReplyTarget(null)} />
+          <ChatComposer editing={editingId !== null} onCancelEdit={() => { setEditingId(null); setActionError('') }} content={editingId !== null ? editContent : content} onChange={editingId !== null ? setEditContent : handleContentChange} onSubmit={editingId !== null ? event => performAction(messages.find(message => message.id === editingId) || { id: editingId }, false, event) : handleSend} sending={sending || actionBusy} error={editingId !== null ? actionError : sendError} image={selectedImage} imagePreview={imagePreview} onImage={chooseImage} onRemoveImage={() => { detachDraft(); setSelectedImage(null) }} replyTarget={replyTarget} replyName={replyName} replyText={replyText} onCancelReply={() => { detachDraft(); setReplyTarget(null) }} />
         </>
       )}
-      {actions.target && messages.some(message => message.id === actions.target.id) && <MessageActionMenu target={actions.target} message={messages.find(message => message.id === actions.target.id)} own={messages.find(message => message.id === actions.target.id).sender_id === user.id} onClose={actions.close} token={token} onUnauthorized={onUnauthorized} onChanged={timeline.retrySync} onReply={message => { setEditingId(null); setReplyTarget(replyPreview(message)); requestAnimationFrame(() => document.getElementById('message-content')?.focus()) }} onEdit={message => { setEditingId(message.id); setEditContent(message.content); setActionError(''); requestAnimationFrame(() => document.getElementById('message-content')?.focus()) }} onDelete={message => performAction(message, true)} />}
+      {actions.target && messages.some(message => message.id === actions.target.id) && <MessageActionMenu reactionRequests={reactionRequests.current} target={actions.target} message={messages.find(message => message.id === actions.target.id)} own={messages.find(message => message.id === actions.target.id).sender_id === user.id} onClose={actions.close} token={token} onUnauthorized={onUnauthorized} onChanged={timeline.retrySync} onReply={message => { detachDraft(); setEditingId(null); setReplyTarget(replyPreview(message)); requestAnimationFrame(() => document.getElementById('message-content')?.focus()) }} onEdit={message => { detachDraft(); stopTyping(); setEditingId(message.id); setEditContent(message.content); setActionError(''); requestAnimationFrame(() => document.getElementById('message-content')?.focus()) }} onDelete={message => performAction(message, true)} />}
       {photo && <ImageViewer attachment={photo} token={token} onUnauthorized={onUnauthorized} onClose={closePhoto} />}
     </section>
   )

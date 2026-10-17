@@ -31,9 +31,24 @@
 .viewer-close { position: absolute; top: max(12px, env(safe-area-inset-top)); right: 12px; z-index: 1; color: white; background: #0008; }
 @keyframes menu-enter { from { transform: translateY(6px) scale(.98); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes message-enter { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
-.message-row[data-enter="true"], .pending-message { animation: message-enter 220ms ease-out; }
+.message-row[data-enter="true"] { animation: message-enter 220ms ease-out; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0s !important; transition-duration: 0s !important; scroll-behavior: auto !important; } }
 
 .pending-photo { display: block; width: 240px; height: 180px; object-fit: contain; background: #e9e5de; }
 .pending-error { max-width: min(82%, 520px); font-size: 12px; color: #a72c20; padding: 6px 0; }
 .pending-error button { min-height: 40px; margin-right: 14px; }
+
+.message-metadata [data-ticks]::before { content: attr(data-ticks); }
+.message-bubble:focus-visible { outline: 3px solid #b6533980; outline-offset: 3px; }
+
+.message-menu .menu-close { text-align: center; color: #756c62; font-size: 12px; }
+
+.message-bubble { position: relative; }
+.message-menu-trigger { position: absolute; right: 2px; top: 0; z-index: 1; width: 32px; min-height: 32px; border-radius: 12px; opacity: 0; pointer-events: none; background: #fffef9e8; color: #795547; font-size: 12px; cursor: pointer; }
+.message-bubble:hover .message-menu-trigger, .message-bubble:focus-within .message-menu-trigger, .message-bubble:focus .message-menu-trigger { opacity: 1; pointer-events: auto; }
+
+.message-row[data-active="true"] .message-bubble { box-shadow: 0 0 0 2px #b6533955; }
+.icon-button, .send-button { transition: transform 100ms ease-out, background-color 150ms; }
+.icon-button:active:not(:disabled), .send-button:active:not(:disabled) { transform: scale(.95); }
+@keyframes chat-pane-enter { from { opacity: .6; transform: translateX(8px); } to { opacity: 1; transform: none; } }
+@media (max-width: 767px) { .chat-shell[data-chat-open="true"] .conversation-pane { animation: chat-pane-enter 240ms ease-out; } }

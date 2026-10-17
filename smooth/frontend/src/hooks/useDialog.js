@@ -9,9 +9,10 @@ export default function useDialog(ref, onClose) {
     focusable()[0]?.focus({ preventScroll: true })
     const mobile = matchMedia('(max-width: 767px)').matches
     const marker = crypto.randomUUID()
-    if (mobile) history.pushState({ ...history.state, smoothOverlay: marker }, '')
+    let pushed = false
+    const timer = mobile ? setTimeout(() => { history.pushState({ ...history.state, smoothOverlay: marker }, ''); pushed = true }, 0) : null
     let popped = false
-    function pop() { popped = true; onClose() }
+    function pop() { if (pushed && history.state?.smoothOverlay !== marker) { popped = true; onClose() } }
     function key(event) {
       if (event.key === 'Escape') { event.preventDefault(); onClose() }
       const items = focusable()
@@ -29,10 +30,11 @@ export default function useDialog(ref, onClose) {
     document.addEventListener('keydown', key)
     if (mobile) window.addEventListener('popstate', pop)
     return () => {
+      clearTimeout(timer)
       document.removeEventListener('keydown', key)
       window.removeEventListener('popstate', pop)
-      if (mobile && !popped && history.state?.smoothOverlay === marker) history.back()
-      if (previous?.isConnected) previous.focus({ preventScroll: true })
+      if (mobile && pushed && !popped && history.state?.smoothOverlay === marker) history.back()
+      if (previous?.isConnected && (modal.contains(document.activeElement) || document.activeElement === document.body)) previous.focus({ preventScroll: true })
     }
   }, [ref, onClose])
 }

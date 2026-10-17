@@ -3,7 +3,6 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 from unittest.mock import patch
-from pathlib import Path
 import test_phase8 as baseline
 from sqlalchemy import select, func, inspect, text, create_engine
 from app.database.database import SessionLocal, engine
@@ -55,20 +54,21 @@ class Phase18Tests(unittest.TestCase):
         self.assertEqual(forbidden.status_code, 404)
 
     def test_image_retries_cleanup_and_payload_conflicts(self):
+        before = set((UPLOAD_DIR / 'images').glob('*'))
         key = str(uuid4())
         with ThreadPoolExecutor(max_workers=3) as pool:
             results = list(pool.map(lambda _: self.image(key), range(3)))
         self.assertTrue(all(result.status_code == 201 for result in results), [r.text for r in results])
         self.assertEqual(len({r.json()['id'] for r in results}), 1)
-        self.assertEqual(len(list((UPLOAD_DIR / 'images').glob('*'))), 1)
+        self.assertEqual(len(set((UPLOAD_DIR / 'images').glob('*')) - before), 1)
         self.assertEqual(self.image(key, 'Other caption').status_code, 409)
         self.assertEqual(self.send(key).status_code, 409)
-        self.assertEqual(len(list((UPLOAD_DIR / 'images').glob('*'))), 1)
+        self.assertEqual(len(set((UPLOAD_DIR / 'images').glob('*')) - before), 1)
         with SessionLocal() as db:
             self.assertEqual(db.scalar(select(func.count()).select_from(MessageAttachment)), 1)
         self.client.delete('/api/messages/' + str(results[0].json()['id']), headers=self.headers('alice'))
         self.assertEqual(self.image(key).status_code, 410)
-        self.assertEqual(len(list((UPLOAD_DIR / 'images').glob('*'))), 0)
+        self.assertEqual(set((UPLOAD_DIR / 'images').glob('*')), before)
 
     def test_failed_image_transaction_has_no_file_or_intent(self):
         # A prior test may leave files in the shared temporary upload directory.
@@ -110,7 +110,6 @@ class Phase18Tests(unittest.TestCase):
 
     def test_last_seen_final_tab_and_detailed_event_capability(self):
         from app.models.user import User
-        from datetime import datetime
         receive = baseline.Phase8Tests.receive_type
         with self.client.websocket_connect('/ws') as alice, self.client.websocket_connect('/ws') as bob:
             alice.send_json({'type':'auth', 'token':self.tokens['alice'], 'presence_version':18})
@@ -124,6 +123,57 @@ class Phase18Tests(unittest.TestCase):
                 tab.send_json({'type':'presence:heartbeat'})
                 self.assertEqual(tab.receive_json()['type'], 'presence:alive')
                 with SessionLocal() as db: self.assertEqual(db.get(User, self.users['bob']).last_seen_at, first)
-            self.assertIn(self.users['bob'], self.client.get('/api/users/presence', headers=self.headers('alice')).json()['users'][0].values())
+            self.assertTrue(self.client.get('/api/users/presence', headers=self.headers('alice')).json()['users'][0]['online'])
+            bob.close()
+            offline = receive(self, alice, 'presence:update')['data']
+            self.assertEqual(offline['status'], 'offline')
+            self.assertIsNotNone(offline.get('last_seen_at'))
         with SessionLocal() as db:
             self.assertIsNotNone(db.get(User, self.users['bob']).last_seen_at)
+
+    def test_failed_text_transaction_does_not_consume_uuid(self):
+        key = str(uuid4())
+        with patch('sqlalchemy.orm.Session.commit', side_effect=RuntimeError('failed')):
+            with self.assertRaises(RuntimeError): self.send(key)
+        with SessionLocal() as db:
+            self.assertIsNone(db.get(MessageSendIntent, (self.users['alice'], key)))
+        first = self.send(key)
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(self.send(key).json()['id'], first.json()['id'])
+
+    def test_detailed_offline_timestamp_not_broadcast_to_unapproved_user(self):
+        receive = baseline.Phase8Tests.receive_type
+        with self.client.websocket_connect('/ws') as alice, self.client.websocket_connect('/ws') as charlie:
+            for socket, name in ((alice, 'alice'), (charlie, 'charlie')):
+                socket.send_json({'type':'auth', 'token':self.tokens[name], 'presence_version':18})
+                self.assertEqual(socket.receive_json()['type'], 'auth:ok')
+                receive(self, socket, 'presence:snapshot')
+            receive(self, alice, 'presence:update')
+            with self.client.websocket_connect('/ws') as bob:
+                baseline.Phase8Tests.authenticate(self, bob, 'bob')
+                receive(self, alice, 'presence:update'); receive(self, charlie, 'presence:update')
+            trusted = receive(self, alice, 'presence:update')['data']
+            unapproved = receive(self, charlie, 'presence:update')['data']
+            self.assertEqual(trusted['status'], 'offline')
+            self.assertIn('last_seen_at', trusted)
+            self.assertEqual(unapproved, {'user_id':self.users['bob'], 'status':'offline'})
+
+
+class PresenceCoalescingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_heartbeat_writes_coalesce_across_tabs_but_final_disconnect_writes(self):
+        from unittest.mock import AsyncMock
+        from time import time
+        from app.realtime.manager import ConnectionManager
+        connections = ConnectionManager(durable=True)
+        stamp = '2026-10-16T12:00:00+00:00'
+        with patch('app.realtime.manager.persist_seen', return_value=stamp) as persist, patch('app.realtime.manager.presence_recipients', return_value=[]):
+            first = await connections.register(1, AsyncMock(), time()+100)
+            second = await connections.register(1, AsyncMock(), time()+100)
+            for _ in range(10): await connections.touch(1)
+            self.assertEqual(persist.call_count, 1)
+            await connections.disconnect(first)
+            self.assertEqual(persist.call_count, 1)
+            self.assertEqual(connections.online_user_ids(), [1])
+            await connections.disconnect(second)
+            self.assertEqual(persist.call_count, 2)
+            self.assertEqual(connections.online_user_ids(), [])

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import useChatViewport from '../hooks/useChatViewport.js'
+import useMediaQuery from '../hooks/useMediaQuery.js'
 import usePresence from '../hooks/usePresence.js'
 import PresenceLabel from '../components/chat/PresenceLabel.jsx'
 import useOptimisticMessages from '../hooks/useOptimisticMessages.js'
@@ -32,7 +34,10 @@ function previewText(message) {
 }
 
 export default function HomePage({ user, token, error, onLogout, onUnauthorized }) {
+  useChatViewport()
+  const desktop = useMediaQuery('(min-width: 768px)')
   const [showList, setShowList] = useState(true)
+  const chatVisible = desktop || !showList
   const [search, setSearch] = useState('')
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
@@ -243,6 +248,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
                     <button type="button" className="recent-row" aria-pressed={selectedUser?.id === conversation.other_user.id}
                       onClick={() => {
                         setShowList(false)
+                        if (!desktop && showList && selectedUser?.id === conversation.other_user.id) return
                         setSelectedUser(conversation.other_user)
                         setSelectedConversation(conversation)
                         activeConversationId.current = conversation.id
@@ -260,7 +266,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
                           <span className={`text-[11px] ${onlineUserIds.has(conversation.other_user.id) ? 'text-emerald-700' : 'text-stone-500'}`}>
                             <PresenceLabel online={onlineUserIds.has(conversation.other_user.id)} lastSeen={presence.lastSeen.get(conversation.other_user.id)} now={presence.now} />
                           </span>
-                          {conversation.unread_count > 0 && !(selectedUser?.id === conversation.other_user.id && pageVisible) && (
+                          {conversation.unread_count > 0 && !(selectedUser?.id === conversation.other_user.id && pageVisible && chatVisible) && (
                             <span aria-label={`${conversation.unread_count} unread ${conversation.unread_count === 1 ? 'message' : 'messages'}`} className="inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-[#b65339] px-1.5 py-0.5 text-[11px] font-semibold text-white">
                               {conversation.unread_count > 99 ? '99+' : conversation.unread_count}
                             </span>
@@ -299,6 +305,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
                       aria-pressed={selectedUser?.id === directoryUser.id}
                       onClick={() => {
                         setShowList(false)
+                        if (!desktop && showList && selectedUser?.id === directoryUser.id) return
                         setSelectedUser(directoryUser)
                         setSelectedConversation(null)
                         activeConversationId.current = null
@@ -323,7 +330,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized 
           {selectedUser ? (
             <>
 
-              <ChatPanel lastSeen={presence.lastSeen.get(selectedUser.id)} now={presence.now} optimistic={optimistic} onBack={() => setShowList(true)} key={`${selectedUser.id}:${conversationAttempt}`} user={user} selectedUser={selectedUser} initialConversation={selectedConversation} onConversationOpened={onConversationOpened} onMessageSent={updateRecentMessage} onMessageMutated={handleMutation} subscribeToMutations={subscribeToMutations} subscribeToSync={subscribeToSync} token={token} onUnauthorized={onUnauthorized} subscribeToMessages={subscribeToMessages} subscribeToStatus={subscribeToStatus} acknowledge={acknowledge} subscribeToTyping={subscribeToTyping} sendTyping={sendTyping} isOnline={onlineUserIds.has(selectedUser.id)} />
+              <ChatPanel active={chatVisible} lastSeen={presence.lastSeen.get(selectedUser.id)} now={presence.now} optimistic={optimistic} onBack={() => setShowList(true)} key={`${selectedUser.id}:${conversationAttempt}`} user={user} selectedUser={selectedUser} initialConversation={selectedConversation} onConversationOpened={onConversationOpened} onMessageSent={updateRecentMessage} onMessageMutated={handleMutation} subscribeToMutations={subscribeToMutations} subscribeToSync={subscribeToSync} token={token} onUnauthorized={onUnauthorized} subscribeToMessages={subscribeToMessages} subscribeToStatus={subscribeToStatus} acknowledge={acknowledge} subscribeToTyping={subscribeToTyping} sendTyping={sendTyping} isOnline={onlineUserIds.has(selectedUser.id)} />
             </>
           ) : (
             <div className="flex h-full flex-col justify-center p-6 sm:p-8">

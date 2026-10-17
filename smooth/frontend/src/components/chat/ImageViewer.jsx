@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { attachmentBlob } from '../AttachmentImage.jsx'
 import useDialog from '../../hooks/useDialog.js'

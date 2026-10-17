@@ -1,4 +1,4 @@
-.messaging-app { height: 100vh; height: 100dvh; overflow: hidden; background: #faf9f6; }
+.messaging-app { height: 100vh; height: var(--chat-height, 100vh); overflow: hidden; background: #faf9f6; }
 .chat-shell { display: grid; grid-template-columns: 330px minmax(0, 1fr); height: 100%; width: 100%; }
 .chat-sidebar { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid #e7e5e4; background: white; }
 .sidebar-header { padding: max(20px, env(safe-area-inset-top)) 20px 18px; border-bottom: 1px solid #eeebe5; }
@@ -31,3 +31,6 @@
   .chat-header { gap: 8px; padding-left: max(4px, env(safe-area-inset-left)); }
   .chat-history { padding: 12px; }
 }
+
+@supports (height: 100dvh) { .messaging-app { height: var(--chat-height, 100dvh); } }
+.chat-avatar { flex-shrink: 0; }

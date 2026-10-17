@@ -9,7 +9,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node tests/phase18-unit.mjs",
+    "test:browser": "node tests/run-browser.cjs",
+    "test:browser:phase18": "node tests/run-browser.cjs phase18"
   },
   "dependencies": {
     "react": "19.3.0",

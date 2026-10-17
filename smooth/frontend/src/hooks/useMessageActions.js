@@ -17,5 +17,5 @@ export default function useMessageActions(messages, historyRef) {
       window.visualViewport?.removeEventListener('resize', close)
     }
   }, [target, close, historyRef])
-  return { target, close, open: (message, element) => setTarget({ id: message.id, element, rect: element.getBoundingClientRect() }) }
+  return { target, close, open: (message, element) => { element.focus({ preventScroll: true }); setTarget({ id: message.id, element, rect: element.getBoundingClientRect() }) } }
 }
