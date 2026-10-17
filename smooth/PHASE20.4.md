@@ -95,3 +95,38 @@ before closing browser contexts. Headers, bodies, auth frames, storage and
 query strings are excluded. The host browser gate retains evidence outside
 the disposable workspace and prints its location. CI uploads that evidence
 on failure. These diagnostics do not change assertions or release gates.
+
+## Last-seen reference clock and ordered presence
+
+Run `20261017T205431Z-4d9038` reached the final-tab logout check in Phase 8
+and displayed `offline`. The old hook updated `lastSeen` on the disconnect
+frame but left its reference `now` at the previous 30-second tick. A valid
+new server timestamp was therefore in the future relative to that stale
+reference; `formatLastSeen` correctly rejected it. This code path reproduces
+the reported text without any absent fixture data. Backend contract tests on
+the unchanged baseline separately verify final-tab persistence, authorized
+HTTP snapshots and private timestamp delivery. Full host artifact access and
+a fresh complete Chromium run are still required for host confirmation.
+
+The presence reducer updates status, known last seen and its reference clock
+atomically. Server time corrects client clock skew. HTTP responses merge only
+newer private timestamps and cannot replace realtime status. Missing/invalid
+timestamps keep the offline fallback; genuinely future timestamps are still
+rejected. Relative formatting through 59 minutes and older calendar formatting
+remain unchanged. No timestamp is created from a local disconnect.
+
+The frontend requests presence protocol 204. It adds server time and a
+monotonic revision to snapshots and transitions; protocol 18 and legacy
+payloads retain their previous shapes. Transition order is reserved before
+database/delivery awaits. Superseded broadcasts are suppressed, including a
+reconnect during membership lookup. The client rejects stale/duplicate events
+and snapshots, resets revision order on a new socket stream, and retains valid
+timestamps. Concurrent persistence cannot overwrite newer activity. Last-seen
+details remain limited to authenticated conversation members.
+
+Regressions cover the stale-clock failure, online/offline transitions, the
+one-hour boundary, clock skew, stale events/snapshots, database write order,
+reconnects, page refreshes and missing data. Phase 8 keeps its original 5-second
+last-seen assertion and adds real-parser stale-frame, reconnect, refresh and an
+explicit missing-data fixture. The complete seven-phase Chromium gate, crop
+and long-press deletion checks remain mandatory before production activation.

@@ -91,7 +91,7 @@ export function connectRealtime(token, { onMessage, onMutation, onReactions, onS
     authTimer = setTimeout(() => current.close(), 10000)
     current.onopen = () => {
       if (stopped) return current.close(1000)
-      current.send(JSON.stringify({ type: 'auth', token, presence_version: 18 }))
+      current.send(JSON.stringify({ type: 'auth', token, presence_version: 204 }))
     }
     current.onmessage = (event) => {
       if (stopped || current !== socket) return
@@ -138,9 +138,11 @@ export function connectRealtime(token, { onMessage, onMutation, onReactions, onS
         onStatus({ message_id: data.message_id, ...receipt })
       }
       if (payload?.type === 'presence:snapshot' && Array.isArray(data?.online_user_ids) && data.online_user_ids.every(validId)) {
-        onPresenceSnapshot(data.online_user_ids)
+        if (data.revision !== undefined && (!Number.isSafeInteger(data.revision) || data.revision < 0)) return
+        onPresenceSnapshot(data.online_user_ids, { revision: data.revision, server_time: data.server_time })
       } else if (payload?.type === 'presence:update' && validId(data?.user_id) && ['online', 'offline'].includes(data?.status)) {
-        onPresenceUpdate({ user_id: data.user_id, status: data.status, last_seen_at: typeof data.last_seen_at === 'string' && Number.isFinite(Date.parse(data.last_seen_at)) ? data.last_seen_at : null })
+        if (data.revision !== undefined && (!Number.isSafeInteger(data.revision) || data.revision < 0)) return
+        onPresenceUpdate({ user_id: data.user_id, status: data.status, revision: data.revision, server_time: data.server_time, last_seen_at: typeof data.last_seen_at === 'string' && Number.isFinite(Date.parse(data.last_seen_at)) ? data.last_seen_at : null })
       } else if (['typing:start', 'typing:stop'].includes(payload?.type) && validId(data?.conversation_id) && validId(data?.user_id)) {
         onTyping({ type: payload.type, data: { conversation_id: data.conversation_id, user_id: data.user_id } })
       }

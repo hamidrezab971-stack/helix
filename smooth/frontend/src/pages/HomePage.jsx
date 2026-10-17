@@ -210,7 +210,7 @@ export default function HomePage({ user, token, error, onLogout, onUnauthorized,
         for (const listener of statusListeners.current) listener(status)
         if (status.read_at) refreshRecent()
       },
-      onPresenceSnapshot: (ids) => { setConnectionState('connected'); presence.snapshot(ids); refreshRecent() },
+      onPresenceSnapshot: (ids, metadata) => { setConnectionState('connected'); presence.snapshot(ids, metadata); refreshRecent() },
       onPresenceUpdate: presence.update,
       onTyping: (event) => {
         for (const listener of typingListeners.current) listener(event)

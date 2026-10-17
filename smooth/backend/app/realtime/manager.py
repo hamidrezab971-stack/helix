@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import UTC, datetime
 from dataclasses import dataclass, field
 from time import time, monotonic
 from typing import Any
@@ -16,6 +17,7 @@ class Connection:
     socket: WebSocket
     expires_at: float
     detailed_presence: bool = False
+    ordered_presence: bool = False
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
@@ -24,6 +26,14 @@ class ConnectionManager:
         self.durable = durable
         self.last_persisted = {}
         self.connections: dict[int, set[Connection]] = {}
+        self.presence_revision = 0
+        self.presence_revisions = {}
+
+    def transition(self, user_id):
+        # Reserve order before persistence/delivery yields to another task.
+        self.presence_revision += 1
+        self.presence_revisions[user_id] = self.presence_revision
+        return self.presence_revision
 
     def online_user_ids(self) -> list[int]:
         return sorted(self.connections)
@@ -41,7 +51,7 @@ class ConnectionManager:
             logging.getLogger(__name__).exception("Unable to persist presence timestamp")
             return None
 
-    async def presence_update(self, user_id: int, status: str, last_seen_at=None) -> None:
+    async def presence_update(self, user_id: int, status: str, last_seen_at=None, *, revision) -> None:
         peers = set()
         if last_seen_at:
             try:
@@ -51,22 +61,30 @@ class ConnectionManager:
                 logging.getLogger(__name__).exception("Unable to scope presence update")
         for observer in tuple(self.connections):
             for connection in tuple(self.connections.get(observer, ())):
+                if self.presence_revisions.get(user_id) != revision:
+                    return
                 data = {"user_id": user_id, "status": status}
+                if connection.ordered_presence:
+                    data.update(revision=revision, server_time=datetime.now(UTC).isoformat())
                 if last_seen_at and observer in peers and connection.detailed_presence:
                     data['last_seen_at'] = last_seen_at
                 await self._deliver(connection, {"type": "presence:update", "data": data})
 
-    async def register(self, user_id: int, socket: WebSocket, expires_at: float, detailed_presence=False) -> Connection:
+    async def register(self, user_id: int, socket: WebSocket, expires_at: float, detailed_presence=False, ordered_presence=False) -> Connection:
         was_online = user_id in self.connections
-        connection = Connection(user_id, socket, expires_at, detailed_presence)
+        connection = Connection(user_id, socket, expires_at, detailed_presence, ordered_presence)
         self.connections.setdefault(user_id, set()).add(connection)
+        revision = self.transition(user_id) if not was_online else None
         try:
             await self.touch(user_id)
             if not was_online:
-                await self.presence_update(user_id, "online")
+                await self.presence_update(user_id, "online", revision=revision)
+            snapshot = {"online_user_ids": self.online_user_ids()}
+            if connection.ordered_presence:
+                snapshot.update(revision=self.presence_revision, server_time=datetime.now(UTC).isoformat())
             await self._deliver(connection, {
                 "type": "presence:snapshot",
-                "data": {"online_user_ids": self.online_user_ids()},
+                "data": snapshot,
             })
         except BaseException:
             # The endpoint cannot clean up a registration that never returned
@@ -84,11 +102,13 @@ class ConnectionManager:
                 sockets.remove(connection)
                 if not sockets:
                     self.connections.pop(connection.user_id, None)
+                    revision = self.transition(connection.user_id)
                     stamp = await self.touch(connection.user_id, final=True)
                     # A new tab may authenticate while persistence awaits I/O.
-                    if connection.user_id not in self.connections:
-                        await self.presence_update(connection.user_id, "offline", stamp)
-                        self.last_persisted.pop(connection.user_id, None)
+                    if self.presence_revisions.get(connection.user_id) == revision:
+                        await self.presence_update(connection.user_id, "offline", stamp, revision=revision)
+                        if self.presence_revisions.get(connection.user_id) == revision:
+                            self.last_persisted.pop(connection.user_id, None)
 
     async def expire(self, connection: Connection) -> None:
         async with connection.lock:

@@ -14,9 +14,12 @@ def iso_utc(value):
 def persist_seen(user_id):
     stamp = datetime.now(UTC).replace(tzinfo=None)
     with SessionLocal() as db:
-        db.execute(update(User).where(User.id == user_id).values(last_seen_at=stamp))
+        # Concurrent heartbeat/final writes must not move activity backwards.
+        db.execute(update(User).where(User.id == user_id,
+            (User.last_seen_at.is_(None)) | (User.last_seen_at < stamp)).values(last_seen_at=stamp))
         db.commit()
-    return iso_utc(stamp)
+        user = db.get(User, user_id)
+        return iso_utc(user.last_seen_at) if user else None
 
 
 def allowed_peers(db, user_id):

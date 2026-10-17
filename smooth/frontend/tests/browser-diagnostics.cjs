@@ -55,7 +55,8 @@ async function captureFailure(browser, error) {
           connection: document.querySelector('.connection-status')?.textContent,
           realtime: rt && { authenticated: rt.authenticated, closed: rt.closed, readyState: rt.socket?.readyState,
             lastPresence: rt.received.filter(e => ['presence:snapshot', 'presence:update'].includes(e.type)).slice(-12)
-              .map(e => ({ type: e.type, online_user_ids: e.data?.online_user_ids, user_id: e.data?.user_id, status: e.data?.status })),
+              .map(e => ({ type: e.type, online_user_ids: e.data?.online_user_ids, user_id: e.data?.user_id, status: e.data?.status,
+                last_seen_at: e.data?.last_seen_at, server_time: e.data?.server_time, revision: e.data?.revision })),
             typingSent: rt.sentTyping.length, messagesReceived: rt.events.length,
             clearEvents: rt.cleared.length,
             lastClearBoundaries: rt.cleared.slice(-8).map(e => ({ conversation_id: e.conversation_id, cleared_through_id: e.cleared_through_id })) } }

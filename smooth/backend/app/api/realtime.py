@@ -63,7 +63,9 @@ async def websocket_endpoint(socket: WebSocket) -> None:
             return
 
         await socket.send_json({"type": "auth:ok"})
-        connection = await manager.register(user_id, socket, expires_at, detailed_presence=auth.get('presence_version') == 18)
+        presence_version = auth.get('presence_version')
+        connection = await manager.register(user_id, socket, expires_at,
+            detailed_presence=presence_version in (18, 204), ordered_presence=presence_version == 204)
         while True:
             try:
                 frame = await asyncio.wait_for(
