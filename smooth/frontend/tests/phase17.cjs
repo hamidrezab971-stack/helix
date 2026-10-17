@@ -356,7 +356,7 @@ c.execute('DELETE FROM conversation_events WHERE conversation_id=? AND id<=?',(c
   console.log('PASS evicted/offline reply target deletion, sub-millisecond chronological ordering, deleted-window recovery, retention-gap reset, expired-cursor reset, dropped-frame recovery on a healthy socket')
 }
 
-main().catch(error => { console.error(error); process.exitCode = 1 }).finally(async () => {
+main().catch(async error => { console.error(error); process.exitCode = 1; await h.captureFailure(browser, error) }).finally(async () => {
   if (browser) await browser.close()
   await h.stopBackend()
   fs.rmSync(h.temporary, { recursive: true, force: true })

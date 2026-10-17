@@ -1,6 +1,8 @@
 // Start Vite once, then run the isolated backend/browser regressions serially.
 const { spawn } = require('node:child_process')
 const path = require('node:path')
+const fs = require('node:fs')
+const os = require('node:os')
 const assertPortFree = require('./ports.cjs')
 const root = path.resolve(__dirname,'..')
 let vite, child
@@ -11,6 +13,8 @@ async function stop() {
   }
 }
 async function main() {
+  process.env.HELIX_BROWSER_ARTIFACTS ||= fs.mkdtempSync(path.join(os.tmpdir(), 'smooth-browser-evidence-'))
+  console.log(`Browser evidence directory: ${process.env.HELIX_BROWSER_ARTIFACTS}`)
   await assertPortFree(5173)
   vite = spawn(process.execPath,[path.join(root,'node_modules/vite/bin/vite.js'),'--host','127.0.0.1'],{cwd:root,stdio:'inherit',env:{...process.env,VITE_API_URL:'',VITE_WS_URL:''}})
   let ready = false
@@ -31,4 +35,4 @@ async function main() {
   }
 }
 process.once('SIGINT',()=>{stop().finally(()=>process.exit(130))})
-main().catch(error=>{console.error(error.message);process.exitCode=1}).finally(stop)
+main().catch(async error=>{console.error(error.message);process.exitCode=1;await require('./browser-diagnostics.cjs').captureFailure(undefined,error)}).finally(stop)

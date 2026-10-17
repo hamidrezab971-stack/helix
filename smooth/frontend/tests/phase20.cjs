@@ -66,4 +66,4 @@ async function main(){
  assert.deepEqual(h.errors,[])
  console.log('PASS Phase 20 real challenge retry, persistent bio, crop cancel/drag/pinch/save, single upload, gallery/primary/delete, Back, 48px FAB, responsive widths')
 }
-main().catch(error=>{console.error(error);process.exitCode=1}).finally(async()=>{await browser?.close();await h.stopBackend();fs.rmSync(h.temporary,{recursive:true,force:true})})
+main().catch(async error=>{console.error(error);process.exitCode=1;await h.captureFailure(browser,error)}).finally(async()=>{await browser?.close();await h.stopBackend();fs.rmSync(h.temporary,{recursive:true,force:true})})

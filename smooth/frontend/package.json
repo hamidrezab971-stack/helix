@@ -10,7 +10,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node tests/phase18-unit.mjs && node tests/phase19-unit.mjs && node tests/phase191-unit.mjs && node tests/phase20-unit.mjs && node tests/phase204-unit.mjs && node tests/run-components.mjs",
+    "test": "node tests/phase18-unit.mjs && node tests/phase19-unit.mjs && node tests/phase191-unit.mjs && node tests/phase20-unit.mjs && node tests/phase204-unit.mjs && node tests/browser-diagnostics-unit.cjs && node tests/run-components.mjs",
     "test:interop": "node tests/phase20-interop.mjs",
     "test:browser": "node tests/run-browser.cjs",
     "test:browser:phase18": "node tests/run-browser.cjs phase18",

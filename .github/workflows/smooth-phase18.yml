@@ -43,4 +43,12 @@ jobs:
         working-directory: smooth/frontend
         env:
           NODE_PATH: /tmp/smooth-browser-check/node_modules
+          HELIX_BROWSER_ARTIFACTS: ${{ runner.temp }}/helix-browser-evidence
         run: npm run test:browser
+      - name: Preserve sanitized browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: helix-browser-evidence
+          path: ${{ runner.temp }}/helix-browser-evidence
+          if-no-files-found: ignore

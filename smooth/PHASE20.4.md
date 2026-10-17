@@ -71,3 +71,27 @@ available when Phase 20.4 is reactivated.
 Physical Android Gallery/Files, pinch zoom and long-press acceptance are pending
 the owner on the actual production domain. Local test success does not mean a
 production release has been activated.
+
+## Browser presence regression investigation
+
+Host run `20261017T180445Z-810d9a` reached real Chromium 134 and Vite 8.3.3.
+The Phase 8 assertion at the former line 365 searched for `.avatar-presence`
+inside `.recent-row`. The preceding assertions had already found that exact
+username's preview and timestamp. The avatar belongs to the sibling profile
+button inside the same list item, a structure also present before Phase 20.4.
+This was an obsolete test hierarchy assumption. Changing presence transport,
+conversation visibility, deletion boundaries or assertion timeouts cannot fix
+that descendant lookup.
+
+The replacement asserts one named chat row, its exact username, one enclosing
+list item, its named profile button and exactly one presence indicator with
+the expected online flag and rendered opacity. It also covers offline/tab
+close/logout and recovery after reconnect. A component regression verifies
+both presence states and the separate profile/chat/actions buttons.
+
+All seven browser phases capture sanitized HTML, masked screenshots, recent
+API method/path/status metadata and presence/connection summaries on failure,
+before closing browser contexts. Headers, bodies, auth frames, storage and
+query strings are excluded. The host browser gate retains evidence outside
+the disposable workspace and prints its location. CI uploads that evidence
+on failure. These diagnostics do not change assertions or release gates.

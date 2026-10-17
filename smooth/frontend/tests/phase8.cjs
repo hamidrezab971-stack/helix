@@ -6,6 +6,7 @@ const path = require('node:path')
 const fs = require('node:fs')
 const os = require('node:os')
 const assertPortFree = require('./ports.cjs')
+const { observe, captureFailure } = require('./browser-diagnostics.cjs')
 
 const backendDirectory = path.resolve(__dirname, '../../backend')
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'smooth-phase8-'))
@@ -38,6 +39,7 @@ async function stopBackend() {
 
 async function newPage(context) {
   const page = await context.newPage()
+  observe(page)
   page.on('pageerror', error => errors.push(error.message))
   await page.addInitScript(() => {
     window.realtimeTest = { authenticated: 0, closed: 0, events: [], received: [], sentTyping: [], statuses: [], mutations: [] }
@@ -116,6 +118,7 @@ async function directoryPresence(page, name, state) {
   await page.locator('#user-search').fill(name)
   await expect(directoryRow(page, name)).toContainText(state)
   await navigate(page, 'Chats')
+  await recentPresence(page, name, state === 'online')
 }
 
 async function logout(page) {
@@ -129,6 +132,22 @@ function directoryRow(page, name) {
 
 function recentRow(page, name) {
   return page.locator('.recent-row').filter({ hasText: `@${name}` })
+}
+
+async function recentPresence(page, name, online) {
+  const row = recentRow(page, name)
+  await expect(row).toHaveCount(1)
+  await expect(row.locator('.conversation-name')).toHaveText(`@${name}`)
+  // Profile and chat are separate sibling buttons; do not nest buttons to
+  // satisfy the legacy descendant locator. Scope the avatar to this list item.
+  const item = page.getByRole('listitem').filter({ has: row })
+  await expect(item).toHaveCount(1)
+  const profile = item.getByRole('button', { name: `View ${name}'s profile`, exact: true })
+  await expect(profile).toBeVisible()
+  const indicator = profile.locator('.avatar-presence')
+  await expect(indicator).toHaveCount(1)
+  await expect(indicator).toHaveAttribute('data-online', String(online))
+  await expect(indicator).toHaveCSS('opacity', online ? '1' : '0')
 }
 
 async function openRecent(page, name) {
@@ -362,7 +381,7 @@ async function main() {
   await status(alice, 'hello bob', 'Delivered')
   await expect(recentRow(alice, names.bob).getByLabel('Last message preview')).toHaveText('You: hello bob')
   await expect(recentRow(alice, names.bob).locator('time')).toHaveText(/\S/)
-  await expect(recentRow(alice, names.bob).locator('.avatar-presence')).toHaveAttribute('data-online', 'true')
+  await recentPresence(alice, names.bob, true)
   await select(bob, names.alice)
   await status(alice, 'hello bob', 'Read')
   await select(bobTab, names.alice)
@@ -404,6 +423,7 @@ async function main() {
   await logout(bob)
   await bob.waitForFunction(() => window.realtimeTest.closed >= 1)
   await expect(alice.getByLabel('Contact presence')).toHaveText(/last seen just now|last seen \d+ minutes? ago/)
+  await recentPresence(alice, names.bob, false)
   const logoutEvents = await bob.evaluate(() => window.realtimeTest.events.length)
   const offlineMessage = await send(alice, 'offline recipient')
   await status(alice, 'offline recipient', 'Sent')
@@ -438,6 +458,7 @@ async function main() {
     await page.waitForFunction(previous => window.realtimeTest.authenticated > previous, beforeRestart[index])
   }
   for (const page of [alice, bob]) await expect(page.getByLabel('Contact presence')).toHaveText('online')
+  await recentPresence(alice, names.bob, true)
   await send(bob, 'after restart')
   await once(alice, 'after restart')
   await once(bob, 'after restart')
@@ -969,11 +990,11 @@ async function main() {
   console.log('PASS inactive Delivered, active Read, receipt-before-HTTP race, multiple-tab receipts, offline Sent/history Read, refresh persistence, forged acknowledgements, 24 persisted receipts')
 }
 
-if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 }).finally(async () => {
+if (require.main === module) main().catch(async error => { console.error(error); process.exitCode = 1; await captureFailure(browser, error) }).finally(async () => {
   if (browser) await browser.close()
   await stopBackend()
   fs.rmSync(temporary, { recursive: true, force: true })
 })
 
 module.exports = { startBackend, stopBackend, newPage, registerAndLogin, select, openRecent,
-  send, status, rowById, openMenu, action, reply, chooseReaction, reaction, visiblePhoto, navigate, logout, names, temporary, backendDirectory, errors }
+  send, status, rowById, openMenu, action, reply, chooseReaction, reaction, visiblePhoto, navigate, logout, names, temporary, backendDirectory, errors, captureFailure, recentPresence }

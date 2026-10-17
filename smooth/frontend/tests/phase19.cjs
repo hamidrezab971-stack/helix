@@ -124,7 +124,7 @@ async function main() {
   assert.deepEqual(h.errors, [])
   console.log(`PASS no uncaught browser errors; screenshots: ${output}`)
 }
-main().catch(error => { console.error(error); process.exitCode = 1 }).finally(async () => {
+main().catch(async error => { console.error(error); process.exitCode = 1; await h.captureFailure(browser, error) }).finally(async () => {
   if (browser) await browser.close()
   await h.stopBackend()
   fs.rmSync(h.temporary, { recursive: true, force: true })

@@ -136,3 +136,18 @@ test('Conversation summaries preserve photo previews, truncation content, and un
   assert.match(markup, /data-online="true"/)
   assert.ok(!render(<ConversationListItem {...props} active />).includes('unread-badge'))
 })
+
+test('Each conversation keeps its online/offline avatar in a separate profile button beside its named chat button', () => {
+  const conversation = { id: 3, other_user: { id: 2, username: 'bob' }, unread_count: 0 }
+  for (const online of [true, false]) {
+    const markup = render(<ConversationListItem conversation={conversation} userId={1} online={online} onSelect={noop} onProfile={noop} onActions={noop} />)
+    const buttons = [...markup.matchAll(/<button\b[^>]*>[\s\S]*?<\/button>/g)].map(match => match[0])
+    assert.equal(buttons.length, 3, 'profile, chat, actions remain independent buttons')
+    assert.match(buttons[0], /aria-label="View bob&#x27;s profile"/)
+    assert.match(buttons[0], new RegExp(`class="avatar-presence" data-online="${online}"`))
+    assert.match(buttons[1], /class="recent-row"/)
+    assert.match(buttons[1], /@bob/)
+    assert.ok(!buttons[1].includes('avatar-presence'), 'legacy descendant locator cannot select the sibling indicator')
+    assert.equal((markup.match(/class="avatar-presence"/g) || []).length, 1)
+  }
+})
