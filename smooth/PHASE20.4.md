@@ -193,3 +193,6 @@ replaced during scrolling. Message actions now resolve a row with its canonical
 server message ID; pending and REST-before-recovery tests remain independent.
 The deletion response waiter is joined with the action promise so an action
 failure cannot also become an unhandled rejection when cleanup closes the page.
+Older-message actions also finish the requested scroll over two animation
+frames before pressing Enter on the resolved bubble. Scroll dismisses open
+menus by design; a queued scroll must finish before the menu is opened.

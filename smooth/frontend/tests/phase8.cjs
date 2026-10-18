@@ -269,8 +269,10 @@ async function openMenu(page, row) {
     await expect(existing).toHaveCount(0)
   }
   await row.scrollIntoViewIfNeeded()
-  await row.locator('.message-bubble').focus()
-  await page.keyboard.press('Enter')
+  // Scroll events intentionally dismiss message menus. Deliver the scroll and
+  // its layout frame before opening, and send Enter to the resolved bubble.
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  await row.locator('.message-bubble').press('Enter')
   await expect(page.getByRole('dialog', { name: 'Message actions', exact: true })).toBeVisible()
   return page.getByRole('dialog', { name: 'Message actions', exact: true })
 }
