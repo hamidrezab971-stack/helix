@@ -12,9 +12,22 @@ async function closeMenu(page) {
   await page.waitForFunction(() => !history.state?.smoothOverlay)
 }
 async function assertViewport(page, width, height) {
-  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.documentElement.scrollHeight <= innerHeight), true)
-  const composer = await page.locator('.chat-composer').boundingBox()
-  assert.ok(composer.x >= 0 && composer.y >= 0 && composer.x + composer.width <= width + 1 && composer.y + composer.height <= height + 1)
+  // VisualViewport updates are applied on the next animation frame. Keep the
+  // same bounds, but observe the resulting layout rather than the resize task.
+  await expect.poll(async () => {
+    const layout = await page.evaluate(() => {
+      const composer = document.querySelector('.chat-composer')?.getBoundingClientRect()
+      return {width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,
+        scrollHeight:document.documentElement.scrollHeight,visualHeight:visualViewport?.height,
+        chatHeight:document.documentElement.style.getPropertyValue('--chat-height'),
+        composer:composer && {x:composer.x,y:composer.y,width:composer.width,height:composer.height}}
+    })
+    const box = layout.composer
+    return layout.width === width && layout.height === height
+      && layout.scrollWidth <= layout.width && layout.scrollHeight <= layout.height
+      && box && box.x >= 0 && box.y >= 0 && box.x + box.width <= width + 1 && box.y + box.height <= height + 1
+      ? 'fits' : layout
+  }, {message:`Composer and document fit the ${width}×${height} viewport after resize`}).toBe('fits')
 }
 async function main() {
   await h.startBackend()

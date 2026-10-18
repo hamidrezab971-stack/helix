@@ -225,3 +225,9 @@ documents multipart-file omission from request post-data and the required
 response-pause lifetime for body reads in the
 [official CDP schema](https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/json/browser_protocol.json).
 The mobile Back assertion uses the rendered header's exact accessible name.
+
+Phase 19 waits for the viewport hook's animation-frame resize update before
+checking composer bounds. The same nonnegative coordinates, one-pixel bounds
+tolerance and document overflow checks remain. Failure output includes actual
+viewport, scroll and composer rectangles. The captured 360px screenshot showed
+the settled composer inside the viewport after the former immediate assertion.
