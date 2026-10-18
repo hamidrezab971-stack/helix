@@ -154,8 +154,14 @@ async function registerAndLogin(page, name) {
 
 async function navigate(page, destination) {
   const nav = page.getByRole('navigation', { name: 'Main navigation' })
+  const back = page.getByRole('button', { name: 'Back', exact: true })
+  // Login submits asynchronously. Wait for the authenticated layout before
+  // deciding whether mobile conversation navigation needs Back.
+  await expect.poll(async () => await nav.isVisible() || await back.isVisible(), {
+    message: 'Authenticated navigation or mobile conversation Back becomes visible',
+  }).toBe(true)
   if (!await nav.isVisible()) {
-    await page.getByRole('button', { name: 'Back', exact: true }).click()
+    await back.click()
     await expect(nav).toBeVisible()
   }
   await nav.getByRole('button', { name: destination, exact: true }).click()
@@ -534,6 +540,12 @@ async function main() {
   await bob.locator('#login-username').fill(names.bob)
   await bob.locator('#login-password').fill('password123')
   await require('./captcha.cjs').ready(bob)
+  // Keep login pending after click returns: navigation must wait for the real
+  // authenticated layout rather than commit to a nonexistent Back button.
+  await bob.route('**/api/auth/login', async route => {
+    await new Promise(resolve => setTimeout(resolve, 250))
+    await route.continue()
+  }, { times: 1 })
   await bob.getByRole('button', { name: 'Log in', exact: true }).click()
   await select(bob, names.alice)
   await expect(alice.getByLabel('Contact presence')).toHaveText('online')

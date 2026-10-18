@@ -163,3 +163,19 @@ reconnects, page refreshes and missing data. Phase 8 keeps its original 5-second
 last-seen assertion and adds real-parser stale-frame, reconnect, refresh and an
 explicit missing-data fixture. The complete seven-phase Chromium gate, crop
 and long-press deletion checks remain mandatory before production activation.
+
+## Login navigation synchronization
+
+Host run `20261018T000356Z-bf57fa` failed after Bob's re-login because the
+navigation helper inspected the layout immediately after clicking Log in.
+Login and the authenticated-user request were still asynchronous. Seeing no
+navigation, it committed to waiting for a mobile Back button; the eventual
+desktop Chats screen correctly had navigation and no conversation Back button.
+The saved sanitized DOM confirms that final layout.
+
+The helper now waits, within the existing assertion timeout, for authenticated
+navigation or a mobile conversation Back button before choosing its path. The
+re-login regression delays the real login request by 250ms and immediately
+selects a contact, exercising the pending-login state without mocking the auth
+response. All seven browser phases, mobile Back assertions, security checks and
+release gates remain required.
