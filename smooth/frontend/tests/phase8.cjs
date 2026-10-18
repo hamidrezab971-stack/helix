@@ -1090,12 +1090,29 @@ async function main() {
   console.log('PASS reaction picker/toggle, per-user flags, multiple emoji/users/tabs, failure retry, duplicate/out-of-order refresh, offline persistence, image/reply reactions, edit preservation, delete cleanup, no activity/unread/typing effects, mobile/restart')
 
   // Explicit failure and retry; no timer-based polling is used by the app.
-  await alice.route('**/api/conversations', route => route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"test unavailable"}' }))
+  await alice.route('**/api/conversations', async route => {
+    const clicked = await alice.evaluate(() => window.realtimeTest.retryConversationsClicked === true)
+    if (clicked) await route.continue()
+    else await route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"test unavailable"}' })
+  })
   await alice.reload()
   await expect(alice.getByText('Unable to load conversations.')).toBeVisible()
-  await alice.unroute('**/api/conversations')
-  await alice.getByRole('button', { name: 'Retry conversations' }).click()
+  // A realtime snapshot may refresh the list too. Keep failures enabled until
+  // the actual Retry click, so background recovery cannot remove the button.
+  await alice.evaluate(() => {
+    document.addEventListener('click', event => {
+      if (event.target.closest('button')?.textContent === 'Retry conversations') {
+        window.realtimeTest.retryConversationsClicked = true
+      }
+    }, { capture: true })
+  })
+  const [retryResponse] = await Promise.all([
+    alice.waitForResponse(response => response.url().endsWith('/api/conversations') && response.status() === 200),
+    alice.getByRole('button', { name: 'Retry conversations' }).click(),
+  ])
+  assert.equal(retryResponse.request().method(), 'GET')
   await expect(recentRow(alice, names.bob)).toBeVisible()
+  await alice.unroute('**/api/conversations')
   await alice.route('**/api/conversations', route => route.fulfill({ status: 401, contentType: 'application/json', body: '{"detail":"test expired"}' }))
   await alice.reload()
   await expect(alice.locator('#login-username')).toBeVisible()

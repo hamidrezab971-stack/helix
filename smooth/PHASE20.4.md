@@ -196,3 +196,9 @@ failure cannot also become an unhandled rejection when cleanup closes the page.
 Older-message actions also finish the requested scroll over two animation
 frames before pressing Enter on the resolved bubble. Scroll dismisses open
 menus by design; a queued scroll must finish before the menu is opened.
+
+The final explicit conversation retry fixture keeps its 503 response enabled
+until the real Retry click. Previously removing the failure route first let a
+realtime snapshot refresh the list and remove the button before the click.
+The retry still requires an actual successful GET and visible persisted row;
+the subsequent 401/storage-cleanup and exact database-count assertions remain.
