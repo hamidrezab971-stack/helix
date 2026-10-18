@@ -179,3 +179,10 @@ re-login regression delays the real login request by 250ms and immediately
 selects a contact, exercising the pending-login state without mocking the auth
 response. All seven browser phases, mobile Back assertions, security checks and
 release gates remain required.
+
+The next host run reached the unread batch after the mobile Back/keyboard
+checks. Expanding to desktop exposed the retained conversation, so its messages
+were correctly marked read. The unread fixture now remains on the mobile list,
+asserts that the composer is hidden and that each message is Delivered, retains
+the exact unread counts and replay/second-tab checks, then restores desktop
+after explicitly reopening the conversation.

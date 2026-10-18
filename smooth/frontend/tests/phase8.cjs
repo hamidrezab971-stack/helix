@@ -618,14 +618,17 @@ async function main() {
   await expect(alice.locator('#chat-title')).toHaveText(`@${names.bob}`)
   assert.equal(await alice.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
   await alice.getByRole('button', { name: 'Back' }).click()
-  await alice.setViewportSize({ width: 1280, height: 800 })
+  await expect(alice.locator('#message-content')).toBeHidden()
 
-  // Unread counts while on the list, with replay protection and a second tab.
+  // Keep the mobile list visible: expanding to desktop exposes the retained
+  // conversation, which correctly marks incoming messages read.
+  // Unread counts on the list, with replay protection and a second tab.
   await unread(alice, names.bob, 0)
   let third
   for (let index = 1; index <= 3; index++) {
     third = await send(bob, `unread batch ${index}`)
     await unread(alice, names.bob, index)
+    await status(bob, `unread batch ${index}`, 'Delivered')
     await unread(bob, names.alice, 0)
   }
   await expect(alice.locator('.recent-row').first()).toContainText(names.bob)
@@ -634,6 +637,8 @@ async function main() {
   const aliceTab = await newPage(aliceContext)
   await unread(aliceTab, names.bob, 3)
   await openRecent(alice, names.bob)
+  await alice.setViewportSize({ width: 1280, height: 800 })
+  await expect(alice.locator('#message-content')).toBeVisible()
   await status(bob, 'unread batch 3', 'Read')
   await unread(alice, names.bob, 0)
   await unread(aliceTab, names.bob, 0)
