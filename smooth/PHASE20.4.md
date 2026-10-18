@@ -195,7 +195,7 @@ The deletion response waiter is joined with the action promise so an action
 failure cannot also become an unhandled rejection when cleanup closes the page.
 Older-message actions also finish the requested scroll over two animation
 frames before pressing Enter on the resolved bubble. Scroll dismisses open
-menus by design; a queued scroll must finish before the menu is opened.
+menus when the history moves after opening.
 
 The final explicit conversation retry fixture keeps its 503 response enabled
 until the real Retry click. Previously removing the failure route first let a
@@ -244,3 +244,16 @@ ID. A global exact-text locator matched both the hidden recent-list preview
 and the visible message. The canonical row must occur once and its text must
 be visible; cleared-history absence and the peer's retained history remain
 separate required assertions.
+
+The real release run `20261018T173430Z-271145` exposed an application race in
+message-menu dismissal. Repeating Phase 17's fresh-history interaction with
+focus/scroll tracing reproduced it: focus moved the history to scrollTop 472,
+Enter opened the menu there, and a delayed notification for that same position
+closed it. Waiting before the key press cannot drain the scroll queued by the
+key press's own focus. The message-actions hook now records the history's
+position when opening and closes on subsequent movement. Resize, viewport,
+missing-message and explicit dismissal behavior remains intact. The regression
+delivers an unchanged-position scroll notification, requires the menu to stay
+visible, then moves history and requires dismissal. The chat deletion gesture
+is scoped to recent-conversation rows; its document listeners only interrupt
+pending gestures and do not close message menus.

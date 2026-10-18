@@ -298,6 +298,16 @@ c.commit()`, cid, aliceId, bobId)
   await h.openRecent(alice, h.names.bob)
   await expect(rows(alice)).toHaveCount(30)
   await expect(alice.getByRole('button', { name: 'Load older messages', exact: true })).toBeVisible()
+  // A scroll notification queued by focus before opening must not dismiss
+  // the menu. Subsequent movement must still close it. Repeat the native
+  // notification after opening to deterministically cover its late delivery.
+  const replyRow = h.rowById(alice, 10000)
+  const replyMenu = await h.openMenu(alice, replyRow)
+  await alice.locator('.chat-history').dispatchEvent('scroll')
+  await alice.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  await expect(replyMenu).toBeVisible()
+  await alice.locator('.chat-history').evaluate(element => { element.scrollTop += element.scrollTop > 0 ? -1 : 1 })
+  await expect(replyMenu).toHaveCount(0)
   await h.reply(alice, 10000)
   for (let i = 0; i < 7; i++) { await top(alice); await loadOlder(alice) }
   await expect(h.rowById(alice, 10000)).toHaveCount(0)
