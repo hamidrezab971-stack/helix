@@ -44,12 +44,23 @@ async function main() {
   await expect(nav(alice)).toBeHidden()
   await expect(alice.getByRole('button', { name: 'New chat' })).toBeHidden()
   await alice.locator('#message-content').fill('Unsent draft سلام')
+  // Development Strict Mode may abort the first mount's opening request.
+  // Reopening the retained chat must add no request, cancelled or completed.
+  const createsAfterOpening = creates.length
+  assert.ok(createsAfterOpening > 0)
   await back(alice)
   await expect(tab(alice, 'Contacts')).toHaveAttribute('aria-current', 'page')
   await expect(alice.locator('#user-search')).toHaveValue(h.names.bob.toUpperCase())
   await alice.locator('.user-row').filter({ hasText: `@${h.names.bob}` }).click()
   await expect(alice.locator('#message-content')).toHaveValue('Unsent draft سلام')
-  assert.equal(creates.length, 1)
+  assert.equal(creates.length, createsAfterOpening)
+  const conversationIds = await alice.evaluate(async () => {
+    const response = await fetch('/api/conversations', {headers:{Authorization:`Bearer ${localStorage.getItem('smooth_access_token')}`}})
+    if (response.status !== 200) throw new Error('Real conversation reuse check failed')
+    return (await response.json()).map(conversation => conversation.id)
+  })
+  assert.equal(conversationIds.length, 1)
+  assert.ok(Number.isSafeInteger(conversationIds[0]))
   await alice.locator('#message-content').fill('')
   const sent = await h.send(alice, 'سلام Helix — retained conversation')
   await h.select(bob, h.names.alice)

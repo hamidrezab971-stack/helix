@@ -231,3 +231,10 @@ checking composer bounds. The same nonnegative coordinates, one-pixel bounds
 tolerance and document overflow checks remain. Failure output includes actual
 viewport, scroll and composer rectangles. The captured 360px screenshot showed
 the settled composer inside the viewport after the former immediate assertion.
+
+Phase 19.1 measures creation attempts before and after reopening the retained
+chat and requires no additional attempt. The initial development Strict Mode
+mount can abort one opening POST before a second completes; counting those as
+two chat creations was incorrect. A real authenticated API check additionally
+requires exactly one persisted conversation identity. Draft retention and the
+subsequent no-extra-WebSocket checks remain unchanged.
