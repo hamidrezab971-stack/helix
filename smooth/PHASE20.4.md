@@ -203,6 +203,14 @@ realtime snapshot refresh the list and remove the button before the click.
 The retry still requires an actual successful GET and visible persisted row;
 the subsequent 401/storage-cleanup and exact database-count assertions remain.
 
-Phase 17's mobile reduced-motion check targets the mounted message composer.
+Phase 17's mobile reduced-motion check targets the animated composer controls.
 Its previous `.auth-input` selector addressed the authentication form, which is
-absent from an authenticated chat. The computed transition must still be `0s`.
+absent from an authenticated chat. Normal motion must have a positive transition
+duration; reduced motion must compute exactly `0s`.
+
+The late eviction fixture reloads a real latest page and requires 30 rows plus
+the older-page control before loading seven pages. Earlier reply-context checks
+retain disjoint history, so their window is not a valid fresh fixture. Direct
+SQL recovery fixtures also reload because SQL inserts emit no socket/sync hint.
+Pagination response and click promises are joined to retain diagnostics if
+either fails, while all eviction, deleted-target and recovery assertions remain.

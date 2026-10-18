@@ -46,9 +46,11 @@ async function settled(page) {
 
 async function loadOlder(page) {
   const previousFirst = await rows(page).first().getAttribute('data-message-id')
-  const response = page.waitForResponse(response => response.request().method() === 'GET' && response.url().includes('/messages/page?'))
-  await page.getByRole('button', { name: 'Load older messages', exact: true }).click()
-  assert.equal((await response).status(), 200)
+  const [response] = await Promise.all([
+    page.waitForResponse(response => response.request().method() === 'GET' && response.url().includes('/messages/page?')),
+    page.getByRole('button', { name: 'Load older messages', exact: true }).click(),
+  ])
+  assert.equal(response.status(), 200)
   await expect(rows(page).first()).not.toHaveAttribute('data-message-id', previousFirst)
   await settled(page)
 }
@@ -263,6 +265,9 @@ c.commit()`, cid, aliceId, bobId)
   await h.visiblePhoto(lazyTab, photoIds[0])
   await expect.poll(() => lazyTab.evaluate(url => window.imageUrls.revoked.includes(url), visibleUrl)).toBe(true)
   await lazyTab.setViewportSize({ width: 375, height: 812 })
+  const controls = lazyTab.locator('.composer-controls')
+  await lazyTab.emulateMedia({ reducedMotion: 'no-preference' })
+  assert.ok((await controls.evaluate(element => getComputedStyle(element).transitionDuration)).split(',').some(value => parseFloat(value) > 0))
   await lazyTab.emulateMedia({ reducedMotion: 'reduce' })
   assert.equal(await lazyTab.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
   await top(lazyTab)
@@ -274,7 +279,7 @@ c.commit()`, cid, aliceId, bobId)
   assert.equal((await mobileResponse).status(), 200)
   await expect(rows(lazyTab).first()).not.toHaveAttribute('data-message-id', oldFirst)
   await settled(lazyTab); await stable(lazyTab, mobileAnchor)
-  assert.equal(await lazyTab.locator('#message-content').evaluate(element => getComputedStyle(element).transitionDuration), '0s')
+  assert.equal(await controls.evaluate(element => getComputedStyle(element).transitionDuration), '0s')
   await lazyTab.reload()
   await lazyTab.getByRole('button', { name: /@.*bob/ }).first().click()
   await expect(rows(lazyTab)).toHaveCount(30)
@@ -287,7 +292,12 @@ c.commit()`, cid, aliceId, bobId)
 
   // A retained composer target stays current even after its row is evicted and
   // its mutation frame is missed; recovery requests its state with the window.
-  await latest(alice)
+  // Earlier reply-context checks retain disjoint history. Start this eviction
+  // fixture from a real fresh latest page rather than inheriting that window.
+  await alice.reload()
+  await h.openRecent(alice, h.names.bob)
+  await expect(rows(alice)).toHaveCount(30)
+  await expect(alice.getByRole('button', { name: 'Load older messages', exact: true })).toBeVisible()
   await h.reply(alice, 10000)
   for (let i = 0; i < 7; i++) { await top(alice); await loadOlder(alice) }
   await expect(h.rowById(alice, 10000)).toHaveCount(0)
@@ -309,6 +319,8 @@ c=sqlite3.connect(sys.argv[1]); cid,sender,recipient=map(int,sys.argv[2:]); star
 ids=list(range(start,start+60))
 c.executemany('INSERT INTO messages(id,conversation_id,sender_id,content,created_at) VALUES(?,?,?,?,?)', [(i,cid,sender,'Recovery history '+str(i),'2025-01-01 00:00:00.'+str(60-index).zfill(6)) for index,i in enumerate(ids)])
 c.executemany('INSERT INTO message_receipts(message_id,recipient_id) VALUES(?,?)', [(i,recipient) for i in ids]); c.commit(); print(json.dumps(ids))`, recoveryCid, charlieId, aliceId))
+  // Direct SQL seeding emits no recovery hint; reload the mounted timeline.
+  await alice.reload()
   await h.select(alice, h.names.charlie)
   await expect(rows(alice)).toHaveCount(30)
   await expect(rows(alice).first()).toHaveAttribute('data-message-id', String(seeded[29]))
