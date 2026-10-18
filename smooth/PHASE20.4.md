@@ -238,3 +238,9 @@ mount can abort one opening POST before a second completes; counting those as
 two chat creations was incorrect. A real authenticated API check additionally
 requires exactly one persisted conversation identity. Draft retention and the
 subsequent no-extra-WebSocket checks remain unchanged.
+
+Phase 20.4 scopes the revived-message assertion to its canonical server message
+ID. A global exact-text locator matched both the hidden recent-list preview
+and the visible message. The canonical row must occur once and its text must
+be visible; cleared-history absence and the peer's retained history remain
+separate required assertions.

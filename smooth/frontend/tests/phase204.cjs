@@ -45,8 +45,10 @@ async function main(){
  await alice.getByRole('button',{name:'Delete chat',exact:true}).dblclick()
  await expect(row(alice,h.names.bob)).toHaveCount(0);await alice.reload();await expect(row(alice,h.names.bob)).toHaveCount(0)
  await expect(bob.getByText('cleared history',{exact:true})).toBeVisible()
- await h.send(bob,'new message after clear');await expect(row(alice,h.names.bob)).toBeVisible()
- await row(alice,h.names.bob).click();await expect(alice.getByText('new message after clear',{exact:true})).toBeVisible()
+ const revived=await h.send(bob,'new message after clear');await expect(row(alice,h.names.bob)).toBeVisible()
+ await row(alice,h.names.bob).click()
+ await expect(h.rowById(alice,revived.id)).toHaveCount(1)
+ await expect(h.rowById(alice,revived.id).getByText('new message after clear',{exact:true})).toBeVisible()
  await expect(alice.locator('.message-list').getByText('cleared history',{exact:true})).toHaveCount(0)
  await h.navigate(alice,'Chats')
  // Right click and keyboard contextmenu alternative on desktop.
