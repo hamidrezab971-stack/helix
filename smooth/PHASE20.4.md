@@ -202,3 +202,7 @@ until the real Retry click. Previously removing the failure route first let a
 realtime snapshot refresh the list and remove the button before the click.
 The retry still requires an actual successful GET and visible persisted row;
 the subsequent 401/storage-cleanup and exact database-count assertions remain.
+
+Phase 17's mobile reduced-motion check targets the mounted message composer.
+Its previous `.auth-input` selector addressed the authentication form, which is
+absent from an authenticated chat. The computed transition must still be `0s`.
