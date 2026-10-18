@@ -257,7 +257,9 @@ async function unread(page, name, count) {
 }
 
 function messageRow(page, content) {
-  return page.locator('.chat-history li').filter({ has: page.locator('.message-bubble').filter({ hasText: content }) })
+  // Pending sends share the bubble text but have no message actions and are
+  // replaced during recovery. Resolve the persisted row before interacting.
+  return page.locator('.chat-history li[data-message-id]').filter({ has: page.locator('.message-bubble').filter({ hasText: content }) })
 }
 
 async function openMenu(page, row) {
@@ -289,10 +291,14 @@ async function edit(page, content, replacement) {
 }
 
 async function remove(page, content, expected = 204) {
-  const response = page.waitForResponse(r => r.request().method() === 'DELETE' && r.url().includes('/api/messages/'))
-  await action(page, messageRow(page, content), 'Delete')
-  await page.getByRole('dialog', { name: 'Delete this message?' }).getByRole('button', { name: 'Delete message', exact: true }).click()
-  assert.equal((await response).status(), expected)
+  const [response] = await Promise.all([
+    page.waitForResponse(r => r.request().method() === 'DELETE' && r.url().includes('/api/messages/')),
+    (async () => {
+      await action(page, messageRow(page, content), 'Delete')
+      await page.getByRole('dialog', { name: 'Delete this message?' }).getByRole('button', { name: 'Delete message', exact: true }).click()
+    })(),
+  ])
+  assert.equal(response.status(), expected)
   if (expected !== 204) { await expect(page.getByRole('dialog').getByRole('alert')).toContainText(/try again/i) }
 }
 

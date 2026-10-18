@@ -186,3 +186,10 @@ were correctly marked read. The unread fixture now remains on the mobile list,
 asserts that the composer is hidden and that each message is Delivered, retains
 the exact unread counts and replay/second-tab checks, then restores desktop
 after explicitly reopening the conversation.
+
+The following run passed those unread checks and reached an immediate
+send-then-delete. The action helper matched a pending bubble, which recovery
+replaced during scrolling. Message actions now resolve a row with its canonical
+server message ID; pending and REST-before-recovery tests remain independent.
+The deletion response waiter is joined with the action promise so an action
+failure cannot also become an unhandled rejection when cleanup closes the page.
