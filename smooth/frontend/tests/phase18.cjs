@@ -131,19 +131,51 @@ async function main() {
   const path = require('node:path'), filename = path.join(h.temporary, 'phase18.png')
   execFileSync(path.join(h.backendDirectory, '.venv/bin/python'), ['-c','from PIL import Image; import sys; Image.new("RGB",(640,480),"coral").save(sys.argv[1])',filename])
   let photo, uploadId
-  await alice.route('**' + base + '/image', async route => { const result = await route.fetch(); photo = await result.json(); await route.abort() })
-  await alice.route('**/api/conversations/*/sync?*', route => route.abort())
+  // Forwarding an intercepted multipart request can omit its native File.
+  // Let Chromium transmit it, then lose the actual committed response instead.
+  const uploadSession = await ac.newCDPSession(alice)
+  const blockedSync = {urlPattern:'*/api/conversations/*/sync?*',requestStage:'Request'}
+  let resolvePhoto, rejectPhoto
+  const committedPhoto = new Promise((resolve,reject) => { resolvePhoto=resolve; rejectPhoto=reject })
+  const uploadTimeout = setTimeout(() => rejectPhoto(new Error('Real image upload did not reach its response within 30 seconds')),30000)
+  const intercept = event => {
+    ;(async () => {
+      if (event.responseStatusCode === undefined) {
+        await uploadSession.send('Fetch.failRequest',{requestId:event.requestId,errorReason:'Failed'})
+        return
+      }
+      assert.equal(event.request.method,'POST')
+      assert.equal(event.responseStatusCode,201,'Real multipart upload must commit before its response is lost')
+      const result = await uploadSession.send('Fetch.getResponseBody',{requestId:event.requestId})
+      const message = JSON.parse(result.base64Encoded ? Buffer.from(result.body,'base64').toString('utf8') : result.body)
+      assert.ok(Number.isSafeInteger(message.id))
+      assert.equal(message.attachment.kind,'image')
+      await uploadSession.send('Fetch.failRequest',{requestId:event.requestId,errorReason:'Failed'})
+      resolvePhoto(message)
+    })().catch(rejectPhoto)
+  }
+  uploadSession.on('Fetch.requestPaused',intercept)
   await alice.evaluate(() => { window.realtimeTest.dropNewMessage = true })
-  await alice.getByLabel('Choose image', {exact:true}).setInputFiles(filename)
-  await expect(alice.getByAltText('Selected image preview')).toBeVisible()
-  await alice.getByRole('button', {name:'Send', exact:true}).click()
-  uploadId = await pending(alice).getAttribute('data-local-id')
-  await expect(pending(alice)).toHaveAttribute('data-state','failed')
-  await expect(alice.getByAltText('Selected image preview')).toBeVisible()
-  await alice.unroute('**' + base + '/image')
-  await pending(alice).getByRole('button', {name:'Retry message'}).click()
-  await expect(pending(alice)).toHaveAttribute('data-state','sent')
-  await alice.unroute('**/api/conversations/*/sync?*')
+  try {
+    await uploadSession.send('Fetch.enable',{patterns:[blockedSync,{urlPattern:'*'+base+'/image',requestStage:'Response'}]})
+    ;[photo,uploadId] = await Promise.all([committedPhoto,(async () => {
+      await alice.getByLabel('Choose image', {exact:true}).setInputFiles(filename)
+      await expect(alice.getByAltText('Selected image preview')).toBeVisible()
+      await alice.getByRole('button', {name:'Send', exact:true}).click()
+      return await pending(alice).getAttribute('data-local-id')
+    })()])
+    await expect(pending(alice)).toHaveAttribute('data-state','failed')
+    await expect(alice.getByAltText('Selected image preview')).toBeVisible()
+    assert.equal(photo.client_message_id,uploadId)
+    await uploadSession.send('Fetch.enable',{patterns:[blockedSync]})
+    await pending(alice).getByRole('button', {name:'Retry message'}).click()
+    await expect(pending(alice)).toHaveAttribute('data-state','sent')
+  } finally {
+    clearTimeout(uploadTimeout)
+    uploadSession.off('Fetch.requestPaused',intercept)
+    await uploadSession.send('Fetch.disable')
+    await uploadSession.detach()
+  }
   await alice.evaluate(() => { window.realtimeTest.dropNewMessage = false; document.dispatchEvent(new Event('visibilitychange')) })
   await assertOne(alice, photo.id, uploadId)
   await h.visiblePhoto(alice, photo.attachment.id)
@@ -177,7 +209,7 @@ async function main() {
   await h.openMenu(alice,h.rowById(alice,saved.id))
   await alice.evaluate(() => history.back())
   await expect(alice.getByRole('dialog')).toHaveCount(0)
-  await alice.getByRole('button',{name:'Back to chats'}).click()
+  await alice.getByRole('button',{name:'Back',exact:true}).click()
   await h.openRecent(alice,h.names.bob)
   await expect(alice.locator('#message-content')).toBeVisible()
   console.log('PASS photo-only surface, private upload retry, viewer, 360/390px and desktop menus, focus/Escape/back/reduced motion')

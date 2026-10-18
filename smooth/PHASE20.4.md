@@ -214,3 +214,14 @@ retain disjoint history, so their window is not a valid fresh fixture. Direct
 SQL recovery fixtures also reload because SQL inserts emit no socket/sync hint.
 Pagination response and click promises are joined to retain diagnostics if
 either fails, while all eviction, deleted-target and recovery assertions remain.
+
+Phase 18 reached its lost image-response fixture with a 422 from the forwarded
+multipart request, followed by a 201 from the direct browser retry. The fixture
+now leaves native multipart transmission to Chromium, pauses the actual server
+response, requires 201 and a valid image message, consumes that paused body,
+then drops the response. Retry must reuse the exact UUID and leave one persisted
+row. Sync recovery remains blocked until the retry is confirmed. The protocol
+documents multipart-file omission from request post-data and the required
+response-pause lifetime for body reads in the
+[official CDP schema](https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/json/browser_protocol.json).
+The mobile Back assertion uses the rendered header's exact accessible name.
