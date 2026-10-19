@@ -61,7 +61,8 @@ async function main(){
   assert.equal(posts,count+1)
   await photo(alice,`[data-attachment-id="${message.attachment.id}"]`)
   await photo(bob,`[data-attachment-id="${message.attachment.id}"]`)
-  await alice.reload();await photo(alice,`[data-attachment-id="${message.attachment.id}"]`)
+  await alice.reload();await h.openRecent(alice,h.names.bob)
+  await photo(alice,`[data-attachment-id="${message.attachment.id}"]`)
   await alice.evaluate(()=>window.realtimeTest.socket.close())
   await expect.poll(()=>alice.evaluate(()=>window.realtimeTest.authenticated)).toBeGreaterThan(1)
   await photo(alice,`[data-attachment-id="${message.attachment.id}"]`)
@@ -94,7 +95,7 @@ async function main(){
  await alice.getByRole('button',{name:'Retry message',exact:true}).click()
  await expect(alice.locator('.pending-message')).toHaveCount(0)
  // Actual input read failure, recovery, and removal clean up all local preview URLs.
- await alice.evaluate(()=>{window.FileReader=class extends window.chatReader{readAsArrayBuffer(){queueMicrotask(()=>this.onerror?.(new Event('error')))}}})
+ await alice.evaluate(()=>{window.chatReader=window.FileReader;window.FileReader=class extends window.chatReader{readAsArrayBuffer(){queueMicrotask(()=>this.onerror?.(new Event('error')))}}})
  await input.setInputFiles(files.JPEG)
  await expect(alice.locator('.chat-composer [role="alert"]')).toContainText('select it again')
  await expect(alice.locator('#composer-image-preview')).toHaveCount(0)
