@@ -17,7 +17,7 @@ export function pinchCrop(start, midpoint, distance, width, height, viewport) {
 
 // Read dimensions before browser decoding: a small compressed file can expand
 // into an enormous bitmap. Orientation can swap these axes, not their product.
-export function cropImageDimensions(buffer) {
+export function cropImageDimensions(buffer, { maxPixels = 32000000, maxDimension = Infinity, maxAspect = 12 } = {}) {
   const bytes = new Uint8Array(buffer), view = new DataView(buffer)
   const ascii = (offset, length) => String.fromCharCode(...bytes.slice(offset, offset + length))
   const invalid = () => { throw new Error('Choose a valid JPEG, PNG or WebP image.') }
@@ -62,7 +62,7 @@ export function cropImageDimensions(buffer) {
     }
   }
   if (!width || !height) invalid()
-  if (width * height > 32000000 || Math.max(width / height, height / width) > 12) {
+  if (width * height > maxPixels || Math.max(width, height) > maxDimension || Math.max(width / height, height / width) > maxAspect) {
     throw new Error('Choose a photo with smaller dimensions.')
   }
   return { width, height }
@@ -101,7 +101,7 @@ export function readSelectedImage(file, signal) {
   })
 }
 
-function loadImage(url, signal) {
+export function loadImage(url, signal) {
   abortCheck(signal)
   return new Promise((resolve, reject) => {
     const image = new Image()

@@ -5,6 +5,8 @@ import { getAttachmentBlob } from '../services/api.js'
 // history. URLs belong to visible components and are always revoked there.
 const cache = new Map()
 let bytes = 0
+let epoch = 0
+export function clearAttachmentCache() { epoch++; cache.clear(); bytes = 0 }
 function remember(key, blob) {
   if (cache.has(key)) bytes -= cache.get(key).size
   cache.delete(key); cache.set(key, blob); bytes += blob.size
@@ -67,8 +69,9 @@ export default function AttachmentImage({ attachment, token, onUnauthorized, onO
 }
 
 export async function attachmentBlob(token, id, signal) {
+  const started = epoch
   const key = `${token}:${id}`
   const blob = cache.get(key) || await getAttachmentBlob(token, id, signal)
-  remember(key, blob)
+  if (started === epoch && !signal?.aborted) remember(key, blob)
   return blob
 }

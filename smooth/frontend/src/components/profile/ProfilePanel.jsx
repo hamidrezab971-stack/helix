@@ -111,17 +111,17 @@ export function ProfileSurface({ user, own = false, online = false, lastSeen, on
     finally { element.value=''; loading.current=null; pending.current=false;if(alive.current)setBusy(false) }
   }
   return <div className="identity-overlay"><section ref={ref} role="dialog" aria-modal="true" aria-labelledby="profile-view-title" className="profile-dialog">
-    <header className="identity-toolbar"><button type="button" onClick={onClose} aria-label="Close profile"><Icon name="back" /></button><h2 id="profile-view-title">{own?'Your photos':'Profile'}</h2>{own && profile && <button type="button" aria-label="Photo options" onClick={() => setMenu(v => !v)} disabled={busy}>•••</button>}</header>
+    <header className="identity-toolbar"><button type="button" onClick={onClose} aria-label="Close profile"><Icon name="back" /></button><h2 id="profile-view-title">{own?'Your photos':'Profile'}</h2>{own && profile && <button type="button" aria-label="Photo options" onClick={() => setMenu(v => !v)} disabled={busy}><Icon name="more" /></button>}</header>
     <div className="profile-dialog-scroll">
       {profile ? <PhotoGallery profile={profile} onSelected={setSelected} /> : <Avatar user={user} presence={false} size="large" />}
       {own && profile && <><input ref={input} type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" aria-label="Choose profile photo" onChange={selectFile} disabled={busy} />
-        {menu && <div className="photo-options">{selected && selected!==profile.primary_photo_id && <button type="button" disabled={busy} onClick={async () => { if(pending.current)return; pending.current=true;setBusy(true);setError('');try{update(await identity.guard(setPrimaryPhoto(identity.token,selected)))}catch(e){setError(e.displayMessage)}finally{pending.current=false;setBusy(false)} }}>Set as primary</button>}{selected && <button type="button" className="danger-button" disabled={busy} onClick={() => {setMenu(false);setDeleting(true)}}>Delete this photo</button>}</div>}
-        <button type="button" className="profile-add" onClick={() => input.current.click()} disabled={busy || profile.photos.length>=profile.max_photos}>{busy ? 'Opening photo…' : `Add photo · ${profile.photos.length}/${profile.max_photos}`}</button></>}
+        {menu && <div className="photo-options">{selected && selected!==profile.primary_photo_id && <button type="button" disabled={busy} onClick={async () => { if(pending.current)return; pending.current=true;setBusy(true);setError('');try{update(await identity.guard(setPrimaryPhoto(identity.token,selected)))}catch(e){setError(e.displayMessage)}finally{pending.current=false;setBusy(false)} }}><Icon name="star" size={18} />Set as primary</button>}{selected && <button type="button" className="danger-button" disabled={busy} onClick={() => {setMenu(false);setDeleting(true)}}><Icon name="trash" size={18} />Delete this photo</button>}</div>}
+        <button type="button" className="profile-add" onClick={() => input.current.click()} disabled={busy || profile.photos.length>=profile.max_photos}><Icon name="camera" size={18} />{busy ? 'Opening photo…' : `Add photo · ${profile.photos.length}/${profile.max_photos}`}</button></>}
       <div className="profile-details"><h3 dir="auto">@{user.username}</h3>{!own && <p className="profile-hint">{online?'online':lastSeen?'Last seen '+new Date(lastSeen).toLocaleString():'offline'}</p>}
         {profile && <p dir="auto" className="profile-biography">{profile.biography || (own?'Add a few words about yourself.':'No bio yet.')}</p>}
         {!profile && !state.error && <p role="status" className="profile-hint">Loading profile…</p>}
         {state.error && <p role="alert">{state.error} <button type="button" className="text-button" onClick={state.retry}>Retry</button></p>}
-        {own && profile && <button type="button" className="text-button" onClick={() => setEditing(true)}>Edit bio</button>}
+        {own && profile && <button type="button" className="text-button" onClick={() => setEditing(true)}><Icon name="edit" size={16} />Edit bio</button>}
         {!own && <button type="button" className="primary-button profile-chat-action" onClick={() => {
           // Let the dialog's Back entry settle before creating a conversation
           // entry, so Android Back returns to the original destination once.

@@ -20,6 +20,7 @@ import { getConversations, deleteConversation } from '../services/api.js'
 import { connectRealtime } from '../services/realtime.js'
 import { ProfileSurface } from '../components/profile/ProfilePanel.jsx'
 import { useIdentity } from '../components/profile/IdentityProvider.jsx'
+import { clearAttachmentCache } from '../components/AttachmentImage.jsx'
 
 function sortRecent(conversations) {
   return [...conversations].sort((a, b) => {
@@ -29,6 +30,7 @@ function sortRecent(conversations) {
 }
 
 export default function HomePage({ user, token, error, onLogout, onUnauthorized, theme, onToggleTheme }) {
+  useEffect(() => () => clearAttachmentCache(), [token])
   useChatViewport()
   const identity = useIdentity()
   const updateIdentity = identity?.update

@@ -24,9 +24,9 @@ async function main() {
     await new Promise(resolve=>setTimeout(resolve,100))
   }
   if(!ready) throw new Error('Frontend startup timed out')
-  const phases = process.argv.slice(2).length ? process.argv.slice(2) : ['phase8','phase17','phase18','phase19','phase191','phase20','phase204']
+  const phases = process.argv.slice(2).length ? process.argv.slice(2) : ['phase8','phase17','phase18','phase19','phase191','phase20','phase204','phase211']
   for(const phase of phases) {
-    if(!['phase8','phase17','phase18','phase19','phase191','phase20','phase204'].includes(phase)) throw new Error('Unknown browser regression phase')
+    if(!['phase8','phase17','phase18','phase19','phase191','phase20','phase204','phase211'].includes(phase)) throw new Error('Unknown browser regression phase')
     const code = await new Promise((resolve,reject) => {
       child=spawn(process.execPath,[path.join(__dirname,`${phase}.cjs`)],{cwd:root,stdio:'inherit',env:process.env})
       child.once('error',reject); child.once('exit',resolve)

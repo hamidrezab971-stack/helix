@@ -1,3 +1,4 @@
+import Icon from '../ui/Icon.jsx'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import useDialog from '../../hooks/useDialog.js'
 import { cropGeometry, pinchCrop, exportCrop, cropErrorMessage } from '../../utils/crop.js'
@@ -52,7 +53,7 @@ export default function CropDialog({ image, onClose, onSave }) {
       <div className="crop-boundary" aria-hidden="true"><i /><i /><i /><i /></div>
     </div>
     <div className="crop-controls"><label htmlFor="crop-zoom">Zoom</label><input id="crop-zoom" type="range" min="1" max="4" step=".01" value={crop.zoom} disabled={busy} onChange={event => update({ ...crop, zoom:Number(event.target.value) })} />
-      <div className="crop-position" aria-label="Position photo">{[['←',-20,0,'Move photo left'],['↑',0,-20,'Move photo up'],['↓',0,20,'Move photo down'],['→',20,0,'Move photo right']].map(([label,x,y,name]) => <button type="button" key={name} aria-label={name} disabled={busy} onClick={() => pan(x,y)}>{label}</button>)}<button type="button" disabled={busy} onClick={() => update({zoom:1,x:0,y:0})}>Reset</button></div>
+      <div className="crop-position" aria-label="Position photo">{[['left',-20,0,'Move photo left'],['up',0,-20,'Move photo up'],['down',0,20,'Move photo down'],['right',20,0,'Move photo right']].map(([label,x,y,name]) => <button type="button" key={name} aria-label={name} disabled={busy} onClick={() => pan(x,y)}><Icon name={label} size={18} /></button>)}<button type="button" disabled={busy} onClick={() => update({zoom:1,x:0,y:0})}>Reset</button></div>
       <p className="profile-hint">Drag to position · Pinch or use the zoom slider</p>{error && <p role="alert" className="form-error">{error}</p>}
     </div>
   </section></div>

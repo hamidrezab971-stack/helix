@@ -808,12 +808,20 @@ async function main() {
   assert.ok(await alice.evaluate(url => window.imageUrls.revoked.includes(url), cancelledUrl))
   alice.off('request', countUpload)
 
-  // Failed upload retains the selection and shows a retryable error.
+  // Invalid local bytes are rejected before sending. Preserve the original
+  // server-rejection assertions below using a valid, readable selection.
   await alice.getByLabel('Choose image', { exact: true }).setInputFiles({ name: 'fake.jpg', mimeType: 'image/jpeg', buffer: Buffer.from('not an image') })
+  await expect(alice.getByRole('alert')).toContainText('valid JPEG')
+  await expect(alice.getByAltText('Selected image preview')).toHaveCount(0)
+  await expect(alice.getByRole('button', { name: 'Send', exact: true })).toBeDisabled()
+  await alice.route('**/api/conversations/*/messages/image', route => route.fulfill({ status: 422, contentType: 'application/json', body: '{"detail":"Synthetic image rejection"}' }))
+  await alice.getByLabel('Choose image', { exact: true }).setInputFiles(jpeg)
+  await expect(alice.getByAltText('Selected image preview')).toBeVisible()
   await alice.getByRole('button', { name: 'Send', exact: true }).click()
   await expect(alice.getByRole('alert')).toContainText('valid JPEG')
   await expect(alice.getByAltText('Selected image preview')).toBeVisible()
   await alice.getByRole('button', { name: 'Remove image' }).click()
+  await alice.unroute('**/api/conversations/*/messages/image')
   const firstPhoto = await sendPhoto(alice, jpeg, 'Vacation photo')
   for (const page of [alice, bob, imageTab]) await visiblePhoto(page, firstPhoto.attachment.id)
   await status(alice, 'Vacation photo', 'Read')

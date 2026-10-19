@@ -1,3 +1,5 @@
+import { uploadMultipart } from './upload.js'
+
 export const API_URL = (import.meta.env?.VITE_API_URL || '').replace(/\/+$/, '')
 const GENERIC_ERROR = 'Something went wrong. Please try again.'
 
@@ -8,7 +10,7 @@ function apiError(message, status) {
   return error
 }
 
-export async function request(path, { body, token, signal, method, binary = false } = {}) {
+export async function request(path, { body, token, signal, method, binary = false, upload } = {}) {
   const headers = {}
   const multipart = body instanceof FormData
   if (body && !multipart) headers['Content-Type'] = 'application/json'
@@ -16,7 +18,9 @@ export async function request(path, { body, token, signal, method, binary = fals
 
   let response
   try {
-    response = await fetch(`${API_URL}${path}`, {
+    response = upload && typeof XMLHttpRequest !== 'undefined'
+      ? await uploadMultipart(`${API_URL}${path}`, { body, headers, signal, ...upload })
+      : await fetch(`${API_URL}${path}`, {
       method: method || (body ? 'POST' : 'GET'),
       headers,
       body: body ? (multipart ? body : JSON.stringify(body)) : undefined,
@@ -24,6 +28,9 @@ export async function request(path, { body, token, signal, method, binary = fals
     })
   } catch (error) {
     if (error.name === 'AbortError') throw error
+    if (error.name === 'NotReadableError') throw apiError('This photo could not be read. Please select it again from Gallery or Files.')
+    if (globalThis.navigator?.onLine === false) throw apiError('You are offline. Reconnect, then retry your message.')
+    if (path.endsWith('/messages/image')) throw apiError('The image upload was interrupted. Check your connection and retry.')
     throw apiError('Unable to connect to the server.')
   }
 
@@ -33,7 +40,8 @@ export async function request(path, { body, token, signal, method, binary = fals
   try {
     data = await response.json()
   } catch {
-    throw apiError(GENERIC_ERROR, response.status)
+    if (response.ok) throw apiError(GENERIC_ERROR, response.status)
+    data = null // Nginx and intermediaries may return HTML for e.g. 413/502.
   }
 
   if (!response.ok) {
@@ -44,6 +52,10 @@ export async function request(path, { body, token, signal, method, binary = fals
         : 'Your sign-in has expired. Please log in again.'
     } else if (response.status === 429) {
       message = `Please wait ${response.headers.get('Retry-After') || 'a few'} seconds before trying again.`
+    } else if (path.endsWith('/messages/image') && [400, 413, 415, 422, 500, 502, 503, 504].includes(response.status)) {
+      message = response.status === 413 ? 'Choose an image of 8 MB or smaller.'
+        : [400, 415, 422].includes(response.status) ? 'Choose a valid JPEG, PNG or WebP image (non-animated, up to 25 megapixels) with a caption up to 2000 characters.'
+          : 'The server could not save your photo. Your selection is kept; please retry.'
     } else if (path.startsWith('/api/auth/') && [400, 503].includes(response.status)) {
       message = response.status === 400 ? 'Verification expired or invalid. Please verify again.' : 'Verification is busy. Please try again shortly.'
     } else if (path.startsWith('/api/profiles')) {
@@ -58,10 +70,8 @@ export async function request(path, { body, token, signal, method, binary = fals
       message = 'Choose another user to start a conversation.'
     } else if (response.status === 409) {
       message = path.startsWith('/api/conversations') ? 'This send ID belongs to a different message.' : 'Unable to create an account with these details. Try another username or sign in.'
-    } else if (path.endsWith('/messages/image') && [413, 422].includes(response.status)) {
-      message = response.status === 413 ? 'Choose an image of 8 MB or smaller.' : 'Choose a valid JPEG, PNG, or WEBP image with safe dimensions and a caption up to 2000 characters.'
     } else if (response.status === 422) {
-      const errors = Array.isArray(data.detail) ? data.detail : []
+      const errors = Array.isArray(data?.detail) ? data.detail : []
       if (path.includes('/reactions')) {
         message = 'Choose a supported reaction.'
       } else if (errors.some((error) => error.loc?.includes('reply_to_message_id'))) {
@@ -195,13 +205,13 @@ export async function deleteMessage(token, messageId, signal) {
   await request(`/api/messages/${messageId}`, { token, signal, method: 'DELETE' })
 }
 
-export async function sendImage(token, conversationId, file, caption, signal, replyToMessageId = null, clientMessageId = null) {
+export async function sendImage(token, conversationId, file, caption, signal, replyToMessageId = null, clientMessageId = null, options = {}) {
   const body = new FormData()
-  body.append('file', file)
+  body.append('file', file, options.filename || file.name || `photo.${file.type === 'image/jpeg' ? 'jpg' : file.type === 'image/webp' ? 'webp' : 'png'}`)
   body.append('caption', caption)
   if (clientMessageId) body.append('client_message_id', clientMessageId)
   if (replyToMessageId !== null) body.append('reply_to_message_id', String(replyToMessageId))
-  return safeMessage(await request(`/api/conversations/${conversationId}/messages/image`, { token, signal, body }))
+  return safeMessage(await request(`/api/conversations/${conversationId}/messages/image`, { token, signal, body, upload: options }))
 }
 
 export async function getAttachmentBlob(token, attachmentId, signal) {

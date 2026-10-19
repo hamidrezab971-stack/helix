@@ -33,3 +33,7 @@
 .composer-slot-content { min-height: 0; overflow: hidden; }
 .message-media img { opacity: 0; transition: opacity var(--motion-normal) var(--ease-out); }
 .message-media img[data-decoded="true"] { opacity: 1; }
+.conversation-more, .identity-toolbar > button, .photo-options button, .profile-add, .crop-position button {
+  transition: transform var(--motion-fast) var(--ease-soft), color var(--motion-fast), background var(--motion-fast), opacity var(--motion-fast);
+}
+.conversation-more:active:not(:disabled), .identity-toolbar > button:active:not(:disabled), .photo-options button:active:not(:disabled), .profile-add:active:not(:disabled), .crop-position button:active:not(:disabled) { transform: scale(.96); }

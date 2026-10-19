@@ -1,5 +1,6 @@
 import test from 'node:test'
 import './phase20-components.jsx'
+import './phase211-components.jsx'
 import assert from 'node:assert/strict'
 import { renderToStaticMarkup as render } from 'react-dom/server'
 import LoginPage from '../src/pages/LoginPage.jsx'
