@@ -1,6 +1,9 @@
 # Required digest references are resolved by infra/scripts/lock-images.py.
 ARG NODE_IMAGE
 ARG PYTHON_IMAGE
+FROM scratch AS wheelhouse
+COPY smooth/backend/requirements.lock /requirements.lock
+
 FROM ${NODE_IMAGE} AS frontend
 WORKDIR /build/frontend
 COPY smooth/frontend/package.json smooth/frontend/package-lock.json ./
@@ -9,10 +12,12 @@ COPY smooth/frontend/ ./
 RUN npm run build
 
 FROM ${PYTHON_IMAGE} AS python-deps
+ARG PIP_NO_INDEX=0
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /build
 COPY smooth/backend/requirements.lock ./
-RUN python -m pip download --only-binary=:all: --require-hashes -r requirements.lock -d /wheels \
+RUN --mount=type=bind,from=wheelhouse,target=/wheelhouse,ro \
+ python -m pip download --find-links=/wheelhouse --only-binary=:all: --require-hashes -r requirements.lock -d /wheels \
  && python -m venv /venv \
  && /venv/bin/pip install --no-index --find-links=/wheels --require-hashes -r requirements.lock
 

@@ -19,9 +19,12 @@ services:
     platform: linux/amd64
     build:
       context: ..
+      additional_contexts:
+        wheelhouse: ${WHEELHOUSE_DIR:-./wheelhouse}
       args:
         NODE_IMAGE: ${NODE_IMAGE:?Resolve image digests first}
         PYTHON_IMAGE: ${PYTHON_IMAGE:?Resolve image digests first}
+        PIP_NO_INDEX: ${PIP_NO_INDEX:-0}
     container_name: ${COMPOSE_PROJECT_NAME:-helix212}-app
     user: '${APP_UID:?Use the audited persistent data UID}:${APP_GID:?Use the audited persistent data GID}'
     init: true
