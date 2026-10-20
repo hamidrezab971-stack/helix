@@ -25,6 +25,10 @@ def check(value,message):
 def get(url,headers=None):
     with urllib.request.urlopen(urllib.request.Request(url,headers=headers or {}),timeout=10) as r:
         return r.read()
+def post(url,payload,headers):
+    request=urllib.request.Request(url,data=json.dumps(payload).encode(),headers={**headers,'Content-Type':'application/json'})
+    with urllib.request.urlopen(request,timeout=20) as response:
+        return json.load(response)
 def internal(url):
     code='import urllib.request;print(urllib.request.urlopen('+repr(url)+',timeout=5).read().decode())'
     return json.loads(subprocess.check_output(compose+['exec','-T','app','python','-c',code],text=True,timeout=20))
@@ -53,9 +57,11 @@ auth={'Authorization':'Basic '+base64.b64encode(('helix-admin:'+password).encode
 grafana=f'http://127.0.0.1:{a.grafana_port}'
 health=json.loads(get(grafana+'/api/datasources/uid/helix-prometheus/health',auth))
 check(health.get('status')=='OK','Grafana cannot query Prometheus')
+dashboard_evidence={}
 for name in ('application','infrastructure','services'):
     result=json.loads(get(grafana+'/api/dashboards/uid/helix-'+name,auth))
     check(result['dashboard']['panels'],'Dashboard provisioning missing')
+    dashboard_evidence[name]=[]
     for panel in result['dashboard']['panels']:
         for target in panel['targets']:
             expr=target['expr']
@@ -63,9 +69,19 @@ for name in ('application','infrastructure','services'):
             check(result['status']=='success','Dashboard PromQL failed: '+panel['title'])
             if a.require_observations and panel['title'] not in ('Active alerts',):
                 check(result['data']['result'],'Dashboard has no real observation: '+panel['title'])
+            # Query through Grafana's real datasource plugin as well as Prometheus.
+            frames=post(grafana+'/api/ds/query',{'from':str(int((time.time()-300)*1000)),'to':str(int(time.time()*1000)),
+                'queries':[{'refId':'A','datasource':{'uid':'helix-prometheus','type':'prometheus'},'expr':expr,'instant':True,'range':False,'intervalMs':15000,'maxDataPoints':300}]},auth)['results']['A']
+            check(not frames.get('error'),'Grafana datasource query failed: '+panel['title'])
+            observed=any(len(frame.get('data',{}).get('values',[]))>=2 and
+                         any(value is not None for value in frame['data']['values'][-1])
+                         for frame in frames.get('frames',[]))
+            if a.require_observations and panel['title']!='Active alerts':
+                check(observed,'Grafana returned no measured values: '+panel['title'])
+            dashboard_evidence[name].append({'panel':panel['title'],'prometheus_series':len(result['data']['result']),'grafana_frames':len(frames.get('frames',[]))})
 if a.require_observations:
     for expr in ('sum(helix_message_delivery_total{outcome="success"}) > 0',
                  'sum(helix_uploads_total{kind="attachment",outcome="success"}) > 0',
                  'sum(helix_uploads_total{outcome="failure"}) > 0'):
         check(internal('http://prometheus:9090/api/v1/query?query='+urllib.parse.quote(expr))['data']['result'],'Missing real application traffic observation')
-print(json.dumps({'services':{x['Service']:x['Health'] for x in states},'targets':{x['labels']['job']:x['health'] for x in targets},'grafana_query':'OK','dashboards':'provisioned; expressions validated','real_observations_required':a.require_observations},indent=2))
+print(json.dumps({'services':{x['Service']:x['Health'] for x in states},'targets':{x['labels']['job']:x['health'] for x in targets},'grafana_query':'OK','dashboards':dashboard_evidence,'real_observations_required':a.require_observations},indent=2))
