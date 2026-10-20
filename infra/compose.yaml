@@ -14,7 +14,10 @@ x-runtime: &runtime
 services:
   app:
     <<: *runtime
-    networks: [monitoring]
+    networks:
+      monitoring: {}
+      ingress:
+        gw_priority: 1
     image: ${HELIX_IMAGE:?Set an immutable candidate image tag}
     platform: linux/amd64
     build:
@@ -36,7 +39,7 @@ services:
       UPLOAD_DIR: /data/uploads
       FRONTEND_DIST_DIR: /app/frontend/dist
       METRICS_TOKEN_FILE: /run/secrets/metrics_token
-      FORWARDED_ALLOW_IPS: 172.30.212.1
+      FORWARDED_ALLOW_IPS: 172.30.213.1
     secrets: [metrics_token]
     ports: ['127.0.0.1:${APP_PORT:-18000}:8000']
     volumes:
@@ -84,7 +87,10 @@ services:
 
   grafana:
     <<: *runtime
-    networks: [monitoring]
+    networks:
+      monitoring: {}
+      ingress:
+        gw_priority: 1
     image: ${GRAFANA_IMAGE:?Resolve image digests first}
     user: '472:472'
     environment:
@@ -160,6 +166,15 @@ services:
       retries: 3
 
 networks:
+  # Internal-only networks do not publish ports on current Docker Engine.
+  # Only app/Grafana join this bridge; their published listeners stay loopback.
+  ingress:
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: 127.0.0.1
+    ipam:
+      config:
+        - subnet: 172.30.213.0/24
+          gateway: 172.30.213.1
   monitoring:
     internal: true
     ipam:
