@@ -1,0 +1,33 @@
+name: HELIX infrastructure code checks
+on:
+  pull_request:
+    paths: ['infra/**', 'Dockerfile', '.dockerignore', 'smooth/backend/**', '.github/workflows/helix-infra.yml']
+  push:
+    branches: ['phase21.2-*']
+permissions:
+  contents: read
+jobs:
+  verify-code:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install verified runtime dependencies and transport tests
+        run: |
+          python -m pip install --require-hashes -r smooth/backend/requirements.lock
+          python -m pip install -r smooth/backend/requirements-test.txt
+      - name: Persistence safety, syntax and real ASGI metrics
+        run: |
+          python infra/scripts/test-safety.py
+          python -m compileall -q infra/scripts
+          node --check infra/scripts/smoke-browser.cjs
+          cd smooth/backend
+          python -m unittest discover -s tests -p test_phase212_metrics.py -v
+      # Image build and full real-stack acceptance need the reviewed digest lock
+      # and a verified private data copy. They are intentionally not claimed here.

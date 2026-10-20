@@ -1,0 +1,369 @@
+{
+  "uid": "helix-application",
+  "title": "HELIX Application",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": [
+    "helix"
+  ],
+  "timezone": "browser",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "refresh": "15s",
+  "editable": false,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Request rate",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (method,route) (rate(helix_http_requests_total{route!=\"/api/health\"}[5m]))",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "HTTP 5xx fraction",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum(rate(helix_http_requests_total{status=~\"5..\"}[5m])) or (0 * sum(rate(helix_http_requests_total[5m])))) / clamp_min(sum(rate(helix_http_requests_total[5m])), 0.001)",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "P50 / P95 / P99 latency",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(helix_http_request_duration_seconds_bucket{route!=\"/api/health\"}[5m])))",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(helix_http_request_duration_seconds_bucket{route!=\"/api/health\"}[5m])))",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(helix_http_request_duration_seconds_bucket{route!=\"/api/health\"}[5m])))",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "HTTP responses by status",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (rate(helix_http_requests_total[5m]))",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Authenticated WebSocket connections",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "helix_websocket_connections",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "WebSocket disconnects",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(helix_websocket_disconnects_total[5m])",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Message frame delivery by outcome",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(helix_message_delivery_total[5m]))",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Message API attempts",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(helix_message_submissions_total[5m]))",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "title": "Upload failures",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (kind) (rate(helix_uploads_total{outcome=\"failure\"}[5m]))",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Application RSS",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "process_resident_memory_bytes{job=\"helix\"}",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    }
+  ],
+  "description": "Real Prometheus series. No traffic or missing collectors produce no data; see runbook. RestartCount resets when a container is recreated."
+}

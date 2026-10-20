@@ -9,6 +9,7 @@ from anyio import CancelScope
 from fastapi import WebSocket, WebSocketDisconnect
 from starlette.concurrency import run_in_threadpool
 from app.services.presence import persist_seen, presence_recipients
+from app.core.metrics import metrics
 
 
 @dataclass(eq=False)
@@ -74,6 +75,7 @@ class ConnectionManager:
         was_online = user_id in self.connections
         connection = Connection(user_id, socket, expires_at, detailed_presence, ordered_presence)
         self.connections.setdefault(user_id, set()).add(connection)
+        metrics.connect()
         revision = self.transition(user_id) if not was_online else None
         try:
             await self.touch(user_id)
@@ -100,6 +102,7 @@ class ConnectionManager:
             sockets = self.connections.get(connection.user_id)
             if sockets is not None and connection in sockets:
                 sockets.remove(connection)
+                metrics.disconnect()
                 if not sockets:
                     self.connections.pop(connection.user_id, None)
                     revision = self.transition(connection.user_id)
@@ -127,9 +130,12 @@ class ConnectionManager:
             async with connection.lock:
                 if time() < connection.expires_at:
                     await asyncio.wait_for(connection.socket.send_json(event), timeout=2)
+                    metrics.delivery(event.get('type', ''), 'success')
                     return
+            metrics.delivery(event.get('type', ''), 'expired')
             await self.expire(connection)
         except (WebSocketDisconnect, RuntimeError, OSError, TimeoutError):
+            metrics.delivery(event.get('type', ''), 'failure')
             await self.disconnect(connection)
             try:
                 await asyncio.wait_for(connection.socket.close(code=1011), timeout=1)

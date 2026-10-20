@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 15s
+  scrape_timeout: 5s
+  evaluation_interval: 15s
+  external_labels:
+    application: helix
+rule_files: [/etc/prometheus/alerts.yml]
+scrape_configs:
+  - job_name: helix
+    metrics_path: /internal/metrics
+    authorization:
+      type: Bearer
+      credentials_file: /run/secrets/metrics_token
+    static_configs:
+      - targets: ['app:8000']
+  - job_name: prometheus
+    static_configs:
+      - targets: ['127.0.0.1:9090']
+  - job_name: node
+    static_configs:
+      - targets: ['172.30.212.1:19100']

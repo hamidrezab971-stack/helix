@@ -13,3 +13,13 @@
 **/uploads
 **/tests
 **/.DS_Store
+infra/**
+!infra/scripts/
+infra/scripts/**
+!infra/scripts/container-entrypoint.py
+**/*.sqlite*
+**/*.backup
+**/*.pem
+**/*.key
+**/*.tar*
+**/*.bundle

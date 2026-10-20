@@ -24,6 +24,7 @@ from app.database.phase20 import migrate_phase20
 from app.database.phase204 import migrate_phase204
 from app.core.body_limits import IdentityBodyLimit
 from app.services.profile_images import collect
+from app.core.metrics import MetricsMiddleware
 
 
 @asynccontextmanager
@@ -57,6 +58,13 @@ app.include_router(conversations_router)
 app.include_router(messages_router)
 app.include_router(timeline_router)
 app.include_router(realtime_router)
+
+# Templates are captured from registered API routes, never from request URLs.
+app.add_middleware(MetricsMiddleware, routes=frozenset({'/api/health'} | {
+    route.path for router in (auth_router, attachments_router, users_router,
+        profiles_router, conversations_router, messages_router, timeline_router)
+    for route in router.routes if getattr(route, 'path', '').startswith('/api/')
+}))
 
 
 @app.exception_handler(RequestValidationError)

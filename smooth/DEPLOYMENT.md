@@ -78,3 +78,11 @@ References: [Railway Docker builds](https://docs.railway.com/builds/dockerfiles)
 [deployment configuration](https://docs.railway.com/config-as-code/reference),
 [persistent volumes](https://docs.railway.com/volumes), and
 [public networking and domains](https://docs.railway.com/networking/public-networking).
+
+## HELIX VPS Phase 21.2 candidate
+
+For the audited VPS transition use [infra/README.md](../infra/README.md).
+The root Dockerfile now requires digest-pinned NODE_IMAGE and PYTHON_IMAGE
+build arguments and an existing database; the historical Railway/local volume
+quickstart above is not compatible with this safety policy. VPS production
+cutover requires the inventory, real isolated rehearsal and explicit approval.
