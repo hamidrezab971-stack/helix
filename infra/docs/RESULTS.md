@@ -1,5 +1,10 @@
 # Real-host qualification results — 2026-10-20 UTC
 
+> Historical completed host run. See [Phase 21.2.1](PHASE21.2.1.fa.md) for the
+> later restricted-session implementation and unresolved gates. Inventory
+> correction: 26 dashboard panels contain 30 queries; the old verifier counted
+> query results as panels. These results do not certify the unbuilt 21.2.1 changes.
+
 **Private qualification: PASS. Public production migration: NO-GO.**
 Production is still the original systemd application. Monitoring observes the
 candidate and actual host; candidate application traffic is isolated QA traffic,

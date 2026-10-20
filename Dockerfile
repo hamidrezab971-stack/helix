@@ -31,8 +31,12 @@ COPY --from=python-deps /venv /venv
 COPY smooth/backend/app/ ./app/
 COPY --from=frontend /build/frontend/dist/ /app/frontend/dist/
 COPY infra/scripts/container-entrypoint.py /app/container-entrypoint.py
+# No application path needs privileged CLI programs or the vulnerable infocmp tool.
+# Retain package metadata for unsuppressed vulnerability scanning.
 RUN groupadd --gid 10001 helix && useradd --uid 10001 --gid helix --no-create-home helix \
- && mkdir -p /data/uploads && chown -R helix:helix /data
+ && mkdir -p /data/uploads && chown -R helix:helix /data \
+ && find / -xdev -type f -perm /6000 -exec chmod a-s {} + \
+ && rm -f /usr/bin/infocmp
 USER 10001:10001
 EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=40s --retries=3 \

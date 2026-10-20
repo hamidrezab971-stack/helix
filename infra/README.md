@@ -1,5 +1,11 @@
 # HELIX Phase 21.2 — controlled Docker transition
 
+[Latest Phase 21.2.1 report](docs/PHASE21.2.1.fa.md): **NO-GO**. Security/storage
+guards and scan tooling changed in source; no new image has been built or
+qualified in the restricted follow-up session. Read the
+[risk assessment](docs/SECURITY-REMEDIATION.md) and
+[current cutover plan](docs/CUTOVER-21.2.1.md) before using historical results.
+
 Status: **private stack qualified on the real VPS; public migration NO-GO**. Read
 [INVENTORY.md](docs/INVENTORY.md) first and [RESULTS.md](docs/RESULTS.md) for
 executed checks and current security/auth/approval gates. The original systemd

@@ -1,5 +1,9 @@
 # Production migration and rollback — approval plan
 
+Current gates and ordered transaction: [Phase 21.2.1](CUTOVER-21.2.1.md).
+The existing image does not contain the new entrypoint/build hardening. Build,
+rescan, live qualification and new guard integration are required before approval.
+
 This is a reviewable plan, not an authorization or an executed deployment.
 No cutover command is run automatically by the supplied scripts. The retained
 systemd release guard pins an earlier candidate and approval. Its seal, lock,

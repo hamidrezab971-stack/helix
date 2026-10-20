@@ -18,6 +18,8 @@ p.add_argument('--app-port',type=int,default=18000)
 p.add_argument('--grafana-port',type=int,default=13000)
 p.add_argument('--public-origin',default='https://helix.localip.ir')
 p.add_argument('--require-observations',action='store_true')
+p.add_argument('--expected-panels',type=int,default=30,
+    help='Reviewed panel inventory; defaults to the requested 30, not query count')
 a=p.parse_args()
 compose=['docker','compose','--env-file',str(a.env_file.resolve()),'-f',str(ROOT/'compose.yaml')]
 def check(value,message):
@@ -58,12 +60,17 @@ grafana=f'http://127.0.0.1:{a.grafana_port}'
 health=json.loads(get(grafana+'/api/datasources/uid/helix-prometheus/health',auth))
 check(health.get('status')=='OK','Grafana cannot query Prometheus')
 dashboard_evidence={}
+panel_count=0
+query_count=0
 for name in ('application','infrastructure','services'):
     result=json.loads(get(grafana+'/api/dashboards/uid/helix-'+name,auth))
     check(result['dashboard']['panels'],'Dashboard provisioning missing')
     dashboard_evidence[name]=[]
+    panel_count+=len(result['dashboard']['panels'])
     for panel in result['dashboard']['panels']:
+        panel_evidence={'id':panel['id'],'panel':panel['title'],'queries':[]}
         for target in panel['targets']:
+            query_count+=1
             expr=target['expr']
             result=internal('http://prometheus:9090/api/v1/query?query='+urllib.parse.quote(expr))
             check(result['status']=='success','Dashboard PromQL failed: '+panel['title'])
@@ -78,10 +85,12 @@ for name in ('application','infrastructure','services'):
                          for frame in frames.get('frames',[]))
             if a.require_observations and panel['title']!='Active alerts':
                 check(observed,'Grafana returned no measured values: '+panel['title'])
-            dashboard_evidence[name].append({'panel':panel['title'],'prometheus_series':len(result['data']['result']),'grafana_frames':len(frames.get('frames',[]))})
+            panel_evidence['queries'].append({'refId':target['refId'],'prometheus_series':len(result['data']['result']),'grafana_frames':len(frames.get('frames',[]))})
+        dashboard_evidence[name].append(panel_evidence)
+check(panel_count==a.expected_panels,f'Dashboard inventory differs: expected {a.expected_panels} panels, found {panel_count} panels / {query_count} queries. Review the inventory; queries are not panels.')
 if a.require_observations:
     for expr in ('sum(helix_message_delivery_total{outcome="success"}) > 0',
                  'sum(helix_uploads_total{kind="attachment",outcome="success"}) > 0',
                  'sum(helix_uploads_total{outcome="failure"}) > 0'):
         check(internal('http://prometheus:9090/api/v1/query?query='+urllib.parse.quote(expr))['data']['result'],'Missing real application traffic observation')
-print(json.dumps({'services':{x['Service']:x['Health'] for x in states},'targets':{x['labels']['job']:x['health'] for x in targets},'grafana_query':'OK','dashboards':dashboard_evidence,'real_observations_required':a.require_observations},indent=2))
+print(json.dumps({'services':{x['Service']:x['Health'] for x in states},'targets':{x['labels']['job']:x['health'] for x in targets},'grafana_query':'OK','dashboards':dashboard_evidence,'panel_count':panel_count,'query_count':query_count,'real_observations_required':a.require_observations},indent=2))

@@ -1,0 +1,63 @@
+{
+  "phase": "21.2.1",
+  "reviewed_at": "2026-10-20T22:28:17.422361+00:00",
+  "base_commit": "1523b62",
+  "decision": "NO-GO — VERIFIED REMAINING BLOCKERS",
+  "production_cutover": false,
+  "new_runtime_image_built": false,
+  "new_scan_completed": false,
+  "last_observed_high": {
+    "app": 44,
+    "prometheus": 10,
+    "grafana": 61,
+    "node-exporter": 14
+  },
+  "last_observed_critical": 0,
+  "source_tests": {
+    "frontend_passed": 98,
+    "frontend_build": true,
+    "data_safety_passed": 14,
+    "security_passed": 7,
+    "image_storage_passed": 6,
+    "promql_syntax_queries": 30,
+    "prometheus_alert_rules": 5,
+    "compose_syntax": true
+  },
+  "live_tests": {
+    "backend_full": "incomplete; AF_UNIX send denied and TestClient stalls",
+    "chromium": "blocked by loopback bind EPERM",
+    "docker": "socket denied",
+    "systemd": "bus denied",
+    "fresh_production_snapshot": "source uploads access denied",
+    "retained_real_account_login": "not verified",
+    "grafana_live_queries": "not reverified",
+    "restart_persistence": "not reverified"
+  },
+  "offline_rehearsal": {
+    "fresh_production_copy": false,
+    "source": "existing 2026-10-20T20:46 snapshot",
+    "cycles": 2,
+    "tables_preserved": 20,
+    "accounts": 13,
+    "messages": 67,
+    "conversations": 21,
+    "attachments": 5,
+    "profile_photos": 3,
+    "upload_hashes_preserved": 8,
+    "signing_matches_current_env": true
+  },
+  "dashboard_inventory": {
+    "panels": 26,
+    "queries": 30,
+    "requested_panels": 30,
+    "scope_reconciliation_required": true
+  },
+  "guard_integration_complete": false,
+  "production_config_files_unchanged": true,
+  "github_permissions": {
+    "pull": true,
+    "push": false
+  },
+  "push_completed": false,
+  "private_evidence": "/root/helix-phase21.2.1/evidence"
+}

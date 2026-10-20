@@ -1,5 +1,10 @@
 # Verified real-host inventory — 2026-10-20 UTC
 
+> Historical host observations. The later [Phase 21.2.1 review](PHASE21.2.1.fa.md)
+> could recheck files and archived images but could not access Docker/systemd,
+> current production storage or network. Do not treat the PID/health below as
+> freshly verified. Dashboard inventory is 26 panels / 30 queries.
+
 This inventory supersedes the restricted-session findings retained in
 [INVENTORY-PRE-HOST.md](INVENTORY-PRE-HOST.md). This qualification ran on the
 actual systemd VPS with root, network and Docker access. No public cutover ran.

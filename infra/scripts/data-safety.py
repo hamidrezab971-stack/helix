@@ -11,7 +11,7 @@ import subprocess
 
 
 def connect(path):
-    if not path.is_file() or path.stat().st_size == 0:
+    if path.is_symlink() or not path.is_file() or path.stat().st_size == 0:
         raise RuntimeError('Existing nonempty database required')
     return sqlite3.connect(path.resolve().as_uri()+'?mode=ro',uri=True)
 
@@ -54,6 +54,11 @@ def compare(before, after):
 
 def snapshot(data, env, output, unit, online_rehearsal=False):
     data=data.resolve()
+    output=output.absolute()
+    if output.is_symlink() or output.resolve().is_relative_to(data) or data.is_relative_to(output.resolve()):
+        raise RuntimeError('Snapshot destination must be separate from the source data tree')
+    if env.resolve().is_relative_to(output.resolve()):
+        raise RuntimeError('Snapshot destination must not contain the source environment')
     if online_rehearsal and unit:
         raise RuntimeError('Online rehearsal and inactive writer modes are mutually exclusive')
     if data == Path('/var/lib/helix') and unit != 'helix.service' and not online_rehearsal:
@@ -61,9 +66,12 @@ def snapshot(data, env, output, unit, online_rehearsal=False):
     if unit:
         state=subprocess.check_output(['systemctl','show',unit,'-p','ActiveState','--value'],text=True).strip()
         if state != 'inactive': raise RuntimeError('Writer must be inactive before a cutover snapshot')
+    before=manifest(data/'uploads')
+    if env.is_symlink() or not env.is_file(): raise RuntimeError('Regular private environment file required')
+    with connect(data/'smooth.db') as source:
+        integrity(source)
     os.umask(0o077)
     output.mkdir(mode=0o700,parents=True,exist_ok=False)
-    before=manifest(data/'uploads')
     shutil.copytree(data/'uploads',output/'uploads')
     with connect(data/'smooth.db') as source:
         integrity(source)
@@ -72,7 +80,6 @@ def snapshot(data, env, output, unit, online_rehearsal=False):
             integrity(destination)
     if before != manifest(output/'uploads') or before != manifest(data/'uploads'):
         raise RuntimeError('Uploads changed during snapshot; discard this incomplete copy and retry')
-    if env.is_symlink() or not env.is_file(): raise RuntimeError('Regular private environment file required')
     env_digest=hashlib.sha256(env.read_bytes()).hexdigest()
     shutil.copyfile(env,output/'app.env'); os.chmod(output/'app.env',0o600)
     if hashlib.sha256((output/'app.env').read_bytes()).hexdigest()!=env_digest or hashlib.sha256(env.read_bytes()).hexdigest()!=env_digest:
@@ -82,12 +89,14 @@ def snapshot(data, env, output, unit, online_rehearsal=False):
     for path in output.rglob('*'):
         if path.is_file():
             with path.open('rb') as f: os.fsync(f.fileno())
-    report={'verified':True,'source':str(data),'inactive_unit':unit,'online_rehearsal':online_rehearsal,'cutover_backup':bool(unit),'tables':rows,'upload_files':len(before),'environment_sha256':env_digest}
+    from datetime import datetime, timezone
+    report={'verified':True,'created_at':datetime.now(timezone.utc).isoformat(),'source':str(data),'inactive_unit':unit,'online_rehearsal':online_rehearsal,'cutover_backup':data == Path('/var/lib/helix') and unit == 'helix.service','tables':rows,'upload_files':len(before),'environment_sha256':env_digest}
     (output/'snapshot.json').write_text(json.dumps(report,indent=2)+'\n')
     with (output/'snapshot.json').open('rb') as f: os.fsync(f.fileno())
     for directory in sorted((x for x in output.rglob('*') if x.is_dir()),reverse=True):
         fd=os.open(directory,os.O_DIRECTORY); os.fsync(fd); os.close(fd)
     fd=os.open(output,os.O_DIRECTORY); os.fsync(fd); os.close(fd)
+    fd=os.open(output.parent,os.O_DIRECTORY); os.fsync(fd); os.close(fd)
     print('Verified private snapshot created. Preserve this baseline; rehearse on a second copy.')
 
 

@@ -25,6 +25,7 @@ jobs:
       - name: Persistence safety, syntax and real ASGI metrics
         run: |
           python infra/scripts/test-safety.py
+          python infra/scripts/test-security.py
           python -m compileall -q infra/scripts
           node --check infra/scripts/smoke-browser.cjs
           cd smooth/backend

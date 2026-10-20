@@ -1,5 +1,10 @@
 # Production transaction review — NOT AUTHORIZED
 
+> Superseded transaction requirements: [Phase 21.2.1 plan](CUTOVER-21.2.1.md).
+> The new source changes have no built/qualified image yet. The old proposed
+> Prometheus volume adoption must not mix qualification history into production
+> telemetry. No current or old manifest authorizes this cutover.
+
 Decision: NO-GO pending the gates in [RESULTS.md](RESULTS.md). This document and
 private proposed configs do not authorize execution. Do not reuse or bypass the
 existing sealed approval for a different candidate. Prepare a newly reviewed

@@ -1,5 +1,17 @@
 # Metrics contract
 
+The currently qualified application series belong to the isolated Docker
+candidate; host series describe the actual VPS. They are not measurements of
+the systemd production application. Before cutover, preserve the qualification
+TSDB separately and initialize the reviewed production TSDB so unlabeled QA
+history is not relabeled as production. Add only fixed environment labels to
+future scrape series; Prometheus external_labels alone do not label local
+PromQL data. See [current transaction plan](CUTOVER-21.2.1.md).
+
+Dashboard inventory correction: 26 panels / 30 queries (application 10/12,
+infrastructure 7/9, services 9/9). Query syntax validation is distinct from
+live Grafana datasource values and browser rendering.
+
 `GET /internal/metrics` uses Prometheus text exposition 0.0.4. It is disabled
 (404) without `METRICS_TOKEN_FILE`. With a configured file (at least 32 bytes),
 exactly one `Authorization: Bearer ...` header is required; wrong credentials,

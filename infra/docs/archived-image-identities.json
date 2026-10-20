@@ -1,0 +1,38 @@
+{
+  "candidate-final": {
+    "index_digest": "sha256:aa9dbf55ad94b1f8102e511349734f416ee83e1158b8c9f8416ca1d287f165d4",
+    "manifest_digest": "sha256:eca362817b3affc5ced695b622a4f90a030a091b00510d834e4f0cc23e7df487",
+    "image_id": "sha256:49d9c9b3ff18d6feb78eaecc0bb6f49a3390ace47e0e2331c6be5e3c1d90d66a",
+    "user": "10001:10001",
+    "file_count": 8707
+  },
+  "prometheus": {
+    "index_digest": "sha256:87861b8cf91579109319ebc300f3f1060e6da9c05d6ae8ad15a20c879e84e32e",
+    "manifest_digest": "sha256:2b23972d85f7f1350cde18fb61239d6fc8669a5b8fe162ab569373d3ad3463d2",
+    "image_id": "sha256:18c7f43a2e30f36002a693de304c7407a30edd4c41d5311c8fb4093d5da25cc8",
+    "user": "nobody",
+    "file_count": 962
+  },
+  "grafana": {
+    "index_digest": "sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f",
+    "manifest_digest": "sha256:7b22f3edf947329d75eba7a62d9f6ea1ac1e786736813ef7a98cfb275a52e49b",
+    "image_id": "sha256:45900b2eda7da0cbda80b9025e446147d9085fee71675ba86a48a1cad34e4c8a",
+    "user": "472",
+    "file_count": 15470
+  },
+  "node-exporter": {
+    "index_digest": "sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0",
+    "manifest_digest": "sha256:da83fae85603c4e47e6c68369a7d746e2dda683dc35ea2e234b4f171e0d92798",
+    "image_id": "sha256:9bbbca8f5cb8e9bd1b835e8ec086b6df6d9a458d2d10ef1c97ea4a9a3ae7e54b",
+    "user": "nobody",
+    "file_count": 954
+  },
+  "app_components": {
+    "infocmp_present": true,
+    "mount_mode": "04755",
+    "systemd_homed_present": false,
+    "perl_archive_tar_module_present": false,
+    "fstab_configured_mounts": false,
+    "setuid_sgid_regular_files": 11
+  }
+}

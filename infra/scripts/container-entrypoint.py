@@ -9,6 +9,8 @@ if not url.startswith('sqlite:////') or '?' in url:
     raise SystemExit('An absolute persistent SQLite database path is required.')
 database = Path(url[len('sqlite:///'):])
 uploads = Path(os.environ['UPLOAD_DIR'])
+if database.is_symlink() or uploads.is_symlink():
+    raise SystemExit('Persistent database and uploads must not be symbolic links.')
 if not database.is_file() or database.stat().st_size == 0 or not uploads.is_dir():
     raise SystemExit('Existing database and uploads directory required; refusing empty initialization.')
 with sqlite3.connect(database.as_uri()+'?mode=ro', uri=True) as db:
@@ -16,6 +18,13 @@ with sqlite3.connect(database.as_uri()+'?mode=ro', uri=True) as db:
         raise SystemExit('SQLite quick_check failed.')
     if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'").fetchone():
         raise SystemExit('Existing HELIX schema required.')
+    columns = {row[1] for row in db.execute('PRAGMA table_info(users)')}
+    if not {'id', 'username', 'password_hash'} <= columns:
+        raise SystemExit('Existing HELIX account schema required.')
+    if not db.execute('SELECT 1 FROM users LIMIT 1').fetchone():
+        raise SystemExit('Existing accounts required; refusing empty initialization.')
+    if db.execute('PRAGMA foreign_key_check').fetchone():
+        raise SystemExit('SQLite foreign_key_check failed; values withheld.')
 if not os.access(database, os.W_OK) or not os.access(database.parent, os.W_OK) or not os.access(uploads, os.W_OK):
     raise SystemExit('Persistent data is not writable by the configured runtime identity.')
 if os.geteuid() == 0 or os.getegid() == 0:
