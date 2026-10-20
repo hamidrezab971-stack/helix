@@ -1,6 +1,6 @@
 const { pbkdf2Sync }=require('node:crypto')
 async function solve(request,purpose) {
- const response=await request.get(`http://127.0.0.1:8000/api/auth/challenge?purpose=${purpose}`)
+ const response=await request.get(`${require('./backend-origin.cjs').origin}/api/auth/challenge?purpose=${purpose}`)
  if(response.status()!==200)throw new Error('Unable to issue real QA challenge: '+response.status())
  const challenge=await response.json(),p=challenge.parameters
  if(p.algorithm!=='PBKDF2/SHA-256' || p.cost>10000)throw new Error('Unexpected QA challenge algorithm/cost')

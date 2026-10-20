@@ -52,9 +52,11 @@ def compare(before, after):
     return result
 
 
-def snapshot(data, env, output, unit):
+def snapshot(data, env, output, unit, online_rehearsal=False):
     data=data.resolve()
-    if data == Path('/var/lib/helix') and unit != 'helix.service':
+    if online_rehearsal and unit:
+        raise RuntimeError('Online rehearsal and inactive writer modes are mutually exclusive')
+    if data == Path('/var/lib/helix') and unit != 'helix.service' and not online_rehearsal:
         raise RuntimeError('Production snapshot requires --inactive-unit helix.service during authorized maintenance')
     if unit:
         state=subprocess.check_output(['systemctl','show',unit,'-p','ActiveState','--value'],text=True).strip()
@@ -80,7 +82,7 @@ def snapshot(data, env, output, unit):
     for path in output.rglob('*'):
         if path.is_file():
             with path.open('rb') as f: os.fsync(f.fileno())
-    report={'verified':True,'source':str(data),'inactive_unit':unit,'tables':rows,'upload_files':len(before),'environment_sha256':env_digest}
+    report={'verified':True,'source':str(data),'inactive_unit':unit,'online_rehearsal':online_rehearsal,'cutover_backup':bool(unit),'tables':rows,'upload_files':len(before),'environment_sha256':env_digest}
     (output/'snapshot.json').write_text(json.dumps(report,indent=2)+'\n')
     with (output/'snapshot.json').open('rb') as f: os.fsync(f.fileno())
     for directory in sorted((x for x in output.rglob('*') if x.is_dir()),reverse=True):
@@ -92,10 +94,10 @@ def snapshot(data, env, output, unit):
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     sub=p.add_subparsers(dest='command',required=True)
-    s=sub.add_parser('snapshot'); s.add_argument('--data',type=Path,required=True); s.add_argument('--env',type=Path,required=True); s.add_argument('--output',type=Path,required=True); s.add_argument('--inactive-unit')
+    s=sub.add_parser('snapshot'); s.add_argument('--data',type=Path,required=True); s.add_argument('--env',type=Path,required=True); s.add_argument('--output',type=Path,required=True); s.add_argument('--inactive-unit'); s.add_argument('--online-rehearsal',action='store_true',help='SQLite online backup and stable upload hashes for isolated qualification only; never a final cutover backup')
     c=sub.add_parser('compare'); c.add_argument('before',type=Path); c.add_argument('after',type=Path)
     a=p.parse_args()
-    if a.command=='snapshot': snapshot(a.data,a.env,a.output,a.inactive_unit)
+    if a.command=='snapshot': snapshot(a.data,a.env,a.output,a.inactive_unit,a.online_rehearsal)
     else: print(json.dumps({'preserved_tables':compare(a.before,a.after)},indent=2))
 
 if __name__=='__main__': main()

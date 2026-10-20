@@ -7,6 +7,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const assertPortFree = require('./ports.cjs')
 const { observe, captureFailure } = require('./browser-diagnostics.cjs')
+const backend = require('./backend-origin.cjs')
 
 const backendDirectory = path.resolve(__dirname, '../../backend')
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'smooth-phase8-'))
@@ -16,15 +17,15 @@ const suffix = Date.now()
 const names = { alice: `alice_${suffix}`, bob: `bob_${suffix}`, charlie: `charlie_${suffix}` }
 
 async function startBackend() {
-  await assertPortFree(8000)
-  server = spawn(path.join(backendDirectory, '.venv/bin/python'), ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000'], {
+  await assertPortFree(backend.port)
+  server = spawn(process.env.HELIX_QA_PYTHON || path.join(backendDirectory, '.venv/bin/python'), ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(backend.port)], {
     cwd: backendDirectory,
     env: { ...process.env, DATABASE_URL: `sqlite:///${temporary}/test.db`, SECRET_KEY: 'phase8-browser-test-only-secret-123456789', ACCESS_TOKEN_EXPIRE_MINUTES: '60', FRONTEND_ORIGIN: 'http://127.0.0.1:5173', UPLOAD_DIR: `${temporary}/uploads`, FRONTEND_DIST_DIR: '', PYTHON_DOTENV_DISABLED: '1' },
     stdio: backendLog(),
   })
   for (let attempt = 0; attempt < 100; attempt++) {
-    if (server.exitCode !== null) throw new Error('Test backend could not start; port 8000 must be free')
-    try { if ((await fetch('http://127.0.0.1:8000/')).ok) return } catch {}
+    if (server.exitCode !== null) throw new Error(`Test backend could not start on isolated port ${backend.port}`)
+    try { if ((await fetch(backend.origin + '/')).ok) return } catch {}
     await new Promise(resolve => setTimeout(resolve, 100))
   }
   throw new Error('Backend startup timed out')

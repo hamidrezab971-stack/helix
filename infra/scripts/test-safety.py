@@ -40,6 +40,15 @@ class SafetyTests(unittest.TestCase):
         with self.assertRaises(RuntimeError): safety.snapshot(self.data,self.env,self.root/'baseline',None)
     def test_production_snapshot_requires_quiescence(self):
         with self.assertRaises(RuntimeError): safety.snapshot(Path('/var/lib/helix'),self.env,self.root/'baseline',None)
+    def test_online_rehearsal_is_labelled_and_cannot_claim_quiescence(self):
+        target=self.root/'online'
+        safety.snapshot(self.data,self.env,target,None,online_rehearsal=True)
+        import json
+        report=json.loads((target/'snapshot.json').read_text())
+        self.assertTrue(report['online_rehearsal'])
+        self.assertFalse(report['cutover_backup'])
+        with self.assertRaises(RuntimeError):
+            safety.snapshot(self.data,self.env,self.root/'invalid','helix.service',online_rehearsal=True)
     def test_entrypoint_refuses_empty_database_without_creating_one(self):
         nonexistent=self.root/'absent.db'
         r=subprocess.run([sys.executable,str(ROOT/'scripts/container-entrypoint.py')],env={**os.environ,'DATABASE_URL':'sqlite:///'+str(nonexistent),'UPLOAD_DIR':str(self.data/'uploads')},capture_output=True,text=True)

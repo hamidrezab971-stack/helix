@@ -243,7 +243,7 @@ c.commit()`, cid, aliceId, bobId)
   execFileSync(path.join(h.backendDirectory, '.venv/bin/python'), ['-c', 'from PIL import Image; import sys; Image.new("RGB",(640,480),"coral").save(sys.argv[1])', filename])
   const photoIds = []
   for (let i = 0; i < 10; i++) {
-    const response = await fetch(`http://127.0.0.1:8000${base}/messages/image`, {
+    const response = await fetch(`${require('./backend-origin.cjs').origin}${base}/messages/image`, {
       method: 'POST', headers: { Authorization: 'Bearer ' + await bob.evaluate(() => localStorage.getItem('smooth_access_token')) },
       body: (() => { const form = new FormData(); form.append('file', new Blob([fs.readFileSync(filename)], { type: 'image/png' }), 'lazy.png'); return form })(),
     })

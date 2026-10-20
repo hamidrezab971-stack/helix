@@ -140,7 +140,7 @@ async function main() {
   // and maximum-length usernames against the existing API, then reload once.
   for (let index = 0; index < 14; index++) {
     const username = `nav_${index}_${Date.now()}`.padEnd(30, 'x')
-    const registered = await context.request.post('http://127.0.0.1:8000/api/auth/register', { data: { username, password: 'password123', altcha: await require('./captcha.cjs').solve(context.request,'register') } })
+    const registered = await context.request.post(require('./backend-origin.cjs').origin+'/api/auth/register', { data: { username, password: 'password123', altcha: await require('./captcha.cjs').solve(context.request,'register') } })
     assert.equal(registered.status(), 201)
     const peer = await registered.json()
     const status = await alice.evaluate(async id => {

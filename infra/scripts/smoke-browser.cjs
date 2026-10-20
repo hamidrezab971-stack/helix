@@ -78,6 +78,11 @@ async function main() {
   assert(history.some(x=>x.id===message.id));assert(history.some(x=>x.id===photo.id))
   assert.equal((await context.request.get(base+'/internal/metrics')).status(),404)
   await page.evaluate(()=>window.connection.close())
+  if (process.env.HELIX_REHEARSAL_ACCOUNTS_FILE) {
+   const fd=fs.openSync(process.env.HELIX_REHEARSAL_ACCOUNTS_FILE,'wx',0o600)
+   try {fs.writeFileSync(fd,JSON.stringify({accounts:accounts.map(x=>({id:x.id,username:x.username,password})),conversationId:conversation.id,messageId:message.id,attachmentId:photo.attachment.id,imagePath:process.env.HELIX_QA_IMAGE}));fs.fsyncSync(fd)}
+   finally {fs.closeSync(fd)}
+  }
   console.log(JSON.stringify({captcha:true,login:true,nginxWebSocket:true,message:true,imageUploadRetrieval:true,history:true,metricsPrivate:true}))
  } finally {await browser.close()}
 }
