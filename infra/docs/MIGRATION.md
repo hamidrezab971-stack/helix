@@ -102,4 +102,8 @@ uploads, repeated 5xx, schema incompatibility, or a public metrics/secret leak.
    failed candidate artifacts. Report the rollback outcome explicitly.
 
 A startup-only old-code rehearsal does not count as a verified production
-rollback. This session has not performed the route-switch drill or live rollback.
+rollback. The later real-host qualification performed two complete isolated
+route-switch round trips with authenticated traffic for the final image; no
+live production rollback or cutover ran. Current evidence, open security/auth
+gates and prepared transaction paths are in [RESULTS.md](RESULTS.md) and
+[CUTOVER-REVIEW.md](CUTOVER-REVIEW.md).

@@ -1,11 +1,12 @@
 # HELIX Phase 21.2 — controlled Docker transition
 
-Status: implemented candidate; **not deployed or live-verified**. Read
+Status: **private stack qualified on the real VPS; public migration NO-GO**. Read
 [INVENTORY.md](docs/INVENTORY.md) first and [RESULTS.md](docs/RESULTS.md) for
-executed checks and current blockers. Production cutover requires explicit
+executed checks and current security/auth/approval gates. The original systemd
+application still serves production. Production cutover requires explicit
 review and authorization after real-host evidence is complete.
 
-The host Nginx keeps port 80/443, domain, ACME webroot, certificates and renewal
+The proposed production topology below keeps port 80/443, domain, ACME webroot, certificates and renewal
 hook. The candidate proxies HTTP/static assets and upgraded WebSockets to
 127.0.0.1:18000. FastAPI serves the exact React build embedded in the image.
 HELIX uses one worker, one named container and one replica. There is no database
@@ -26,6 +27,11 @@ Host-only timer → narrow Docker state/stats → node-exporter textfile
 Prometheus keeps 15 days or 2 GB, whichever expires first, on a named volume.
 Grafana has its own named volume, provisioned datasource and three dashboards.
 No Prometheus port is published. Grafana and the app publish loopback only.
+The monitoring bridge remains internal; app and Grafana also join a dedicated
+172.30.213.0/24 ingress bridge because current Docker does not publish ports
+from internal-only networks. Only loopback ports are published. The trusted
+forwarding gateway is 172.30.213.1. Check both fixed subnets for overlaps.
+
 All containers have restart policies, health checks, bounded local log rotation,
 CPU/memory/PID limits, non-root users, read-only roots, dropped capabilities and
 no-new-privileges. Application /tmp is capped. No Docker socket is mounted.
@@ -42,11 +48,12 @@ receive only its atomically written, low-cardinality .prom file.
 
 ## Build inputs and private configuration
 
-Prerequisites on the real host: approved Docker Engine and Compose >=2.30
-(raw environment support), linux/amd64, Node >=22.12, Python 3.12, existing
+Prerequisites on the real host: approved Docker Engine and Compose >=2.33.1
+(raw environment and explicit gateway priority support), linux/amd64, Node >=22.12, Python 3.12, existing
 Nginx, and a separately pinned Playwright/Chromium installation. Docker
 installation changes the host firewall; review Docker bridge/iptables behavior
-before installation. This session cannot install Docker on the protected host.
+before installation. Docker CE 29.9.1 and Compose 5.6.0 from the official signed
+repository were installed and validated during real-host qualification.
 
 The Dockerfile **requires immutable base image references**. No mutable fallback
 is provided. Resolve five explicitly reviewed exact version tags with:
@@ -100,7 +107,10 @@ supported password reset procedure if needed.
    services. Run the existing guarded host readiness checks without apply.
 2. Obtain a verified baseline with `data-safety.py snapshot`. For the actual
    production path it requires `--inactive-unit helix.service`; it never stops a
-   service itself. This maintenance step needs an authorized window. Existing
+   service itself. This final maintenance step needs an authorized window. For
+   qualification while production stays up, use explicit `--online-rehearsal`: it
+   performs a SQLite online backup with stable upload hashes, labels it as
+   rehearsal-only, and cannot claim a quiesced cutover backup. Existing
    independently verified consistent backups can be used for initial rehearsal,
    but cannot stand in for a fresh pre-cutover backup. Never copy a live SQLite
    file with cp; the helper uses SQLite backup, integrity and FK checks, hashes
@@ -119,7 +129,9 @@ python3 infra/scripts/prepare-rehearsal.py --baseline /PRIVATE/baseline \
    paths must reference the private secret files. Use APP_PORT=18000 and
    GRAFANA_PORT=13000. Confirm the production service still listens at 8000.
 5. Run existing backend/frontend/browser suites per `.github/workflows/` with
-   the candidate sources, current dependency lock, and disposable test DBs.
+   the candidate sources, current dependency lock, and disposable test DBs. Set
+   HELIX_QA_BACKEND_PORT=18080 for browser fixtures/Vite so tests never use the
+   production port. Use the retained Node 22 toolchain and qualified Python venv.
 6. Run the real integration harness from a venv with dotenv/Pillow. Supply a
    separately installed pinned Playwright through NODE_PATH:
 
@@ -161,8 +173,9 @@ ssh -N -L 127.0.0.1:13000:127.0.0.1:13000 root@helix.localip.ir
 
 Open http://localhost:13000 locally and sign in with the private Grafana
 credentials. Dashboards: HELIX Application, VPS Infrastructure and Service
-Health. Configure `systemd/helix-host-collector.{service,timer}` for the reviewed
-installed infra path/project after approval. Run it every 30 seconds; freshness
+Health. The qualification collector timer and private proxy service are already enabled
+on this host; exact names and paths are in the inventory. For production, adapt
+`systemd/helix-host-collector.{service,timer}` to the reviewed installed project. Run it every 30 seconds; freshness
 is alerted after two minutes. See [METRICS.md](docs/METRICS.md) for exact semantics.
 
 Rules evaluate locally in Prometheus and are visible in Grafana's Service Health
@@ -170,7 +183,19 @@ panel. External notification delivery is not configured. Protect monitoring
 volumes and backups; never publish Prometheus/Grafana or disable authentication.
 Rehearsal traffic is not production monitoring evidence.
 
-See [MIGRATION.md](docs/MIGRATION.md) for the production approval gates and rollback.
+For restricted dependency networking, set WHEELHOUSE_DIR to the private retained
+wheel directory and PIP_NO_INDEX=1. Compose supplies the named BuildKit context;
+pip still enforces requirements.lock hashes. Do not add wheels or credentials
+to Git. Network builds use the empty infra/wheelhouse context and the same hashes.
+
+Build rehearsals with a unique candidate tag, then freeze HELIX_IMAGE to its
+actual resolved digest after the final build. Do not rerun the build harness on
+the final digest-pinned env or existing qualification data; use verify-stack.py
+for read-only verification and a newly prepared disposable copy for new builds.
+
+See [QUALIFICATION.fa.md](docs/QUALIFICATION.fa.md),
+[CUTOVER-REVIEW.md](docs/CUTOVER-REVIEW.md) and
+[MIGRATION.md](docs/MIGRATION.md) for the production approval gates and rollback.
 Official references: [Compose services](https://docs.docker.com/reference/compose-file/services/),
 [Prometheus configuration](https://prometheus.io/docs/prometheus/latest/configuration/configuration/),
 [Grafana provisioning](https://grafana.com/docs/grafana/latest/administration/provisioning/).

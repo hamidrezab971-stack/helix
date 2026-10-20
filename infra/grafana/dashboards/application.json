@@ -2,7 +2,7 @@
   "uid": "helix-application",
   "title": "HELIX Application",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "tags": [
     "helix"
   ],
@@ -66,12 +66,14 @@
         {
           "refId": "A",
           "expr": "(sum(rate(helix_http_requests_total{status=~\"5..\"}[5m])) or (0 * sum(rate(helix_http_requests_total[5m])))) / clamp_min(sum(rate(helix_http_requests_total[5m])), 0.001)",
-          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+          "legendFormat": "5xx fraction"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit"
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
         },
         "overrides": []
       },
@@ -100,17 +102,17 @@
         {
           "refId": "A",
           "expr": "histogram_quantile(0.5, sum by (le) (rate(helix_http_request_duration_seconds_bucket{route!=\"/api/health\"}[5m])))",
-          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+          "legendFormat": "P50"
         },
         {
           "refId": "B",
           "expr": "histogram_quantile(0.95, sum by (le) (rate(helix_http_request_duration_seconds_bucket{route!=\"/api/health\"}[5m])))",
-          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+          "legendFormat": "P95"
         },
         {
           "refId": "C",
           "expr": "histogram_quantile(0.99, sum by (le) (rate(helix_http_request_duration_seconds_bucket{route!=\"/api/health\"}[5m])))",
-          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+          "legendFormat": "P99"
         }
       ],
       "fieldConfig": {
