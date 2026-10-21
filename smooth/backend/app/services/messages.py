@@ -37,7 +37,7 @@ def effective_message(message: Message, receipt: MessageReceipt | None, edit: Me
     })
 
 
-def validate_reply_target(db: Session, conversation_id: int, target_id: int | None) -> None:
+def validate_reply_target(db: Session, conversation_id: int, target_id: int | None, user_id: int | None = None) -> None:
     if target_id is None:
         return
     if type(target_id) is not int or not 0 < target_id < 2**63:
@@ -45,13 +45,16 @@ def validate_reply_target(db: Session, conversation_id: int, target_id: int | No
     target = db.get(Message, target_id)
     if target is None or target.conversation_id != conversation_id:
         raise HTTPException(status_code=404, detail="Reply target not found")
+    if user_id is not None:
+        from app.services.visibility import require_visible
+        require_visible(db, target, user_id)
 
 
-def reply_previews(db: Session, messages: list[Message]) -> dict[int, ReplyPreview]:
+def reply_previews(db: Session, messages: list[Message], user_id: int | None = None) -> dict[int, ReplyPreview]:
     if not messages:
         return {}
     target = aliased(Message)
-    rows = db.execute(
+    query = (
         select(MessageReply.message_id, target, MessageEdit, MessageAttachment)
         .select_from(MessageReply)
         .join(Message, Message.id == MessageReply.message_id)
@@ -60,6 +63,10 @@ def reply_previews(db: Session, messages: list[Message]) -> dict[int, ReplyPrevi
         .outerjoin(MessageAttachment, MessageAttachment.message_id == target.id)
         .where(MessageReply.message_id.in_([message.id for message in messages]), target.conversation_id == Message.conversation_id)
     )
+    if user_id is not None:
+        from app.services.visibility import visible_message
+        query = query.where(visible_message(user_id, target))
+    rows = db.execute(query)
     # One batch query, no recursive target replies or per-message profile fetch.
     return {message_id: ReplyPreview(
         id=target_message.id, sender_id=target_message.sender_id,

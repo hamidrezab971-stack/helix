@@ -1,0 +1,119 @@
+{
+  "evidence_directory": "/root/helix-qualification-20261020",
+  "decision": "NO-GO",
+  "production_cutover": false,
+  "backend": {
+    "passed": 148,
+    "seconds": 816.7
+  },
+  "frontend_passed": 98,
+  "browser_phases": 8,
+  "browser_initial_failure": "phase204 blank fixture timeout; phase204 and phase211 rerun passed",
+  "safety_passed": 8,
+  "candidate": {
+    "reference": "helix@sha256:aa9dbf55ad94b1f8102e511349734f416ee83e1158b8c9f8416ca1d287f165d4",
+    "id": "sha256:aa9dbf55ad94b1f8102e511349734f416ee83e1158b8c9f8416ca1d287f165d4",
+    "repo_digests": [
+      "helix@sha256:aa9dbf55ad94b1f8102e511349734f416ee83e1158b8c9f8416ca1d287f165d4"
+    ],
+    "architecture": "amd64",
+    "created": "2026-10-20T21:00:40.18720697Z"
+  },
+  "services": {
+    "app": "healthy",
+    "grafana": "healthy",
+    "node-exporter": "healthy",
+    "prometheus": "healthy"
+  },
+  "targets": {
+    "helix": "up",
+    "node": "up",
+    "prometheus": "up"
+  },
+  "dashboards": {
+    "application": 12,
+    "infrastructure": 9,
+    "services": 9
+  },
+  "security": {
+    "scanner": "Trivy 0.76.0",
+    "counts": {
+      "LOW": 63,
+      "HIGH": 44,
+      "MEDIUM": 68,
+      "UNKNOWN": 3
+    },
+    "unique_cves": 79,
+    "unique_high_ids": [
+      "CVE-2025-69720",
+      "CVE-2026-16742",
+      "CVE-2026-54369",
+      "CVE-2026-76642",
+      "CVE-2026-78408",
+      "CVE-2026-78409",
+      "CVE-2026-78410",
+      "CVE-2026-9538"
+    ],
+    "fixable_high_critical": 0,
+    "release_approved": false
+  },
+  "monitoring_security": {
+    "prometheus": {
+      "image": "prom/prometheus:v3.13.4@sha256:87861b8cf91579109319ebc300f3f1060e6da9c05d6ae8ad15a20c879e84e32e",
+      "counts": {
+        "LOW": 6,
+        "MEDIUM": 30,
+        "UNKNOWN": 2,
+        "HIGH": 10
+      },
+      "fixable_high_critical": 10
+    },
+    "grafana": {
+      "image": "grafana/grafana:13.2.4@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f",
+      "counts": {
+        "MEDIUM": 175,
+        "HIGH": 61,
+        "UNKNOWN": 5,
+        "LOW": 13
+      },
+      "fixable_high_critical": 61
+    },
+    "node-exporter": {
+      "image": "prom/node-exporter:v1.12.1@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0",
+      "counts": {
+        "HIGH": 14,
+        "MEDIUM": 15,
+        "UNKNOWN": 1,
+        "LOW": 1
+      },
+      "fixable_high_critical": 14
+    }
+  },
+  "private_handoffs": [
+    {
+      "cycle": 1,
+      "container_to_old_seconds_until_api_healthy": 1.938,
+      "old_to_container_seconds_until_api_healthy": 2.846
+    },
+    {
+      "cycle": 2,
+      "container_to_old_seconds_until_api_healthy": 1.898,
+      "old_to_container_seconds_until_api_healthy": 2.78
+    }
+  ],
+  "production_interruption": "unmeasured; planning estimate only 2-5 minutes",
+  "evidence_hashes": {
+    "stack-final.json": "9c5a2fc3eb7d22594cf9acb0888d7afb050f4c642274796dc2cf5f6d9cff4128",
+    "production-safety-final.json": "7cbb6466c90f97ac7593a7fd3f371ea0912458651baf488caaa0dca34e2cb2b2",
+    "candidate-final-image.json": "d0a631ac1c6d840a13db38f2662488c648d74469ccef7a027aa56061b3734998",
+    "route-drill-final.json": "351b439389224be5e6850ba5894067df1271c9d8e21ffb3e505654bbabb835ba",
+    "tls-auth-wss.json": "9cb3132b278a8030d237e81d5a9d1c18abe5b35b4809bb6abd208b44e145eea6",
+    "sigterm-final.json": "4fa56935cff60b617db90458986b94bc49f65948458fe1c3275425475833f3e8",
+    "filesystem-security.json": "5d850e7225746261795eb240301570a6f9874bf32f469dd03fdd6992d8a294b7",
+    "security/candidate-final-vulnerabilities.json": "64faad8447634458b54575fc22acf39b5d522d707f1a648429c78797e9f42a1b",
+    "security/prometheus-vulnerabilities.json": "c3fe7892a2e9f5f086ab7ddda36d8bf069a7c494772139fc17086abf1865a474",
+    "security/grafana-vulnerabilities.json": "b6f97dd6ca4632ecfd0cfd9b73aa4b113817fa7e929a1a48594b1b5e151593f2",
+    "security/node-exporter-vulnerabilities.json": "82eee4772c7a7f1459a0f31182e80e20212073f5f1458348efefd63752a4f184",
+    "http-boundaries.json": "75d27d2c4a52a1560c7020973260311436b279976b37736ccd739188d52fdaf8"
+  }
+}

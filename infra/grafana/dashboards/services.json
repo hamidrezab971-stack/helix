@@ -1,0 +1,325 @@
+{
+  "uid": "helix-services",
+  "title": "Service Health",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": [
+    "helix"
+  ],
+  "timezone": "browser",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "refresh": "15s",
+  "editable": false,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Database health endpoint",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "helix_api_health",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Prometheus targets",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "up",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Container running",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "helix_container_running",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Container healthy",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "helix_container_healthy",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Container restart count (current container)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "helix_container_restart_count",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Container memory saturation",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "helix_container_memory_bytes / helix_container_memory_limit_bytes",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Container CPU quota saturation",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "helix_container_cpu_cores / helix_container_cpu_limit_cores",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Collector freshness",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - helix_host_collector_timestamp_seconds",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "title": "Active alerts",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "ALERTS{alertstate=\"firing\"}",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    }
+  ],
+  "description": "Real Prometheus series. No traffic or missing collectors produce no data; see runbook. RestartCount resets when a container is recreated."
+}

@@ -1,0 +1,373 @@
+{
+  "phase": "21.2.1",
+  "reviewed_at": "2026-10-21T10:49:15.633675+00:00",
+  "base_commit": "78530d5031739eee409541001fe39b59b32d9b9c",
+  "decision": "NO-GO \u2014 VERIFIED REMAINING BLOCKERS",
+  "production_cutover": false,
+  "new_runtime_image_built": true,
+  "compiler_final_results": {
+    "grafana": {
+      "exit_code": 2,
+      "memory_limit_bytes": 2147483648
+    },
+    "prometheus": {
+      "exit_code": 1,
+      "memory_limit_bytes": 2147483648
+    }
+  },
+  "prometheus_patched_binary_selected": false,
+  "grafana_patched_main_selected": false,
+  "grafana_pruned_overlay_selected": true,
+  "new_scan_completed": true,
+  "security_before_high": {
+    "app": 44,
+    "prometheus": 10,
+    "grafana": 61,
+    "node-exporter": 14
+  },
+  "security_after_high": {
+    "app": 44,
+    "prometheus": 12,
+    "grafana": 11,
+    "node-exporter": 0
+  },
+  "security_after_critical": {
+    "app": 0,
+    "prometheus": 0,
+    "grafana": 0,
+    "node-exporter": 0
+  },
+  "security_policy_gate_passed": false,
+  "scanner_database": {
+    "Version": 2,
+    "NextUpdate": "2026-10-22T07:13:45.702546867Z",
+    "UpdatedAt": "2026-10-21T07:13:45.702547343Z",
+    "DownloadedAt": "2026-10-21T10:45:40.623919046Z"
+  },
+  "runtime": {
+    "app": {
+      "image": "helix@sha256:6dd818b91b1de902c806a7f1ebbead3be46e1a7a3efca78fa4dfa3a9232e3271",
+      "healthy": true,
+      "automatic_restart_count": 0,
+      "user": "997:987",
+      "memory_limit": 805306368,
+      "cpu_limit_nanos": 1000000000,
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ]
+    },
+    "prometheus": {
+      "image": "prom/prometheus:v3.13.4@sha256:87861b8cf91579109319ebc300f3f1060e6da9c05d6ae8ad15a20c879e84e32e",
+      "healthy": true,
+      "automatic_restart_count": 0,
+      "user": "65534:65534",
+      "memory_limit": 536870912,
+      "cpu_limit_nanos": 500000000,
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ]
+    },
+    "grafana": {
+      "image": "helix-grafana@sha256:0ba86c2c8d85e837751858ad99a0882757fec868208b6b01902887e2593442d9",
+      "healthy": true,
+      "automatic_restart_count": 0,
+      "user": "472:472",
+      "memory_limit": 805306368,
+      "cpu_limit_nanos": 500000000,
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ]
+    },
+    "node-exporter": {
+      "image": "helix-node-exporter@sha256:c3f91da714ada22d873de8fb66a6c6fec8bc9bd34f6bbbfacebff5089c3246df",
+      "healthy": true,
+      "automatic_restart_count": 0,
+      "user": "65534:65534",
+      "memory_limit": 100663296,
+      "cpu_limit_nanos": 250000000,
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ]
+    }
+  },
+  "source_tests": {
+    "backend_passed": 148,
+    "backend_seconds": 704.258,
+    "frontend_passed": 99,
+    "safety_passed": 14,
+    "security_passed": 7,
+    "chromium_phases_passed": [
+      "phase8",
+      "phase17",
+      "phase18",
+      "phase19",
+      "phase191",
+      "phase20",
+      "phase204",
+      "phase211"
+    ]
+  },
+  "live_tests": {
+    "captcha_login_text_image_ws_presence": true,
+    "tls_ca_hostname_tls12_tls13": true,
+    "authenticated_wss_foreign_origin_rejection": true,
+    "docker_restart_persistence": true,
+    "isolated_route_rollback_cycles": 2,
+    "latest_route_cycles": [
+      {
+        "cycle": 1,
+        "container_to_old_seconds_until_api_healthy": 2.648,
+        "old_runtime_continuity": {
+          "original_tables_exact": [
+            "users",
+            "conversations",
+            "message_send_intents",
+            "conversation_members",
+            "messages",
+            "conversation_events",
+            "conversation_sync_state",
+            "message_edits",
+            "message_receipts",
+            "message_attachments",
+            "message_replies",
+            "message_reactions",
+            "smooth_schema_migrations",
+            "user_profile_photos",
+            "profile_file_gc",
+            "conversation_visibility"
+          ],
+          "allocation_cursor": "monotonic",
+          "expiring_auth_tables": "excluded explicitly",
+          "original_uploads": "8/8 hashes match"
+        },
+        "old_to_container_seconds_until_api_healthy": 4.393,
+        "candidate_continuity": {
+          "original_tables_exact": [
+            "users",
+            "conversations",
+            "message_send_intents",
+            "conversation_members",
+            "messages",
+            "conversation_events",
+            "conversation_sync_state",
+            "message_edits",
+            "message_receipts",
+            "message_attachments",
+            "message_replies",
+            "message_reactions",
+            "smooth_schema_migrations",
+            "user_profile_photos",
+            "profile_file_gc",
+            "conversation_visibility"
+          ],
+          "allocation_cursor": "monotonic",
+          "expiring_auth_tables": "excluded explicitly",
+          "original_uploads": "8/8 hashes match"
+        }
+      },
+      {
+        "cycle": 2,
+        "container_to_old_seconds_until_api_healthy": 2.99,
+        "old_runtime_continuity": {
+          "original_tables_exact": [
+            "users",
+            "conversations",
+            "message_send_intents",
+            "conversation_members",
+            "messages",
+            "conversation_events",
+            "conversation_sync_state",
+            "message_edits",
+            "message_receipts",
+            "message_attachments",
+            "message_replies",
+            "message_reactions",
+            "smooth_schema_migrations",
+            "user_profile_photos",
+            "profile_file_gc",
+            "conversation_visibility"
+          ],
+          "allocation_cursor": "monotonic",
+          "expiring_auth_tables": "excluded explicitly",
+          "original_uploads": "8/8 hashes match"
+        },
+        "old_to_container_seconds_until_api_healthy": 5.312,
+        "candidate_continuity": {
+          "original_tables_exact": [
+            "users",
+            "conversations",
+            "message_send_intents",
+            "conversation_members",
+            "messages",
+            "conversation_events",
+            "conversation_sync_state",
+            "message_edits",
+            "message_receipts",
+            "message_attachments",
+            "message_replies",
+            "message_reactions",
+            "smooth_schema_migrations",
+            "user_profile_photos",
+            "profile_file_gc",
+            "conversation_visibility"
+          ],
+          "allocation_cursor": "monotonic",
+          "expiring_auth_tables": "excluded explicitly",
+          "original_uploads": "8/8 hashes match"
+        }
+      }
+    ],
+    "stopped_writer_snapshot_restore_drill": {
+      "scope": "isolated only",
+      "quiesced_backup_after_writer_exit": true,
+      "old_runtime_on_second_restored_copy": true,
+      "stop_and_backup_seconds": 0.997,
+      "stop_backup_restore_validation_and_start_until_api_seconds": 9.165,
+      "production_unit_continuously_active": true,
+      "is_a_production_final_backup": false
+    },
+    "active_websocket_restart": {
+      "active_authenticated_websocket": true,
+      "close_code": 1012,
+      "restart_to_api_seconds": 3.758,
+      "jwt_still_valid_after_restart": true,
+      "prior_history_and_image_preserved": true,
+      "scope": "private candidate"
+    },
+    "real_alert_failure_recovery": {
+      "scope": "private candidate only",
+      "production_writer_stopped": false,
+      "stopped_states": {
+        "HelixUnavailable": "firing",
+        "HelixSustainedHttpErrors": "inactive",
+        "HostLowDiskSpace": "inactive",
+        "HostCollectorStale": "inactive",
+        "HelixApiHealthFailed": "firing"
+      },
+      "seconds_to_firing": 82.62,
+      "recovered_states": {
+        "HelixUnavailable": "inactive",
+        "HelixSustainedHttpErrors": "inactive",
+        "HostLowDiskSpace": "inactive",
+        "HostCollectorStale": "inactive",
+        "HelixApiHealthFailed": "inactive"
+      },
+      "real_failure_and_recovery": true,
+      "external_notifications_configured": false
+    },
+    "retained_real_account_login": false
+  },
+  "dashboard_inventory": {
+    "panels": 26,
+    "queries": 30,
+    "targets": {
+      "helix": "up",
+      "node": "up",
+      "prometheus": "up"
+    },
+    "grafana_query": "OK",
+    "scope_reconciliation_required": false
+  },
+  "production_fingerprint": {
+    "pid": 261758,
+    "release": "/opt/helix/releases/2aec7a584c18194a3e1c",
+    "cwd": "/opt/helix/releases/2aec7a584c18194a3e1c/smooth/backend",
+    "configuration_unchanged": true,
+    "public_assets": {
+      "at": "2026-10-21T10:38:21.142487+00:00",
+      "index_sha256": "d28b14fb906625ab4a59518bcef3f078950c517629697fa9e1e7c7fe7c42c4f7",
+      "http_status": 200,
+      "assets": {
+        "/assets/index-CziQpFIJ.js": "422b5dac5ee45aeb593d4e0c84eb7c03c2793c8be7a3b280f8e5fcc986a0fa3d",
+        "/assets/index-BOfdGuWB.css": "6e93c9716864964039ea0cc38cbbbffe3468159ef60416f3e13c5cc9320b1f3f"
+      },
+      "tls12": {
+        "protocol": "TLSv1.2",
+        "expires": "Jan 15 03:43:55 2027 GMT",
+        "certificate_sha256": "15fdeb07d49a3c61224f351a99376322079764314bc0fd2cd9a7837858af71c4"
+      },
+      "tls13": {
+        "protocol": "TLSv1.3",
+        "expires": "Jan 15 03:43:55 2027 GMT",
+        "certificate_sha256": "15fdeb07d49a3c61224f351a99376322079764314bc0fd2cd9a7837858af71c4"
+      }
+    },
+    "configuration_sha256": {
+      "/etc/systemd/system/helix.service": "bdd140e96bba30e416ba1a80069f7c91465a1517a0857f2382b0a40a706c2922",
+      "/etc/nginx/sites-available/helix.localip.ir.conf": "2b65ceb53b4c6c5efd945fa9fefe1f9baa30a192e2de30e6c343ec004caaab11",
+      "/opt/helix/current/.helix-build.json": "f88ae5532c960bba83892a6abaf3f2fd254a70671618c96bf7d800a647657956"
+    },
+    "fresh_verified_at": "2026-10-21T10:38:21.142487+00:00"
+  },
+  "data_integrity": {
+    "verified_online_snapshot": true,
+    "table_count": 20,
+    "latest_delivery_snapshot": {
+      "latest_snapshot_at": "2026-10-21T10:44:32.987749+00:00",
+      "all_20_tables_preserved_by_actual_final_image": true,
+      "integrity": "ok",
+      "foreign_keys": "ok",
+      "all_8_media_hashes_preserved": true,
+      "no_published_ports": true,
+      "production_writer_unchanged": true,
+      "production_delta_since_initial": {
+        "users": {
+          "changed_columns": [
+            "last_seen_at"
+          ],
+          "missing_rows": 0,
+          "added_rows": 0
+        }
+      },
+      "initial_candidate_copy_not_a_final_production_backup": true,
+      "image": "helix@sha256:6dd818b91b1de902c806a7f1ebbead3be46e1a7a3efca78fa4dfa3a9232e3271"
+    },
+    "all_original_account_hashes_and_signing_keys_preserved": true,
+    "database_integrity": "ok",
+    "foreign_keys": "ok",
+    "all_baseline_media_hashes_preserved": true,
+    "final_production_stopped_writer_backup_created": false
+  },
+  "production_observation": {
+    "unobserved_intervals": [
+      {
+        "from": "2026-10-21T02:56:24.704337+00:00",
+        "to": "2026-10-21T10:37:32.178988+00:00",
+        "seconds": 27667.474651
+      }
+    ],
+    "samples": 522,
+    "all_healthy": true,
+    "max_seconds": 0.632,
+    "first": "2026-10-21T00:57:05.446103+00:00",
+    "last": "2026-10-21T10:48:34.864459+00:00"
+  },
+  "temporary_encrypted_swap_removed": true,
+  "guard_integration_complete": false,
+  "external_alert_delivery_verified": false,
+  "off_host_recovery_verified": false,
+  "github_permissions": {
+    "pull": true,
+    "push": false
+  },
+  "push_completed": false,
+  "private_evidence": "/root/helix-phase21.2.1/host-20261021",
+  "private_final_live_evidence": "final-live-complete.json",
+  "github_permissions_checked_at": "2026-10-21T10:50:52.644161+00:00"
+}

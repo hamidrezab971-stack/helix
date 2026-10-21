@@ -45,6 +45,7 @@ from app.services.images import IMAGE_MESSAGE_SENTINEL, MAX_IMAGE_BYTES, image_p
 from app.models.user import User
 from app.realtime.manager import ConnectionManager, manager
 from app.services.receipts import acknowledge_message, initialize_receipts
+from captcha_support import protected_post
 
 
 class Phase8Tests(unittest.TestCase):
@@ -56,10 +57,10 @@ class Phase8Tests(unittest.TestCase):
         self.users, self.tokens = {}, {}
         for name in ("alice", "bob", "charlie"):
             body = {"username": name, "password": "password123"}
-            response = self.client.post("/api/auth/register", json=body)
+            response = protected_post(self.client, "/api/auth/register", body)
             self.assertEqual(response.status_code, 201)
             self.users[name] = response.json()["id"]
-            self.tokens[name] = self.client.post("/api/auth/login", json=body).json()["access_token"]
+            self.tokens[name] = protected_post(self.client, "/api/auth/login", body).json()["access_token"]
         response = self.client.post(f'/api/conversations/with/{self.users["bob"]}', headers=self.headers("alice"))
         self.assertEqual(response.status_code, 201)
         self.path = f'/api/conversations/{response.json()["id"]}/messages'
@@ -316,7 +317,9 @@ class Phase8Tests(unittest.TestCase):
         self.assertEqual(rows[1]["last_message"]["id"], latest["id"])
         self.assertEqual(rows[0]["updated_at"], rows[0]["last_message"]["created_at"])
         self.assertEqual(set(rows[0]), {"id", "other_user", "last_message", "updated_at", "unread_count"})
-        self.assertEqual(set(rows[0]["other_user"]), {"id", "username", "created_at"})
+        self.assertEqual(set(rows[0]["other_user"]), {"id", "username", "created_at", "primary_photo_id", "profile_version"})
+        self.assertIsNone(rows[0]['other_user']['primary_photo_id'])
+        self.assertEqual(rows[0]['other_user']['profile_version'], 0)
         self.assertEqual(set(rows[0]["last_message"]), {"id", "sender_id", "content", "created_at", "attachment"})
         with SessionLocal() as db:
             db.get(Message, latest["id"]).created_at = datetime(2026, 10, 3)

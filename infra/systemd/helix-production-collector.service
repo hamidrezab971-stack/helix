@@ -1,0 +1,16 @@
+[Unit]
+Description=HELIX production Docker health metrics collector
+After=docker.service
+Requires=docker.service
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/helix-docker-production/infra/scripts/host-collector.py --project helix-production --api-port 18000 --directory /var/lib/helix-docker/textfile
+User=root
+UMask=0022
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ReadWritePaths=/var/lib/helix-docker/textfile

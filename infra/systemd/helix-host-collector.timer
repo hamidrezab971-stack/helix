@@ -1,0 +1,8 @@
+[Unit]
+Description=Collect HELIX container and API health observations
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=30s
+AccuracySec=5s
+[Install]
+WantedBy=timers.target

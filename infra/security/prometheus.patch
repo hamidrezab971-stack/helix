@@ -1,0 +1,68 @@
+diff --git a/go.mod b/go.mod
+index e7ad344..0ec910f 100644
+--- a/go.mod
++++ b/go.mod
+@@ -3 +3 @@ module github.com/prometheus/prometheus
+-go 1.25.0
++go 1.26.0
+@@ -98,3 +98,3 @@ require (
+-	golang.org/x/sync v0.22.0
+-	golang.org/x/sys v0.47.0
+-	golang.org/x/text v0.41.0
++	golang.org/x/sync v0.23.0
++	golang.org/x/sys v0.48.0
++	golang.org/x/text v0.42.0
+@@ -103 +103 @@ require (
+-	google.golang.org/grpc v1.83.1
++	google.golang.org/grpc v1.83.2
+@@ -242 +242 @@ require (
+-	golang.org/x/crypto v0.55.0 // indirect
++	golang.org/x/crypto v0.57.0 // indirect
+@@ -244,3 +244,3 @@ require (
+-	golang.org/x/mod v0.38.0 // indirect
+-	golang.org/x/net v0.57.0 // indirect
+-	golang.org/x/term v0.45.0 // indirect
++	golang.org/x/mod v0.41.0 // indirect
++	golang.org/x/net v0.60.0 // indirect
++	golang.org/x/term v0.46.0 // indirect
+@@ -248 +248 @@ require (
+-	golang.org/x/tools v0.48.0 // indirect
++	golang.org/x/tools v0.49.0 // indirect
+diff --git a/go.sum b/go.sum
+index aa9cc6e..7ed1988 100644
+--- a/go.sum
++++ b/go.sum
+@@ -663,0 +664,2 @@ golang.org/x/crypto v0.55.0/go.mod h1:uq0V9dE/fzQuJtbnL+2EhWOE63vo164FY8xqEnV9xi
++golang.org/x/crypto v0.57.0 h1:3ZVCjf8Ggz7zneR/EHRVx68Ctf+2pmIMP2UFhh9cC6M=
++golang.org/x/crypto v0.57.0/go.mod h1:Fdz0i5U6CoizGwLda9DttjSk6qlZo25zYNtR+ycvuZA=
+@@ -671,0 +674,2 @@ golang.org/x/mod v0.38.0/go.mod h1:V6Xz0pq8TQ3dGqVQ1FVHuelZpAL0uNhSkk9ogYP3c40=
++golang.org/x/mod v0.41.0 h1:qJmnOUb4YB+FsEuM3HcWucdZASCPGhsX6uljO6pog0c=
++golang.org/x/mod v0.41.0/go.mod h1:Ek9pY8RKWXwsWvd3rQiHYtMqkjSUV+s1Rj7j4H5Ur6o=
+@@ -686,0 +691,2 @@ golang.org/x/net v0.57.0/go.mod h1:KpXc8iv+r3XplLAG/f7Jsf9RPszJzdR0f58q9vGOuEU=
++golang.org/x/net v0.60.0 h1:79p50tfZlm0J9YfoDsSi639qSXNGVwEzOPLCxM2FsYU=
++golang.org/x/net v0.60.0/go.mod h1:2DA/G1UfVbCpQPeWTmMPGY7Cs2PkBkwu743bVX5PIVg=
+@@ -698,0 +705,2 @@ golang.org/x/sync v0.22.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=
++golang.org/x/sync v0.23.0 h1:KameEIfc1IkluZyXWLn39Wd4tURc6GbCiISGiZm2bQk=
++golang.org/x/sync v0.23.0/go.mod h1:sUUOizhqBxiL6pEWpqNLUiaJn1ShEbZ6BBqskPbjZm0=
+@@ -730,0 +739,2 @@ golang.org/x/sys v0.47.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
++golang.org/x/sys v0.48.0 h1:bbX/i/6MgT9BVLM9RT1thmxL04yeTAhbEz4SyadbXoo=
++golang.org/x/sys v0.48.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=
+@@ -737,0 +748,2 @@ golang.org/x/term v0.45.0/go.mod h1:9aqxs0blBcrm/n0L9QW0aRVD+ktan8ssZromtqJC43w=
++golang.org/x/term v0.46.0 h1:3+OXuTbaKDgwk8jTi3aSLHRlmWqHEUDUtxnbFigO4YE=
++golang.org/x/term v0.46.0/go.mod h1:+K02xbkittuwc0Am4abfA3Fc+XRGXkvBXNO88NCXPoc=
+@@ -747,0 +760,2 @@ golang.org/x/text v0.41.0/go.mod h1:jvf1O8ajNzZqhSrQBPbutR/EB83Cc0CFrezNQIwbb5M=
++golang.org/x/text v0.42.0 h1:JbOZXgfeCPU9gacVtYliJqOhD+zhrEqK4LfdpmlUZqI=
++golang.org/x/text v0.42.0/go.mod h1:ojzP1Z+2QtioaF8DTtO8K5q7JWVVYwZKenzujK0Zd0E=
+@@ -758,0 +773,2 @@ golang.org/x/tools v0.48.0/go.mod h1:08xX0orndb/F7jJxGDicx061tyd5pcMto75YMAXr6lk
++golang.org/x/tools v0.49.0 h1:3NI7VXzL9+1WZD52Dx2ttoPwD5DWrFGpl9mFZDlmisI=
++golang.org/x/tools v0.49.0/go.mod h1:SJNXV9DBKT0UbdttsQjbfJlAE/q+y36++zo3uL3N0Oo=
+@@ -776,0 +793,2 @@ google.golang.org/grpc v1.83.1/go.mod h1:kDyl6SKsiHKt0uylY5gtn5cEjkrIOhQOGDgIc4J
++google.golang.org/grpc v1.83.2 h1:EManeRomTObA0BU7I8vXgg/78uE5MJ9M8B39EX2WscU=
++google.golang.org/grpc v1.83.2/go.mod h1:YPI1hK3kDked6iHvgX3tR0y+nX/qpMFKhPgFsokw1S8=
+diff --git a/go.work b/go.work
+index 5edc3c4..a8bda25 100644
+--- a/go.work
++++ b/go.work
+@@ -1 +1 @@
+-go 1.25.0
++go 1.26.0

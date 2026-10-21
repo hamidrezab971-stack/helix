@@ -1,0 +1,7 @@
+{
+  "release": "/opt/helix/releases/2aec7a584c18194a3e1c",
+  "fingerprint": "2aec7a584c18194a3e1c01acf7fd026a1e125e8b7c2811544c77ec77fe6c26c0",
+  "build_policy": "nonroot-systemd-v1",
+  "assets_match": true,
+  "live_verified": false
+}

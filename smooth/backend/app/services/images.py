@@ -1,11 +1,12 @@
 import logging
+import os
 import re
 import warnings
 from io import BytesIO
 from uuid import uuid4
 
 from fastapi import HTTPException
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from app.core.config import UPLOAD_DIR
 
@@ -16,7 +17,10 @@ IMAGE_FORMATS = {"JPEG": ("jpg", "image/jpeg"), "PNG": ("png", "image/png"), "WE
 
 
 def image_path(storage_name: str):
-    root = (UPLOAD_DIR / "images").resolve()
+    namespace = UPLOAD_DIR / "images"
+    if namespace.is_symlink():
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    root = namespace.resolve()
     if not re.fullmatch(r"[a-f0-9]{32}\.(jpg|png|webp)", storage_name):
         raise HTTPException(status_code=404, detail="Attachment not found")
     path = root / storage_name
@@ -51,16 +55,41 @@ def store_image(file) -> dict:
             # verify alone does not fully decode JPEG pixel data.
             with Image.open(BytesIO(data)) as image:
                 image.load()
+                # Keep already clean originals byte-for-byte. Photos carrying
+                # private metadata are oriented then encoded from fresh pixels.
+                if image.getexif() or any(key.lower() in ('exif', 'xmp', 'xml:com.adobe.xmp', 'icc_profile', 'comment', 'description', 'photoshop') for key in image.info) or getattr(image, 'text', None):
+                    format = image.format
+                    oriented = ImageOps.exif_transpose(image)
+                    mode = 'RGBA' if format != 'JPEG' and ('A' in oriented.getbands() or 'transparency' in image.info) else 'RGB'
+                    pixels = oriented.convert(mode)
+                    clean = Image.new(mode, pixels.size)
+                    clean.paste(pixels)
+                    output = BytesIO()
+                    clean.save(output, format=format, **({'quality': 92} if format in ('JPEG', 'WEBP') else {}))
+                    data = output.getvalue()
+                    width, height = clean.size
+                    clean.close(); pixels.close()
+                    if oriented is not image:
+                        oriented.close()
     except (UnidentifiedImageError, OSError, ValueError, SyntaxError, Image.DecompressionBombError, Image.DecompressionBombWarning):
         raise HTTPException(status_code=422, detail="Use a valid, non-animated JPEG, PNG, or WEBP image with safe dimensions") from None
+    if len(data) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Prepared image must be 8 MB or smaller")
     storage_name = f"{uuid4().hex}.{extension}"
     path = image_path(storage_name)
     created = False
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("xb") as destination:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600), 'wb') as destination:
             created = True
             destination.write(data)
+            destination.flush()
+            os.fsync(destination.fileno())
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     except OSError:
         if created:
             remove_image(storage_name)

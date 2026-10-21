@@ -1,0 +1,41 @@
+{
+  "source": "official tagged upstream files, with final newline normalization",
+  "packages": [
+    {
+      "path": "smooth/frontend/src/vendor/altcha.js",
+      "upstream": "https://github.com/altcha-org/altcha/blob/v3.4.0/dist/main/altcha.js",
+      "sha256": "805c28a9d3f4a8c35ae02914bac8223496cba208ab19ffbe00c113d169eb4bbd",
+      "license": "MIT"
+    },
+    {
+      "path": "smooth/frontend/src/vendor/ALTCHA-LICENSE.txt",
+      "upstream": "https://github.com/altcha-org/altcha/blob/v3.4.0/LICENSE.txt",
+      "sha256": "6e5b53473509753fccc2767e173a5dd200c3c2d136cde24cfd07c86703c9836a",
+      "license": "MIT"
+    },
+    {
+      "path": "smooth/backend/app/vendor/altcha/__init__.py",
+      "upstream": "https://github.com/altcha-org/altcha-lib-py/blob/v2.3.0/altcha/__init__.py",
+      "sha256": "5f562ab4dd8dc24a0e1c0f198aaec86fd2d8caa9f09903443ea7b6ba8a5e5cc0",
+      "license": "MIT"
+    },
+    {
+      "path": "smooth/backend/app/vendor/altcha/v1.py",
+      "upstream": "https://github.com/altcha-org/altcha-lib-py/blob/v2.3.0/altcha/v1.py",
+      "sha256": "8122ea855291134b076d0c16ead1f92f9203b4abb7416f7272b9d0cd9f18e468",
+      "license": "MIT"
+    },
+    {
+      "path": "smooth/backend/app/vendor/altcha/v2.py",
+      "upstream": "https://github.com/altcha-org/altcha-lib-py/blob/v2.3.0/altcha/v2.py",
+      "sha256": "a6c1f682ecd53c6f0876e039ac7fd59a39e082e71a284b882fe3ab751fc92e5c",
+      "license": "MIT"
+    },
+    {
+      "path": "smooth/backend/app/vendor/altcha/LICENSE",
+      "upstream": "https://github.com/altcha-org/altcha-lib-py/blob/v2.3.0/LICENSE",
+      "sha256": "08737cdc4e5f089847c2feb285fbd68061839df4263407feffcc237497752267",
+      "license": "MIT"
+    }
+  ]
+}

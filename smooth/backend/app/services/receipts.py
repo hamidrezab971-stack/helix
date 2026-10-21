@@ -8,6 +8,7 @@ from app.models.conversation_member import ConversationMember
 from app.models.message import Message
 from app.models.message_receipt import MessageReceipt
 from app.services.sync import record_event
+from app.services.visibility import visible_message
 
 
 def initialize_receipts() -> None:
@@ -32,7 +33,7 @@ def acknowledge_message(message_id: int, user_id: int, read: bool) -> tuple[int,
         ).join(ConversationMember, (
             (ConversationMember.conversation_id == Message.conversation_id)
             & (ConversationMember.user_id == user_id)
-        )).where(Message.id == message_id, MessageReceipt.recipient_id == user_id))
+        )).where(Message.id == message_id, MessageReceipt.recipient_id == user_id, visible_message(user_id)))
         if message is None:
             return None
         now = datetime.now(UTC).replace(tzinfo=None)

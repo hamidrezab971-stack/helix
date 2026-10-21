@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""Verified copies and row-level continuity checks; no restore operation exists."""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import sqlite3
+import stat
+import subprocess
+
+
+def connect(path):
+    if path.is_symlink() or not path.is_file() or path.stat().st_size == 0:
+        raise RuntimeError('Existing nonempty database required')
+    return sqlite3.connect(path.resolve().as_uri()+'?mode=ro',uri=True)
+
+
+def integrity(db):
+    if db.execute('PRAGMA integrity_check').fetchall() != [('ok',)]:
+        raise RuntimeError('SQLite integrity_check failed; values withheld')
+    if db.execute('PRAGMA foreign_key_check').fetchone():
+        raise RuntimeError('SQLite foreign_key_check failed; values withheld')
+
+
+def manifest(root):
+    if not root.is_dir() or root.is_symlink(): raise RuntimeError('Real uploads directory required')
+    result={}
+    for path in sorted(root.rglob('*')):
+        if path.is_symlink(): raise RuntimeError('Symlink found in uploads; review required')
+        if path.is_file():
+            with path.open('rb') as f: result[str(path.relative_to(root))]=hashlib.file_digest(f,'sha256').hexdigest()
+        elif not path.is_dir(): raise RuntimeError('Special file found in uploads')
+    return result
+
+
+def quote(name): return '"'+name.replace('"','""')+'"'
+
+
+def fresh_marker(data):
+    path=data/'.helix-fresh-bootstrap-v1'
+    if not path.exists() and not path.is_symlink(): return None
+    info=path.lstat()
+    if (not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077
+            or info.st_uid != (data/'smooth.db').stat().st_uid
+            or path.read_bytes() != b'HELIX fresh bootstrap v1\n'):
+        raise RuntimeError('Invalid fresh bootstrap marker; snapshot refused')
+    return path.read_bytes()
+
+
+def compare(before, after):
+    with connect(before) as baseline, connect(after) as candidate:
+        integrity(baseline); integrity(candidate)
+        candidate.execute('ATTACH DATABASE ? AS baseline',(before.resolve().as_uri()+'?mode=ro',))
+        tables=[r[0] for r in baseline.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
+        result={}
+        for table in tables:
+            cols=[r[1] for r in baseline.execute('PRAGMA table_info('+quote(table)+')')]
+            columns=','.join(map(quote,cols))
+            missing=candidate.execute(f'SELECT {columns} FROM baseline.{quote(table)} EXCEPT SELECT {columns} FROM main.{quote(table)} LIMIT 1').fetchone()
+            if missing is not None: raise RuntimeError('Existing row changed or lost in '+table+'; values withheld')
+            result[table]=baseline.execute('SELECT count(*) FROM '+quote(table)).fetchone()[0]
+    return result
+
+
+def snapshot(data, env, output, unit, online_rehearsal=False):
+    data=data.resolve()
+    output=output.absolute()
+    if output.is_symlink() or output.resolve().is_relative_to(data) or data.is_relative_to(output.resolve()):
+        raise RuntimeError('Snapshot destination must be separate from the source data tree')
+    if env.resolve().is_relative_to(output.resolve()):
+        raise RuntimeError('Snapshot destination must not contain the source environment')
+    if online_rehearsal and unit:
+        raise RuntimeError('Online rehearsal and inactive writer modes are mutually exclusive')
+    if data == Path('/var/lib/helix') and unit != 'helix.service' and not online_rehearsal:
+        raise RuntimeError('Production snapshot requires --inactive-unit helix.service during authorized maintenance')
+    if unit:
+        state=subprocess.check_output(['systemctl','show',unit,'-p','ActiveState','--value'],text=True).strip()
+        if state != 'inactive': raise RuntimeError('Writer must be inactive before a cutover snapshot')
+    marker=fresh_marker(data)
+    before=manifest(data/'uploads')
+    if env.is_symlink() or not env.is_file(): raise RuntimeError('Regular private environment file required')
+    with connect(data/'smooth.db') as source:
+        integrity(source)
+    os.umask(0o077)
+    output.mkdir(mode=0o700,parents=True,exist_ok=False)
+    shutil.copytree(data/'uploads',output/'uploads')
+    with connect(data/'smooth.db') as source:
+        integrity(source)
+        with sqlite3.connect(output/'smooth.db') as destination:
+            source.backup(destination)
+            integrity(destination)
+    if before != manifest(output/'uploads') or before != manifest(data/'uploads'):
+        raise RuntimeError('Uploads changed during snapshot; discard this incomplete copy and retry')
+    env_digest=hashlib.sha256(env.read_bytes()).hexdigest()
+    shutil.copyfile(env,output/'app.env'); os.chmod(output/'app.env',0o600)
+    if hashlib.sha256((output/'app.env').read_bytes()).hexdigest()!=env_digest or hashlib.sha256(env.read_bytes()).hexdigest()!=env_digest:
+        raise RuntimeError('Persistent environment changed during snapshot; retry after review')
+    (output/'uploads-manifest.json').write_text(json.dumps(before,indent=2)+'\n')
+    rows=compare(data/'smooth.db',output/'smooth.db')
+    if fresh_marker(data) != marker:
+        raise RuntimeError('Fresh bootstrap marker changed during snapshot')
+    if marker is not None:
+        (output/'.helix-fresh-bootstrap-v1').write_bytes(marker)
+    for path in output.rglob('*'):
+        if path.is_file():
+            with path.open('rb') as f: os.fsync(f.fileno())
+    from datetime import datetime, timezone
+    report={'verified':True,'created_at':datetime.now(timezone.utc).isoformat(),'source':str(data),'inactive_unit':unit,'online_rehearsal':online_rehearsal,'cutover_backup':data == Path('/var/lib/helix') and unit == 'helix.service','tables':rows,'upload_files':len(before),'environment_sha256':env_digest,'fresh_bootstrap_marker_preserved':marker is not None}
+    (output/'snapshot.json').write_text(json.dumps(report,indent=2)+'\n')
+    with (output/'snapshot.json').open('rb') as f: os.fsync(f.fileno())
+    for directory in sorted((x for x in output.rglob('*') if x.is_dir()),reverse=True):
+        fd=os.open(directory,os.O_DIRECTORY); os.fsync(fd); os.close(fd)
+    fd=os.open(output,os.O_DIRECTORY); os.fsync(fd); os.close(fd)
+    fd=os.open(output.parent,os.O_DIRECTORY); os.fsync(fd); os.close(fd)
+    print('Verified private snapshot created. Preserve this baseline; rehearse on a second copy.')
+
+
+def main():
+    p=argparse.ArgumentParser(description=__doc__)
+    sub=p.add_subparsers(dest='command',required=True)
+    s=sub.add_parser('snapshot'); s.add_argument('--data',type=Path,required=True); s.add_argument('--env',type=Path,required=True); s.add_argument('--output',type=Path,required=True); s.add_argument('--inactive-unit'); s.add_argument('--online-rehearsal',action='store_true',help='SQLite online backup and stable upload hashes for isolated qualification only; never a final cutover backup')
+    c=sub.add_parser('compare'); c.add_argument('before',type=Path); c.add_argument('after',type=Path)
+    a=p.parse_args()
+    if a.command=='snapshot': snapshot(a.data,a.env,a.output,a.inactive_unit,a.online_rehearsal)
+    else: print(json.dumps({'preserved_tables':compare(a.before,a.after)},indent=2))
+
+if __name__=='__main__': main()

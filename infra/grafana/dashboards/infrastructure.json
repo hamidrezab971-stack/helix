@@ -1,0 +1,267 @@
+{
+  "uid": "helix-infrastructure",
+  "title": "VPS Infrastructure",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": [
+    "helix"
+  ],
+  "timezone": "browser",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "refresh": "15s",
+  "editable": false,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Host CPU busy",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m]))",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Host memory used",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Root disk free",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "node_filesystem_avail_bytes{mountpoint=\"/\",fstype!~\"overlay|tmpfs|squashfs\"}",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Root disk available fraction",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "node_filesystem_avail_bytes{mountpoint=\"/\",fstype!~\"overlay|tmpfs|squashfs\"} / node_filesystem_size_bytes{mountpoint=\"/\",fstype!~\"overlay|tmpfs|squashfs\"}",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Disk read/write throughput",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(node_disk_read_bytes_total[5m])",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(node_disk_written_bytes_total[5m])",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Disk busy fraction",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(node_disk_io_time_seconds_total[5m])",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Host network RX/TX",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "helix-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(node_network_receive_bytes_total{device!=\"lo\"}[5m])",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(node_network_transmit_bytes_total{device!=\"lo\"}[5m])",
+          "legendFormat": "{{method}} {{route}} {{status}} {{outcome}} {{kind}} {{service}} {{job}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    }
+  ],
+  "description": "Real Prometheus series. No traffic or missing collectors produce no data; see runbook. RestartCount resets when a container is recreated."
+}

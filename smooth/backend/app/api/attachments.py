@@ -1,4 +1,6 @@
 from typing import Annotated
+from uuid import UUID
+from hashlib import sha256
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Request
 from fastapi.responses import FileResponse
@@ -22,22 +24,33 @@ from app.models.user import User
 from app.realtime.manager import manager
 from app.schemas.conversations import MessageResponse
 from app.services.sync import record_event
+from app.services.idempotency import fingerprint, replay, remember
 from app.services.images import IMAGE_MESSAGE_SENTINEL, MAX_IMAGE_BYTES, image_path, remove_image, store_image
 from app.services.messages import allocate_message_id, effective_message, reply_previews, validate_reply_target
+from app.services.visibility import require_visible
 
 router = APIRouter(prefix="/api", tags=["images"])
 
 
-def create_image_message(conversation_id: int, user_id: int, caption: str, file: UploadFile, db: Session, reply_to_message_id: int | None = None):
+def create_image_message(conversation_id: int, user_id: int, caption: str, file: UploadFile, db: Session, reply_to_message_id: int | None = None, client_message_id: str | None = None):
     require_membership(conversation_id, user_id, db)
     member_ids = list(db.scalars(select(ConversationMember.user_id).where(ConversationMember.conversation_id == conversation_id)))
     recipients = [member_id for member_id in member_ids if member_id != user_id]
     if len(recipients) != 1:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    validate_reply_target(db, conversation_id, reply_to_message_id)
+    # Hash bounded bytes before storing; filename and multipart metadata are not intent.
+    data = file.file.read(MAX_IMAGE_BYTES + 1)
+    if len(data) > MAX_IMAGE_BYTES:
+        raise HTTPException(413, detail="Images must be 8 MB or smaller")
+    file.file.seek(0)
+    digest = fingerprint(conversation_id, caption, reply_to_message_id, sha256(data).hexdigest())
+    duplicate = replay(db, user_id, client_message_id, digest)
+    if duplicate is not None:
+        return duplicate, []
+    validate_reply_target(db, conversation_id, reply_to_message_id, user_id)
     stored = store_image(file)
     try:
-        message = Message(id=allocate_message_id(db), conversation_id=conversation_id, sender_id=user_id, content=caption or IMAGE_MESSAGE_SENTINEL)
+        message = Message(id=allocate_message_id(db), conversation_id=conversation_id, sender_id=user_id, content=caption or IMAGE_MESSAGE_SENTINEL, client_message_id=client_message_id)
         db.add(message)
         db.flush()
         attachment = MessageAttachment(message_id=message.id, **stored)
@@ -46,12 +59,17 @@ def create_image_message(conversation_id: int, user_id: int, caption: str, file:
         if reply_to_message_id is not None:
             db.add(MessageReply(message_id=message.id, reply_to_message_id=reply_to_message_id))
         db.flush()
-        saved = effective_message(message, receipt, None, attachment, reply_previews(db, [message]).get(message.id))
+        saved = effective_message(message, receipt, None, attachment, reply_previews(db, [message], user_id).get(message.id))
+        remember(db, message, digest)
         record_event(db, conversation_id, 'new', message.id)
         db.commit()
     except BaseException as error:
         db.rollback()
         remove_image(stored["storage_name"])
+        if isinstance(error, IntegrityError):
+            duplicate = replay(db, user_id, client_message_id, digest)
+            if duplicate is not None:
+                return duplicate, []
         if isinstance(error, IntegrityError) and reply_to_message_id is not None:
             raise HTTPException(status_code=404, detail="Reply target not found") from None
         raise
@@ -88,7 +106,7 @@ async def upload_image(
 
     bounded = Request(request.scope, receive=bounded_receive)
     try:
-        async with bounded.form(max_files=1, max_fields=2, max_part_size=8192) as form:
+        async with bounded.form(max_files=1, max_fields=3, max_part_size=8192) as form:
             file = form.get("file")
             caption = form.get("caption", "")
             if not isinstance(file, UploadFile) or len(form.getlist("file")) != 1 or not isinstance(caption, str):
@@ -101,7 +119,13 @@ async def upload_image(
                 target = int(target)
             if len(caption) > 2000:
                 raise HTTPException(status_code=422, detail="Use a caption up to 2000 characters")
-            saved, member_ids = await run_in_threadpool(create_image_message, conversation_id, user_id, caption, file, db, target)
+            client_id = form.get("client_message_id")
+            if client_id is not None:
+                try:
+                    client_id = str(UUID(client_id))
+                except (ValueError, TypeError, AttributeError):
+                    raise HTTPException(422, detail="Use a valid client message UUID") from None
+            saved, member_ids = await run_in_threadpool(create_image_message, conversation_id, user_id, caption, file, db, target, client_id)
     except StarletteHTTPException:
         if too_large:
             raise HTTPException(status_code=413, detail="Images must be 8 MB or smaller") from None
@@ -121,6 +145,7 @@ def download_image(
     if message is None:
         raise HTTPException(status_code=404, detail="Attachment not found")
     require_membership(message.conversation_id, user.id, db)
+    require_visible(db, message, user.id)
     path = image_path(attachment.storage_name)
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Attachment not found")

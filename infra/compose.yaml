@@ -1,0 +1,210 @@
+name: ${COMPOSE_PROJECT_NAME:-helix212}
+x-runtime: &runtime
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: local
+    options:
+      max-size: '10m'
+      max-file: '3'
+  pids_limit: 128
+
+services:
+  app:
+    <<: *runtime
+    networks:
+      monitoring: {}
+      ingress:
+        gw_priority: 1
+    image: ${HELIX_IMAGE:?Set an immutable candidate image tag}
+    platform: linux/amd64
+    build:
+      context: ..
+      additional_contexts:
+        wheelhouse: ${WHEELHOUSE_DIR:-./wheelhouse}
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:?Resolve image digests first}
+        PYTHON_IMAGE: ${PYTHON_IMAGE:?Resolve image digests first}
+        PIP_NO_INDEX: ${PIP_NO_INDEX:-0}
+    container_name: ${COMPOSE_PROJECT_NAME:-helix212}-app
+    user: '${APP_UID:?Use the audited persistent data UID}:${APP_GID:?Use the audited persistent data GID}'
+    init: true
+    env_file:
+      - path: ${APP_ENV_FILE:?Use a protected environment file}
+        format: raw
+    environment:
+      DATABASE_URL: sqlite:////data/smooth.db
+      UPLOAD_DIR: /data/uploads
+      FRONTEND_DIST_DIR: /app/frontend/dist
+      METRICS_TOKEN_FILE: /run/secrets/metrics_token
+      FORWARDED_ALLOW_IPS: 172.30.213.1
+    secrets: [metrics_token]
+    ports: ['127.0.0.1:${APP_PORT:-18000}:8000']
+    volumes:
+      - type: bind
+        source: ${APP_DATA_DIR:?Existing isolated data directory required}
+        target: /data
+        bind:
+          create_host_path: false
+    tmpfs: ['/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777']
+    cpus: 1.0
+    mem_limit: 768m
+    stop_grace_period: 45s
+    deploy:
+      replicas: 1
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health',timeout=3).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  prometheus:
+    <<: *runtime
+    networks: [monitoring]
+    image: ${PROMETHEUS_IMAGE:?Resolve image digests first}
+    user: '65534:65534'
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=2GB
+      - --web.listen-address=0.0.0.0:9090
+    volumes:
+      - ./prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    secrets: [metrics_token]
+    cpus: 0.5
+    mem_limit: 512m
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:9090/-/ready']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  grafana:
+    <<: *runtime
+    # Separate release gate: default production startup must not reactivate
+    # Grafana before a supported publisher artifact passes its own review.
+    profiles: [grafana-reviewed]
+    networks:
+      monitoring: {}
+      ingress:
+        gw_priority: 1
+    image: ${GRAFANA_IMAGE:?Resolve image digests first}
+    user: '472:472'
+    environment:
+      # Applied to Grafana and its Go datasource child; leave room for both
+      # runtimes, SQLite and buffers inside the shared container limit.
+      GOMEMLIMIT: 256MiB
+      GF_SECURITY_ADMIN_USER: helix-admin
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_password
+      GF_SECURITY_SECRET_KEY__FILE: /run/secrets/grafana_secret_key
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: 'false'
+      # This installation provisions only Prometheus; do not start unused
+      # backend plugins with independent vulnerable Go runtimes.
+      GF_PLUGINS_DISABLE_PLUGINS: elasticsearch,grafana-postgresql-datasource,grafana-pyroscope-datasource,influxdb,jaeger,loki,mssql,mysql,opentsdb,stackdriver,tempo,zipkin
+      GF_PLUGINS_PREINSTALL_DISABLED: 'true'
+      GF_LOG_MODE: console
+      GF_SERVER_DOMAIN: helix.localip.ir
+      GF_SERVER_PROTOCOL: http
+      GF_SERVER_ROOT_URL: https://helix.localip.ir/grafana/
+      GF_SERVER_SERVE_FROM_SUB_PATH: 'true'
+      GF_SERVER_ENFORCE_DOMAIN: 'true'
+      GF_SECURITY_COOKIE_SECURE: 'true'
+      GF_SECURITY_COOKIE_SAMESITE: lax
+      GF_LIVE_ALLOWED_ORIGINS: https://helix.localip.ir
+    ports: ['127.0.0.1:${GRAFANA_PORT:-13000}:3000']
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    secrets: [grafana_password, grafana_secret_key]
+    tmpfs: ['/tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777']
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    cpus: 0.5
+    mem_limit: 768m
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:3000/api/health']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  # Host networking is necessary for host network counters. Listener binds only
+  # to the dedicated internal bridge gateway, never 0.0.0.0 or the public IP.
+  node-exporter:
+    <<: *runtime
+    image: ${NODE_EXPORTER_IMAGE:?Resolve image digests first}
+    user: '65534:65534'
+    network_mode: host
+    command:
+      - --web.listen-address=172.30.212.1:19100
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/host/root
+      - --collector.disable-defaults
+      - --collector.cpu
+      - --collector.meminfo
+      - --collector.filesystem
+      - --collector.diskstats
+      - --collector.netdev
+      - --collector.textfile
+      - --collector.textfile.directory=/host/textfile
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run|var/lib/docker/.+)($$|/)
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro,rslave
+      - type: bind
+        source: ${TEXTFILE_DIR:?Prepare the private host collector directory}
+        target: /host/textfile
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      prometheus:
+        condition: service_started
+    cpus: 0.25
+    mem_limit: 96m
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, 'http://172.30.212.1:19100/metrics']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  # Internal-only networks do not publish ports on current Docker Engine.
+  # Only app/Grafana join this bridge; their published listeners stay loopback.
+  ingress:
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: 127.0.0.1
+    ipam:
+      config:
+        - subnet: 172.30.213.0/24
+          gateway: 172.30.213.1
+  monitoring:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.212.0/24
+          gateway: 172.30.212.1
+volumes:
+  prometheus_data:
+  grafana_data:
+secrets:
+  metrics_token:
+    file: ${METRICS_TOKEN_FILE:?Prepare protected metrics token}
+  grafana_password:
+    file: ${GRAFANA_PASSWORD_FILE:?Prepare protected Grafana password}
+  grafana_secret_key:
+    file: ${GRAFANA_SECRET_KEY_FILE:?Prepare persistent Grafana signing key}

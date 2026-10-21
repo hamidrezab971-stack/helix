@@ -46,9 +46,11 @@ async function settled(page) {
 
 async function loadOlder(page) {
   const previousFirst = await rows(page).first().getAttribute('data-message-id')
-  const response = page.waitForResponse(response => response.request().method() === 'GET' && response.url().includes('/messages/page?'))
-  await page.getByRole('button', { name: 'Load older messages', exact: true }).click()
-  assert.equal((await response).status(), 200)
+  const [response] = await Promise.all([
+    page.waitForResponse(response => response.request().method() === 'GET' && response.url().includes('/messages/page?')),
+    page.getByRole('button', { name: 'Load older messages', exact: true }).click(),
+  ])
+  assert.equal(response.status(), 200)
   await expect(rows(page).first()).not.toHaveAttribute('data-message-id', previousFirst)
   await settled(page)
 }
@@ -81,6 +83,9 @@ c.commit()`, cid, aliceId, bobId)
       if (response.url().endsWith('/context')) contextSizes.push((await response.json()).items.length)
     } catch {}
   })
+  // Direct SQL fixtures have no sync events. Reload explicitly; selecting the
+  // already-active chat now preserves its mounted timeline and scroll position.
+  await alice.reload()
   await h.select(alice, h.names.bob)
   await expect(rows(alice)).toHaveCount(30)
   assert.equal(await rows(alice).first().getAttribute('data-message-id'), '9971')
@@ -140,7 +145,7 @@ c.commit()`, cid, aliceId, bobId)
 
   await latest(alice)
   await settled(alice)
-  await h.rowById(alice, 10000).getByRole('button', { name: 'Reply', exact: true }).click()
+  await h.reply(alice, 10000)
   const authBefore = await alice.evaluate(() => window.realtimeTest.authenticated)
   await alice.route('**/api/conversations/*/sync?*', route => route.abort())
   await alice.evaluate(() => { window.realtimeTest.pauseRealtime = true; window.realtimeTest.socket.close() })
@@ -187,6 +192,7 @@ c.commit()`, cid, aliceId, bobId)
   await expect(h.rowById(historyTab, 10000)).toContainText('Changed during initial reconnect')
   await historyTab.unroute('**/api/conversations/*/messages/page?*')
   // A held, obsolete Bob snapshot must never appear in Charlie's conversation.
+  await h.select(historyTab, h.names.charlie)
   let releaseSwitch, capturedSwitch
   const heldSwitch = new Promise(resolve => { releaseSwitch = resolve })
   const switchCaptured = new Promise(resolve => { capturedSwitch = resolve })
@@ -237,7 +243,7 @@ c.commit()`, cid, aliceId, bobId)
   execFileSync(path.join(h.backendDirectory, '.venv/bin/python'), ['-c', 'from PIL import Image; import sys; Image.new("RGB",(640,480),"coral").save(sys.argv[1])', filename])
   const photoIds = []
   for (let i = 0; i < 10; i++) {
-    const response = await fetch(`http://127.0.0.1:8000${base}/messages/image`, {
+    const response = await fetch(`${require('./backend-origin.cjs').origin}${base}/messages/image`, {
       method: 'POST', headers: { Authorization: 'Bearer ' + await bob.evaluate(() => localStorage.getItem('smooth_access_token')) },
       body: (() => { const form = new FormData(); form.append('file', new Blob([fs.readFileSync(filename)], { type: 'image/png' }), 'lazy.png'); return form })(),
     })
@@ -259,6 +265,9 @@ c.commit()`, cid, aliceId, bobId)
   await h.visiblePhoto(lazyTab, photoIds[0])
   await expect.poll(() => lazyTab.evaluate(url => window.imageUrls.revoked.includes(url), visibleUrl)).toBe(true)
   await lazyTab.setViewportSize({ width: 375, height: 812 })
+  const controls = lazyTab.locator('.composer-controls')
+  await lazyTab.emulateMedia({ reducedMotion: 'no-preference' })
+  assert.ok((await controls.evaluate(element => getComputedStyle(element).transitionDuration)).split(',').some(value => parseFloat(value) > 0))
   await lazyTab.emulateMedia({ reducedMotion: 'reduce' })
   assert.equal(await lazyTab.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
   await top(lazyTab)
@@ -270,7 +279,7 @@ c.commit()`, cid, aliceId, bobId)
   assert.equal((await mobileResponse).status(), 200)
   await expect(rows(lazyTab).first()).not.toHaveAttribute('data-message-id', oldFirst)
   await settled(lazyTab); await stable(lazyTab, mobileAnchor)
-  assert.equal(await lazyTab.locator('.auth-input').first().evaluate(element => getComputedStyle(element).transitionDuration), '0s')
+  assert.equal(await controls.evaluate(element => getComputedStyle(element).transitionDuration), '0s')
   await lazyTab.reload()
   await lazyTab.getByRole('button', { name: /@.*bob/ }).first().click()
   await expect(rows(lazyTab)).toHaveCount(30)
@@ -283,8 +292,23 @@ c.commit()`, cid, aliceId, bobId)
 
   // A retained composer target stays current even after its row is evicted and
   // its mutation frame is missed; recovery requests its state with the window.
-  await latest(alice)
-  await h.rowById(alice, 10000).getByRole('button', { name: 'Reply', exact: true }).click()
+  // Earlier reply-context checks retain disjoint history. Start this eviction
+  // fixture from a real fresh latest page rather than inheriting that window.
+  await alice.reload()
+  await h.openRecent(alice, h.names.bob)
+  await expect(rows(alice)).toHaveCount(30)
+  await expect(alice.getByRole('button', { name: 'Load older messages', exact: true })).toBeVisible()
+  // A scroll notification queued by focus before opening must not dismiss
+  // the menu. Subsequent movement must still close it. Repeat the native
+  // notification after opening to deterministically cover its late delivery.
+  const replyRow = h.rowById(alice, 10000)
+  const replyMenu = await h.openMenu(alice, replyRow)
+  await alice.locator('.chat-history').dispatchEvent('scroll')
+  await alice.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  await expect(replyMenu).toBeVisible()
+  await alice.locator('.chat-history').evaluate(element => { element.scrollTop += element.scrollTop > 0 ? -1 : 1 })
+  await expect(replyMenu).toHaveCount(0)
+  await h.reply(alice, 10000)
   for (let i = 0; i < 7; i++) { await top(alice); await loadOlder(alice) }
   await expect(h.rowById(alice, 10000)).toHaveCount(0)
   await alice.route('**/api/conversations/*/sync?*', route => route.abort())
@@ -305,6 +329,8 @@ c=sqlite3.connect(sys.argv[1]); cid,sender,recipient=map(int,sys.argv[2:]); star
 ids=list(range(start,start+60))
 c.executemany('INSERT INTO messages(id,conversation_id,sender_id,content,created_at) VALUES(?,?,?,?,?)', [(i,cid,sender,'Recovery history '+str(i),'2025-01-01 00:00:00.'+str(60-index).zfill(6)) for index,i in enumerate(ids)])
 c.executemany('INSERT INTO message_receipts(message_id,recipient_id) VALUES(?,?)', [(i,recipient) for i in ids]); c.commit(); print(json.dumps(ids))`, recoveryCid, charlieId, aliceId))
+  // Direct SQL seeding emits no recovery hint; reload the mounted timeline.
+  await alice.reload()
   await h.select(alice, h.names.charlie)
   await expect(rows(alice)).toHaveCount(30)
   await expect(rows(alice).first()).toHaveAttribute('data-message-id', String(seeded[29]))
@@ -352,7 +378,7 @@ c.execute('DELETE FROM conversation_events WHERE conversation_id=? AND id<=?',(c
   console.log('PASS evicted/offline reply target deletion, sub-millisecond chronological ordering, deleted-window recovery, retention-gap reset, expired-cursor reset, dropped-frame recovery on a healthy socket')
 }
 
-main().catch(error => { console.error(error); process.exitCode = 1 }).finally(async () => {
+main().catch(async error => { console.error(error); process.exitCode = 1; await h.captureFailure(browser, error) }).finally(async () => {
   if (browser) await browser.close()
   await h.stopBackend()
   fs.rmSync(h.temporary, { recursive: true, force: true })

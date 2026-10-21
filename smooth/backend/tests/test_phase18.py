@@ -1,0 +1,180 @@
+"""Phase 18 additive send identity and presence regressions."""
+import unittest
+from concurrent.futures import ThreadPoolExecutor
+from uuid import uuid4
+from unittest.mock import patch
+import test_phase8 as baseline
+from sqlalchemy import select, func, inspect, text, create_engine
+from app.database.database import SessionLocal, engine
+from app.database.migrations import migrate_phase18
+from app.models.message import Message, MessageSendIntent
+from app.models.message_attachment import MessageAttachment
+from app.models.conversation_event import ConversationEvent
+from app.core.config import UPLOAD_DIR
+
+class Phase18Tests(unittest.TestCase):
+    setUp = baseline.Phase8Tests.setUp
+    headers = baseline.Phase8Tests.headers
+    receive_type = baseline.Phase8Tests.receive_type
+    image_bytes = baseline.Phase8Tests.image_bytes
+
+    def send(self, key, content='Original', **extra):
+        return self.client.post(self.path, headers=self.headers('alice'), json={'content': content, 'client_message_id': key, **extra})
+
+    def image(self, key, caption='', data=None):
+        return self.client.post(self.path + '/image', headers=self.headers('alice'), files={'file': ('photo.png', data or self.image_bytes(), 'image/png')}, data={'caption': caption, 'client_message_id': key})
+
+    def test_identity_replay_conflict_edits_deletion_and_restart(self):
+        key = str(uuid4())
+        original = self.send(key)
+        self.assertEqual(original.status_code, 201, original.text)
+        self.assertEqual(original.json()['client_message_id'], key)
+        self.assertEqual(self.send(key).json()['id'], original.json()['id'])
+        self.assertEqual(self.send(key, 'Different').status_code, 409)
+        self.client.patch('/api/messages/' + str(original.json()['id']), headers=self.headers('alice'), json={'content': 'Edited'})
+        engine.dispose()
+        self.assertEqual(self.send(key).json()['content'], 'Edited')
+        self.client.delete('/api/messages/' + str(original.json()['id']), headers=self.headers('alice'))
+        self.assertEqual(self.send(key).status_code, 410)
+        with SessionLocal() as db:
+            self.assertEqual(db.scalar(select(func.count()).select_from(Message)), 0)
+            self.assertEqual(db.scalar(select(func.count()).select_from(MessageSendIntent)), 1)
+            self.assertEqual(db.scalar(select(func.count()).select_from(ConversationEvent).where(ConversationEvent.kind == 'new')), 1)
+
+    def test_concurrent_duplicate_and_sender_scope(self):
+        key = str(uuid4())
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            results = list(pool.map(lambda _: self.send(key), range(4)))
+        self.assertTrue(all(result.status_code == 201 for result in results), [r.text for r in results])
+        self.assertEqual(len({result.json()['id'] for result in results}), 1)
+        other = self.client.post(self.path, headers=self.headers('bob'), json={'content': 'Original', 'client_message_id': key})
+        self.assertEqual(other.status_code, 201)
+        self.assertNotEqual(other.json()['id'], results[0].json()['id'])
+        self.assertEqual(self.send('invalid').status_code, 422)
+        forbidden = self.client.post(self.path, headers=self.headers('charlie'), json={'content':'Original', 'client_message_id':key})
+        self.assertEqual(forbidden.status_code, 404)
+
+    def test_image_retries_cleanup_and_payload_conflicts(self):
+        before = set((UPLOAD_DIR / 'images').glob('*'))
+        key = str(uuid4())
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            results = list(pool.map(lambda _: self.image(key), range(3)))
+        self.assertTrue(all(result.status_code == 201 for result in results), [r.text for r in results])
+        self.assertEqual(len({r.json()['id'] for r in results}), 1)
+        self.assertEqual(len(set((UPLOAD_DIR / 'images').glob('*')) - before), 1)
+        self.assertEqual(self.image(key, 'Other caption').status_code, 409)
+        self.assertEqual(self.send(key).status_code, 409)
+        self.assertEqual(len(set((UPLOAD_DIR / 'images').glob('*')) - before), 1)
+        with SessionLocal() as db:
+            self.assertEqual(db.scalar(select(func.count()).select_from(MessageAttachment)), 1)
+        self.client.delete('/api/messages/' + str(results[0].json()['id']), headers=self.headers('alice'))
+        self.assertEqual(self.image(key).status_code, 410)
+        self.assertEqual(set((UPLOAD_DIR / 'images').glob('*')), before)
+
+    def test_failed_image_transaction_has_no_file_or_intent(self):
+        # A prior test may leave files in the shared temporary upload directory.
+        before = set((UPLOAD_DIR / 'images').glob('*'))
+        key = str(uuid4())
+        with patch('sqlalchemy.orm.Session.commit', side_effect=RuntimeError('failed')):
+            with self.assertRaises(RuntimeError): self.image(key)
+        self.assertEqual(set((UPLOAD_DIR / 'images').glob('*')), before)
+        with SessionLocal() as db:
+            self.assertIsNone(db.get(MessageSendIntent, (self.users['alice'], key)))
+        self.assertEqual(self.image(key).status_code, 201)
+
+    def test_migrate_real_legacy_schema_idempotently(self):
+        legacy = create_engine('sqlite://')
+        with legacy.begin() as c:
+            c.execute(text('CREATE TABLE users (id INTEGER PRIMARY KEY)'))
+            c.execute(text('CREATE TABLE messages (id INTEGER PRIMARY KEY, sender_id INTEGER, content TEXT)'))
+            c.execute(text("INSERT INTO messages VALUES (1, 1, 'Preserved')"))
+            c.execute(text('CREATE TABLE smooth_schema_migrations (version INTEGER PRIMARY KEY)'))
+        migrate_phase18(legacy); migrate_phase18(legacy)
+        self.assertIn('client_message_id', {col['name'] for col in inspect(legacy).get_columns('messages')})
+        with legacy.connect() as c:
+            self.assertEqual(c.execute(text('SELECT content, client_message_id FROM messages')).one(), ('Preserved', None))
+        legacy.dispose()
+
+    def test_authorized_presence_snapshot_and_private_directory(self):
+        from app.services.presence import persist_seen
+        stamp = persist_seen(self.users['bob'])
+        snapshot = self.client.get('/api/users/presence', headers=self.headers('alice'))
+        self.assertEqual(snapshot.status_code, 200)
+        self.assertEqual([peer['user_id'] for peer in snapshot.json()['users']], [self.users['bob']])
+        self.assertEqual(snapshot.json()['users'][0]['last_seen_at'], stamp)
+        self.assertFalse(snapshot.json()['users'][0]['online'])
+        self.assertTrue(stamp.endswith('+00:00'))
+        self.assertEqual(self.client.get('/api/users/presence', headers=self.headers('charlie')).json()['users'], [])
+        self.assertEqual(self.client.get('/api/users/presence').status_code, 401)
+        directory = self.client.get('/api/users', headers=self.headers('charlie')).json()
+        self.assertTrue(all('last_seen_at' not in peer for peer in directory))
+
+    def test_last_seen_final_tab_and_detailed_event_capability(self):
+        from app.models.user import User
+        receive = baseline.Phase8Tests.receive_type
+        with self.client.websocket_connect('/ws') as alice, self.client.websocket_connect('/ws') as bob:
+            alice.send_json({'type':'auth', 'token':self.tokens['alice'], 'presence_version':18})
+            self.assertEqual(alice.receive_json()['type'], 'auth:ok')
+            receive(self, alice, 'presence:snapshot')
+            baseline.Phase8Tests.authenticate(self, bob, 'bob')
+            receive(self, alice, 'presence:update')
+            with self.client.websocket_connect('/ws') as tab:
+                baseline.Phase8Tests.authenticate(self, tab, 'bob')
+                with SessionLocal() as db: first = db.get(User, self.users['bob']).last_seen_at
+                tab.send_json({'type':'presence:heartbeat'})
+                self.assertEqual(tab.receive_json()['type'], 'presence:alive')
+                with SessionLocal() as db: self.assertEqual(db.get(User, self.users['bob']).last_seen_at, first)
+            self.assertTrue(self.client.get('/api/users/presence', headers=self.headers('alice')).json()['users'][0]['online'])
+            bob.close()
+            offline = receive(self, alice, 'presence:update')['data']
+            self.assertEqual(offline['status'], 'offline')
+            self.assertIsNotNone(offline.get('last_seen_at'))
+        with SessionLocal() as db:
+            self.assertIsNotNone(db.get(User, self.users['bob']).last_seen_at)
+
+    def test_failed_text_transaction_does_not_consume_uuid(self):
+        key = str(uuid4())
+        with patch('sqlalchemy.orm.Session.commit', side_effect=RuntimeError('failed')):
+            with self.assertRaises(RuntimeError): self.send(key)
+        with SessionLocal() as db:
+            self.assertIsNone(db.get(MessageSendIntent, (self.users['alice'], key)))
+        first = self.send(key)
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(self.send(key).json()['id'], first.json()['id'])
+
+    def test_detailed_offline_timestamp_not_broadcast_to_unapproved_user(self):
+        receive = baseline.Phase8Tests.receive_type
+        with self.client.websocket_connect('/ws') as alice, self.client.websocket_connect('/ws') as charlie:
+            for socket, name in ((alice, 'alice'), (charlie, 'charlie')):
+                socket.send_json({'type':'auth', 'token':self.tokens[name], 'presence_version':18})
+                self.assertEqual(socket.receive_json()['type'], 'auth:ok')
+                receive(self, socket, 'presence:snapshot')
+            receive(self, alice, 'presence:update')
+            with self.client.websocket_connect('/ws') as bob:
+                baseline.Phase8Tests.authenticate(self, bob, 'bob')
+                receive(self, alice, 'presence:update'); receive(self, charlie, 'presence:update')
+            trusted = receive(self, alice, 'presence:update')['data']
+            unapproved = receive(self, charlie, 'presence:update')['data']
+            self.assertEqual(trusted['status'], 'offline')
+            self.assertIn('last_seen_at', trusted)
+            self.assertEqual(unapproved, {'user_id':self.users['bob'], 'status':'offline'})
+
+
+class PresenceCoalescingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_heartbeat_writes_coalesce_across_tabs_but_final_disconnect_writes(self):
+        from unittest.mock import AsyncMock
+        from time import time
+        from app.realtime.manager import ConnectionManager
+        connections = ConnectionManager(durable=True)
+        stamp = '2026-10-16T12:00:00+00:00'
+        with patch('app.realtime.manager.persist_seen', return_value=stamp) as persist, patch('app.realtime.manager.presence_recipients', return_value=[]):
+            first = await connections.register(1, AsyncMock(), time()+100)
+            second = await connections.register(1, AsyncMock(), time()+100)
+            for _ in range(10): await connections.touch(1)
+            self.assertEqual(persist.call_count, 1)
+            await connections.disconnect(first)
+            self.assertEqual(persist.call_count, 1)
+            self.assertEqual(connections.online_user_ids(), [1])
+            await connections.disconnect(second)
+            self.assertEqual(persist.call_count, 2)
+            self.assertEqual(connections.online_user_ids(), [])

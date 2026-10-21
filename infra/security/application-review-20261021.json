@@ -1,0 +1,449 @@
+{
+  "reviewed_at": "2026-10-21",
+  "scope": "Exact application artifact under mandatory runtime mitigations; not a CVE suppression or material-risk acceptance",
+  "image": "helix@sha256:4a1472f45e955cba7ea2bfefe4554e4d52e57ee8053214d2a4c3d03602618049",
+  "config_id": "sha256:0bab97dec7835a90be631491cc9be015b7a505ac571be0346356e9ab14cb7772",
+  "report_sha256": "59558e701f29956e95597c5350ec8e0c48ecd2c69115bbadc48674e9d88a67ca",
+  "findings": [
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-76642",
+      "package": "bsdutils",
+      "installed": "1:2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "bsdutils: Failed privileged mount helper post-hooks require SUID/CAP_SYS_ADMIN and authorized mount. Runtime UID 10001, all capability sets zero, NoNewPrivs=1, Seccomp=2, no SUID/SGID and no fstab entries exclude privileged hooks. HELIX never calls mount.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-m25x-3hj9-m26f"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78408",
+      "package": "bsdutils",
+      "installed": "1:2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "bsdutils: Requires a privileged nsenter --join-cgroup operator retaining a root-opened host cgroup FD. Container has no host cgroup bind, no capabilities, no SUID and runs only unprivileged Python with no nsenter call or inherited host cgroup FD.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78409",
+      "package": "bsdutils",
+      "installed": "1:2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "bsdutils: Requires Linux >=6.15 detached-tree fast path, authorized fstab X-mount.subdir and privileged mount. Host kernel 6.8, empty fstab, no capabilities/SUID and no HELIX mount calls exclude these prerequisites.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-8f2p-47x3-43mv"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78410",
+      "package": "bsdutils",
+      "installed": "1:2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "bsdutils: Requires privileged SUID restricted bind mount from writable fstab source. Image has no SUID/SGID or fstab entries, read-only root and no capabilities; HELIX has no mount invocation.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-rh77-686x-2f2m"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-54369",
+      "package": "libacl1",
+      "installed": "2.3.2-2+b1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "libacl1: Path-based ACL operations require privileged libacl caller and attacker-controlled pathname. HELIX has no ACL API/CLI or ctypes call, libacl is not loaded by Python, runtime is UID 10001 with no caps/SUID; root is read-only. No privileged ACL processing of uploads exists.",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-54369"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-76642",
+      "package": "libblkid1",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "libblkid1: Failed privileged mount helper post-hooks require SUID/CAP_SYS_ADMIN and authorized mount. Runtime UID 10001, all capability sets zero, NoNewPrivs=1, Seccomp=2, no SUID/SGID and no fstab entries exclude privileged hooks. HELIX never calls mount.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-m25x-3hj9-m26f"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78408",
+      "package": "libblkid1",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "libblkid1: Requires a privileged nsenter --join-cgroup operator retaining a root-opened host cgroup FD. Container has no host cgroup bind, no capabilities, no SUID and runs only unprivileged Python with no nsenter call or inherited host cgroup FD.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78409",
+      "package": "libblkid1",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "libblkid1: Requires Linux >=6.15 detached-tree fast path, authorized fstab X-mount.subdir and privileged mount. Host kernel 6.8, empty fstab, no capabilities/SUID and no HELIX mount calls exclude these prerequisites.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-8f2p-47x3-43mv"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78410",
+      "package": "libblkid1",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "libblkid1: Requires privileged SUID restricted bind mount from writable fstab source. Image has no SUID/SGID or fstab entries, read-only root and no capabilities; HELIX has no mount invocation.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-rh77-686x-2f2m"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-76642",
+      "package": "liblastlog2-2",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "liblastlog2-2: Failed privileged mount helper post-hooks require SUID/CAP_SYS_ADMIN and authorized mount. Runtime UID 10001, all capability sets zero, NoNewPrivs=1, Seccomp=2, no SUID/SGID and no fstab entries exclude privileged hooks. HELIX never calls mount.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-m25x-3hj9-m26f"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78408",
+      "package": "liblastlog2-2",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "liblastlog2-2: Requires a privileged nsenter --join-cgroup operator retaining a root-opened host cgroup FD. Container has no host cgroup bind, no capabilities, no SUID and runs only unprivileged Python with no nsenter call or inherited host cgroup FD.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78409",
+      "package": "liblastlog2-2",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "liblastlog2-2: Requires Linux >=6.15 detached-tree fast path, authorized fstab X-mount.subdir and privileged mount. Host kernel 6.8, empty fstab, no capabilities/SUID and no HELIX mount calls exclude these prerequisites.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-8f2p-47x3-43mv"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78410",
+      "package": "liblastlog2-2",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "liblastlog2-2: Requires privileged SUID restricted bind mount from writable fstab source. Image has no SUID/SGID or fstab entries, read-only root and no capabilities; HELIX has no mount invocation.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-rh77-686x-2f2m"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-76642",
+      "package": "libmount1",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "libmount1: Failed privileged mount helper post-hooks require SUID/CAP_SYS_ADMIN and authorized mount. Runtime UID 10001, all capability sets zero, NoNewPrivs=1, Seccomp=2, no SUID/SGID and no fstab entries exclude privileged hooks. HELIX never calls mount.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-m25x-3hj9-m26f"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78408",
+      "package": "libmount1",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "libmount1: Requires a privileged nsenter --join-cgroup operator retaining a root-opened host cgroup FD. Container has no host cgroup bind, no capabilities, no SUID and runs only unprivileged Python with no nsenter call or inherited host cgroup FD.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78409",
+      "package": "libmount1",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "libmount1: Requires Linux >=6.15 detached-tree fast path, authorized fstab X-mount.subdir and privileged mount. Host kernel 6.8, empty fstab, no capabilities/SUID and no HELIX mount calls exclude these prerequisites.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-8f2p-47x3-43mv"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78410",
+      "package": "libmount1",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "libmount1: Requires privileged SUID restricted bind mount from writable fstab source. Image has no SUID/SGID or fstab entries, read-only root and no capabilities; HELIX has no mount invocation.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-rh77-686x-2f2m"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2025-69720",
+      "package": "libncursesw6",
+      "installed": "6.5+20250216-2",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "libncursesw6: The affected analyze_string code is in the infocmp executable, not ncurses library use. /usr/bin/infocmp was removed from the final image and absence is rechecked. HELIX has no infocmp invocation. Debian package metadata remains intact.",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2025-69720"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-76642",
+      "package": "libsmartcols1",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "libsmartcols1: Failed privileged mount helper post-hooks require SUID/CAP_SYS_ADMIN and authorized mount. Runtime UID 10001, all capability sets zero, NoNewPrivs=1, Seccomp=2, no SUID/SGID and no fstab entries exclude privileged hooks. HELIX never calls mount.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-m25x-3hj9-m26f"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78408",
+      "package": "libsmartcols1",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "libsmartcols1: Requires a privileged nsenter --join-cgroup operator retaining a root-opened host cgroup FD. Container has no host cgroup bind, no capabilities, no SUID and runs only unprivileged Python with no nsenter call or inherited host cgroup FD.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78409",
+      "package": "libsmartcols1",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "libsmartcols1: Requires Linux >=6.15 detached-tree fast path, authorized fstab X-mount.subdir and privileged mount. Host kernel 6.8, empty fstab, no capabilities/SUID and no HELIX mount calls exclude these prerequisites.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-8f2p-47x3-43mv"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78410",
+      "package": "libsmartcols1",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "libsmartcols1: Requires privileged SUID restricted bind mount from writable fstab source. Image has no SUID/SGID or fstab entries, read-only root and no capabilities; HELIX has no mount invocation.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-rh77-686x-2f2m"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-16742",
+      "package": "libsystemd0",
+      "installed": "257.13-1~deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "libsystemd0: The affected systemd-homed daemon is absent. libsystemd0/libudev1 package matches do not provide homed or homed-managed users; no host D-Bus/home socket is mounted.",
+      "source": "https://github.com/systemd/systemd/security/advisories/GHSA-jm29-p7hh-vjhv"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2025-69720",
+      "package": "libtinfo6",
+      "installed": "6.5+20250216-2",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "libtinfo6: The affected analyze_string code is in the infocmp executable, not ncurses library use. /usr/bin/infocmp was removed from the final image and absence is rechecked. HELIX has no infocmp invocation. Debian package metadata remains intact.",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2025-69720"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-16742",
+      "package": "libudev1",
+      "installed": "257.13-1~deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "libudev1: The affected systemd-homed daemon is absent. libsystemd0/libudev1 package matches do not provide homed or homed-managed users; no host D-Bus/home socket is mounted.",
+      "source": "https://github.com/systemd/systemd/security/advisories/GHSA-jm29-p7hh-vjhv"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-76642",
+      "package": "libuuid1",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "libuuid1: Failed privileged mount helper post-hooks require SUID/CAP_SYS_ADMIN and authorized mount. Runtime UID 10001, all capability sets zero, NoNewPrivs=1, Seccomp=2, no SUID/SGID and no fstab entries exclude privileged hooks. HELIX never calls mount.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-m25x-3hj9-m26f"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78408",
+      "package": "libuuid1",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "libuuid1: Requires a privileged nsenter --join-cgroup operator retaining a root-opened host cgroup FD. Container has no host cgroup bind, no capabilities, no SUID and runs only unprivileged Python with no nsenter call or inherited host cgroup FD.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78409",
+      "package": "libuuid1",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "libuuid1: Requires Linux >=6.15 detached-tree fast path, authorized fstab X-mount.subdir and privileged mount. Host kernel 6.8, empty fstab, no capabilities/SUID and no HELIX mount calls exclude these prerequisites.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-8f2p-47x3-43mv"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78410",
+      "package": "libuuid1",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "libuuid1: Requires privileged SUID restricted bind mount from writable fstab source. Image has no SUID/SGID or fstab entries, read-only root and no capabilities; HELIX has no mount invocation.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-rh77-686x-2f2m"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-76642",
+      "package": "login",
+      "installed": "1:4.16.0-2+really2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "login: Failed privileged mount helper post-hooks require SUID/CAP_SYS_ADMIN and authorized mount. Runtime UID 10001, all capability sets zero, NoNewPrivs=1, Seccomp=2, no SUID/SGID and no fstab entries exclude privileged hooks. HELIX never calls mount.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-m25x-3hj9-m26f"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78408",
+      "package": "login",
+      "installed": "1:4.16.0-2+really2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "login: Requires a privileged nsenter --join-cgroup operator retaining a root-opened host cgroup FD. Container has no host cgroup bind, no capabilities, no SUID and runs only unprivileged Python with no nsenter call or inherited host cgroup FD.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78409",
+      "package": "login",
+      "installed": "1:4.16.0-2+really2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "login: Requires Linux >=6.15 detached-tree fast path, authorized fstab X-mount.subdir and privileged mount. Host kernel 6.8, empty fstab, no capabilities/SUID and no HELIX mount calls exclude these prerequisites.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-8f2p-47x3-43mv"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78410",
+      "package": "login",
+      "installed": "1:4.16.0-2+really2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "login: Requires privileged SUID restricted bind mount from writable fstab source. Image has no SUID/SGID or fstab entries, read-only root and no capabilities; HELIX has no mount invocation.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-rh77-686x-2f2m"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-76642",
+      "package": "mount",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "mount: Failed privileged mount helper post-hooks require SUID/CAP_SYS_ADMIN and authorized mount. Runtime UID 10001, all capability sets zero, NoNewPrivs=1, Seccomp=2, no SUID/SGID and no fstab entries exclude privileged hooks. HELIX never calls mount.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-m25x-3hj9-m26f"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78408",
+      "package": "mount",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "mount: Requires a privileged nsenter --join-cgroup operator retaining a root-opened host cgroup FD. Container has no host cgroup bind, no capabilities, no SUID and runs only unprivileged Python with no nsenter call or inherited host cgroup FD.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78409",
+      "package": "mount",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "mount: Requires Linux >=6.15 detached-tree fast path, authorized fstab X-mount.subdir and privileged mount. Host kernel 6.8, empty fstab, no capabilities/SUID and no HELIX mount calls exclude these prerequisites.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-8f2p-47x3-43mv"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78410",
+      "package": "mount",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "mount: Requires privileged SUID restricted bind mount from writable fstab source. Image has no SUID/SGID or fstab entries, read-only root and no capabilities; HELIX has no mount invocation.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-rh77-686x-2f2m"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2025-69720",
+      "package": "ncurses-base",
+      "installed": "6.5+20250216-2",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "ncurses-base: The affected analyze_string code is in the infocmp executable, not ncurses library use. /usr/bin/infocmp was removed from the final image and absence is rechecked. HELIX has no infocmp invocation. Debian package metadata remains intact.",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2025-69720"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2025-69720",
+      "package": "ncurses-bin",
+      "installed": "6.5+20250216-2",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "ncurses-bin: The affected analyze_string code is in the infocmp executable, not ncurses library use. /usr/bin/infocmp was removed from the final image and absence is rechecked. HELIX has no infocmp invocation. Debian package metadata remains intact.",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2025-69720"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-9538",
+      "package": "perl-base",
+      "installed": "5.40.1-6+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "perl-base: Archive::Tar is absent from perl-base runtime, confirmed by failed module load. HELIX does not accept/extract tar archives or invoke Perl; authenticated uploads are validated with patched Pillow 13.",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-9538"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-76642",
+      "package": "util-linux",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "util-linux: Failed privileged mount helper post-hooks require SUID/CAP_SYS_ADMIN and authorized mount. Runtime UID 10001, all capability sets zero, NoNewPrivs=1, Seccomp=2, no SUID/SGID and no fstab entries exclude privileged hooks. HELIX never calls mount.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-m25x-3hj9-m26f"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78408",
+      "package": "util-linux",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "util-linux: Requires a privileged nsenter --join-cgroup operator retaining a root-opened host cgroup FD. Container has no host cgroup bind, no capabilities, no SUID and runs only unprivileged Python with no nsenter call or inherited host cgroup FD.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-55fx-f4gg-cfhj"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78409",
+      "package": "util-linux",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "util-linux: Requires Linux >=6.15 detached-tree fast path, authorized fstab X-mount.subdir and privileged mount. Host kernel 6.8, empty fstab, no capabilities/SUID and no HELIX mount calls exclude these prerequisites.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-8f2p-47x3-43mv"
+    },
+    {
+      "target": "/scan/app.tar (debian 13.7)",
+      "id": "CVE-2026-78410",
+      "package": "util-linux",
+      "installed": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "disposition": "not_affected_in_qualified_runtime",
+      "rationale": "util-linux: Requires privileged SUID restricted bind mount from writable fstab source. Image has no SUID/SGID or fstab entries, read-only root and no capabilities; HELIX has no mount invocation.",
+      "source": "https://github.com/util-linux/util-linux/security/advisories/GHSA-rh77-686x-2f2m"
+    }
+  ]
+}

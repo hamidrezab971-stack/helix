@@ -1,0 +1,58 @@
+.chat-sidebar { position: relative; }
+.navigation-header { padding: max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 12px max(16px, env(safe-area-inset-left)); }
+.navigation-titlebar, .navigation-searchbar { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+.navigation-titlebar h1 { flex: 1; min-width: 0; font-size: 20px; font-weight: 600; letter-spacing: -.4px; }
+.navigation-brand { font-size: 26px; letter-spacing: -1px; }
+.navigation-titlebar .brand-mark { width: 32px; height: 32px; border-radius: 10px; }
+.navigation-searchbar { gap: 4px; margin-left: -8px; animation: navigation-enter var(--motion-normal) var(--ease-out); }
+.navigation-searchbar .search-field { flex: 1; }
+.navigation-header .search-field input { font-size: 16px; }
+.contacts-search { margin-top: 12px; }
+.search-tabs { display: flex; gap: 6px; padding: 10px 0 0 42px; }
+.search-tabs button { min-height: 40px; padding: 8px 18px; border-radius: 20px; font-size: 13px; color: var(--text-secondary); transition: color var(--motion-fast), background var(--motion-fast); }
+.search-tabs [aria-selected="true"] { background: var(--surface-selected); color: var(--accent); }
+.navigation-body { flex: 1; display: flex; position: relative; min-height: 0; }
+.navigation-body > .sidebar-content { width: 100%; padding-bottom: 96px; }
+.navigation-body .conversation-list, .navigation-body .people-list { margin: 0; padding: 0; list-style: none; }
+.navigation-body .recent-row { min-height: 72px; padding: 10px; }
+.navigation-body .chat-avatar { border-radius: 50%; }
+.navigation-body .recent-row .avatar-presence { width: 11px; height: 11px; bottom: 0; right: 0; }
+.navigation-surface { animation: navigation-enter var(--motion-normal) var(--ease-out); }
+.new-chat-button { position: absolute; bottom: 18px; right: max(20px, env(safe-area-inset-right)); display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); box-shadow: 0 4px 12px #0002; transition: transform 160ms var(--ease-out), opacity 160ms; }
+.new-chat-button:active { transform: scale(.96); }
+.bottom-navigation { display: flex; flex-shrink: 0; padding: 6px max(8px, env(safe-area-inset-right)) max(7px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); border-top: 1px solid var(--border-subtle); background: var(--surface-sidebar); }
+.bottom-navigation button { display: flex; flex: 1; min-width: 0; min-height: 52px; align-items: center; justify-content: center; flex-direction: column; gap: 3px; font-size: 10px; font-weight: 500; color: var(--text-muted); border-radius: 14px; transition: color var(--motion-fast), transform var(--motion-fast); }
+.bottom-navigation button > span { display: grid; place-items: center; width: 48px; height: 27px; border-radius: 14px; transition: background var(--motion-fast); }
+.bottom-navigation [aria-current="page"] { color: var(--accent); }
+.bottom-navigation [aria-current="page"] > span { background: var(--surface-selected); }
+.bottom-navigation button:active { transform: scale(.95); }
+.directory-loading { min-height: 70px; display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--text-secondary); font-size: 12px; }
+.account-page, .settings-page { padding: 20px 10px; }
+.account-page > .chat-avatar { width: 64px; height: 64px; font-size: 24px; margin: 8px auto 16px; }
+.account-page h2 { font-size: 18px; text-align: center; overflow-wrap: anywhere; }
+.account-page dl { margin: 28px 8px 20px; font-size: 13px; }
+.account-page dt { font-size: 11px; color: var(--text-muted); margin-top: 18px; }
+.account-page dd { margin: 5px 0 0; color: var(--text-primary); overflow-wrap: anywhere; }
+.account-action, .preference-row { display: flex; align-items: center; width: 100%; gap: 12px; min-height: 56px; padding: 12px; text-align: left; font-size: 13px; border-radius: var(--radius-md); }
+.account-action { color: var(--danger); }
+.preference-row { color: var(--text-primary); background: var(--surface-raised); }
+.preference-row > svg { color: var(--accent); }
+.preference-row small { display: block; font-size: 11px; color: var(--text-secondary); margin-top: 3px; }
+.preference-value { margin-left: auto; font-size: 11px; color: var(--accent); }
+.settings-label { font-size: 12px; color: var(--text-muted); margin: 0 12px 12px; }
+.settings-note { font-size: 12px; line-height: 1.7; color: var(--text-muted); margin: 16px 12px; }
+@keyframes navigation-enter { from { opacity: .5; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@media (hover: hover) { .new-chat-button:hover { background: var(--accent-strong); } .account-action:hover { background: var(--surface-hover); } }
+@media (max-width: 767px) { .chat-shell[data-chat-open="true"] .new-chat-button { display: none; } }
+@media (max-height: 450px) { .navigation-header { padding-top: max(6px, env(safe-area-inset-top)); padding-bottom: 6px; } .bottom-navigation button { min-height: 46px; } }
+
+.conversation-item { max-height: 100px; opacity: 1; transform-origin: center left; transition: max-height 190ms var(--ease-out), opacity 160ms, transform 190ms var(--ease-out); }
+.conversation-item[data-removing="true"] { max-height: 0; opacity: 0; transform: scale(.98); overflow: hidden; pointer-events: none; }
+.navigation-body .conversation-item > .recent-row { padding-right: 44px; touch-action: pan-y; user-select: none; -webkit-touch-callout: none; }
+.conversation-more { position: absolute; right: 0; top: 14px; width: 44px; min-height: 44px; display: grid; place-items: center; color: var(--text-muted); border-radius: 12px; }
+.conversation-more:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.conversation-actions { width: min(288px, calc(100vw - 24px)); animation-duration: 180ms; }
+.conversation-actions h2 { margin: 10px 12px; font-size: 15px; font-weight: 600; }
+.conversation-actions p { margin: 8px 12px 12px; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+.conversation-actions-overlay { background: #0004; }
+@media (prefers-reduced-motion: reduce) { .conversation-item, .conversation-actions { transition: none; animation: none; } }

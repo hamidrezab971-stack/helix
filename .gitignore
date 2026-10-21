@@ -1,0 +1,10 @@
+infra/.env
+infra/*.local.env
+infra/secrets/
+infra/data/
+infra/evidence/
+infra/images.resolved.env
+**/*.sqlite*
+**/*.backup
+**/__pycache__/
+**/*.py[cod]

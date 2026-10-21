@@ -13,7 +13,7 @@ const key = message => ({ id: message.id, created_at: message.created_at })
 // state small. Cursors allow revisiting evicted history in either direction.
 export default function useTimeline({ token, selectedUser, initialConversation, onConversationOpened,
   onUnauthorized, subscribeToSync, beforeChange, atBottom, onPersistedRead, retryAttempt,
-  trackedIds, onReconciled }) {
+  trackedIds, onReconciled, visible = true }) {
   const [messages, setMessages] = useState([])
   const [conversation, setConversation] = useState(null)
   const [stage, setStage] = useState('opening')
@@ -28,6 +28,8 @@ export default function useTimeline({ token, selectedUser, initialConversation, 
   const session = useRef(null)
   const tracked = useRef([])
   tracked.current = trackedIds
+  const viewVisible = useRef(visible)
+  viewVisible.current = visible
 
   const install = useCallback((s, incoming, missing = [], reason = 'sync', page = null, targetId = null) => {
     if (!s.active) return
@@ -108,7 +110,7 @@ export default function useTimeline({ token, selectedUser, initialConversation, 
 
     async function acknowledgeRange() {
       if (!s.active || !s.readBoundary || s.readBusy) return
-      const read = document.visibilityState === 'visible'
+      const read = document.visibilityState === 'visible' && viewVisible.current
       const identity = `${s.readThroughId}:${read}`
       if (s.readDone === identity) return
       s.readBusy = true

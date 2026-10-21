@@ -1,0 +1,9 @@
+# Install as /etc/nginx/snippets/helix-monitoring-access.conf only after review.
+# Use a verified VPN administrator address range if remote access is required.
+# Default: SSH tunnel/loopback access with an additional administrator password.
+# Never trust X-Forwarded-For to authorize access or enable satisfy any.
+allow 127.0.0.1;
+allow ::1;
+deny all;
+auth_basic "HELIX monitoring administrators";
+auth_basic_user_file /etc/nginx/helix-monitoring.htpasswd;

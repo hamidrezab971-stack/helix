@@ -17,6 +17,7 @@ from app.services.receipts import acknowledge_message
 
 router = APIRouter()
 AUTH_TIMEOUT_SECONDS = 5
+PRESENCE_IDLE_SECONDS = 75
 
 
 def authenticate_socket(token: str) -> tuple[int, float]:
@@ -62,14 +63,19 @@ async def websocket_endpoint(socket: WebSocket) -> None:
             return
 
         await socket.send_json({"type": "auth:ok"})
-        connection = await manager.register(user_id, socket, expires_at)
+        presence_version = auth.get('presence_version')
+        connection = await manager.register(user_id, socket, expires_at,
+            detailed_presence=presence_version in (18, 204), ordered_presence=presence_version == 204)
         while True:
             try:
                 frame = await asyncio.wait_for(
-                    socket.receive(), timeout=max(0, expires_at - time())
+                    socket.receive(), timeout=max(0, min(PRESENCE_IDLE_SECONDS, expires_at - time()))
                 )
             except TimeoutError:
-                await manager.expire(connection)
+                if time() >= expires_at:
+                    await manager.expire(connection)
+                else:
+                    await socket.close(code=1001)
                 return
             if frame["type"] == "websocket.disconnect":
                 return
@@ -78,6 +84,10 @@ async def websocket_endpoint(socket: WebSocket) -> None:
                 return
             try:
                 event = json.loads(frame.get("text", ""))
+                if isinstance(event, dict) and event.get("type") == 'presence:heartbeat':
+                    await manager.touch(user_id)
+                    await manager._deliver(connection, {"type": "presence:alive"})
+                    continue
                 if isinstance(event, dict) and event.get("type") in ("message:delivered", "message:read"):
                     message_id = event.get("message_id")
                     # Malformed, missing and forged receipt IDs are ignored;

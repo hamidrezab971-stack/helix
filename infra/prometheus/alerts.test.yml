@@ -1,0 +1,78 @@
+rule_files: [alerts.yml]
+evaluation_interval: 1m
+tests:
+  - name: real target and database health failure thresholds
+    interval: 1m
+    input_series:
+      - series: 'up{job="helix"}'
+        values: '0x3'
+      - series: helix_api_health
+        values: '0x3'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: HelixUnavailable
+        exp_alerts:
+          - exp_labels: {job: helix, severity: critical}
+            exp_annotations:
+              summary: HELIX metrics target unavailable
+              description: Check API health, credentials and container state; scrape health alone is not an end-to-end probe.
+      - eval_time: 2m
+        alertname: HelixApiHealthFailed
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations: {summary: HELIX database health endpoint failed}
+  - name: low root disk persists for ten minutes
+    interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/"}'
+        values: '10x12'
+      - series: 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/"}'
+        values: '100x12'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: HostLowDiskSpace
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: HostLowDiskSpace
+        exp_alerts:
+          - exp_labels: {fstype: ext4, mountpoint: /, severity: critical}
+            exp_annotations: {summary: Host root disk has less than 15 percent available}
+  - name: stale collector requires two more minutes
+    interval: 1m
+    input_series:
+      - series: helix_host_collector_timestamp_seconds
+        values: '0x7'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: HostCollectorStale
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: HostCollectorStale
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations: {summary: Host service and container collector is stale}
+  - name: sustained errors require traffic and duration
+    interval: 1m
+    input_series:
+      - series: 'helix_http_requests_total{status="200"}'
+        values: '0+100x12'
+      - series: 'helix_http_requests_total{status="500"}'
+        values: '0+10x12'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: HelixSustainedHttpErrors
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: HelixSustainedHttpErrors
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations: {summary: HELIX HTTP 5xx responses exceed 5 percent}
+  - name: zero traffic never triggers an error ratio alert
+    interval: 1m
+    input_series:
+      - series: 'helix_http_requests_total{status="500"}'
+        values: '0x12'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: HelixSustainedHttpErrors
+        exp_alerts: []

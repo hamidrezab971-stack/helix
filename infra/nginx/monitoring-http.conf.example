@@ -1,0 +1,5 @@
+# Install in the http context only when the reviewed routes are enabled.
+map $http_upgrade $helix_monitoring_connection {
+    default upgrade;
+    '' close;
+}

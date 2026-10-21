@@ -1,4 +1,6 @@
-export const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '')
+import { uploadMultipart } from './upload.js'
+
+export const API_URL = (import.meta.env?.VITE_API_URL || '').replace(/\/+$/, '')
 const GENERIC_ERROR = 'Something went wrong. Please try again.'
 
 function apiError(message, status) {
@@ -8,7 +10,7 @@ function apiError(message, status) {
   return error
 }
 
-async function request(path, { body, token, signal, method, binary = false } = {}) {
+export async function request(path, { body, token, signal, method, binary = false, upload } = {}) {
   const headers = {}
   const multipart = body instanceof FormData
   if (body && !multipart) headers['Content-Type'] = 'application/json'
@@ -16,7 +18,9 @@ async function request(path, { body, token, signal, method, binary = false } = {
 
   let response
   try {
-    response = await fetch(`${API_URL}${path}`, {
+    response = upload && typeof XMLHttpRequest !== 'undefined'
+      ? await uploadMultipart(`${API_URL}${path}`, { body, headers, signal, ...upload })
+      : await fetch(`${API_URL}${path}`, {
       method: method || (body ? 'POST' : 'GET'),
       headers,
       body: body ? (multipart ? body : JSON.stringify(body)) : undefined,
@@ -24,6 +28,9 @@ async function request(path, { body, token, signal, method, binary = false } = {
     })
   } catch (error) {
     if (error.name === 'AbortError') throw error
+    if (error.name === 'NotReadableError') throw apiError('This photo could not be read. Please select it again from Gallery or Files.')
+    if (globalThis.navigator?.onLine === false) throw apiError('You are offline. Reconnect, then retry your message.')
+    if (path.endsWith('/messages/image')) throw apiError('The image upload was interrupted. Check your connection and retry.')
     throw apiError('Unable to connect to the server.')
   }
 
@@ -33,7 +40,8 @@ async function request(path, { body, token, signal, method, binary = false } = {
   try {
     data = await response.json()
   } catch {
-    throw apiError(GENERIC_ERROR, response.status)
+    if (response.ok) throw apiError(GENERIC_ERROR, response.status)
+    data = null // Nginx and intermediaries may return HTML for e.g. 413/502.
   }
 
   if (!response.ok) {
@@ -42,6 +50,16 @@ async function request(path, { body, token, signal, method, binary = false } = {
       message = path.endsWith('/login')
         ? 'Invalid username or password'
         : 'Your sign-in has expired. Please log in again.'
+    } else if (response.status === 429) {
+      message = `Please wait ${response.headers.get('Retry-After') || 'a few'} seconds before trying again.`
+    } else if (path.endsWith('/messages/image') && [400, 413, 415, 422, 500, 502, 503, 504].includes(response.status)) {
+      message = response.status === 413 ? 'Choose an image of 8 MB or smaller.'
+        : [400, 415, 422].includes(response.status) ? 'Choose a valid JPEG, PNG or WebP image (non-animated, up to 25 megapixels) with a caption up to 2000 characters.'
+          : 'The server could not save your photo. Your selection is kept; please retry.'
+    } else if (path.startsWith('/api/auth/') && [400, 503].includes(response.status)) {
+      message = response.status === 400 ? 'Verification expired or invalid. Please verify again.' : 'Verification is busy. Please try again shortly.'
+    } else if (path.startsWith('/api/profiles')) {
+      message = response.status === 413 ? 'Choose a photo of 2 MB or smaller.' : response.status === 422 ? 'Use a valid JPEG, PNG or WebP, and a biography up to 1000 characters.' : response.status === 409 ? 'Your photo gallery is full.' : 'Unable to update this profile. Please try again.'
     } else if (path.startsWith('/api/messages') && [403, 404].includes(response.status)) {
       message = 'This message is unavailable or you don’t have permission to change it.'
     } else if (path.startsWith('/api/conversations') && [403, 404].includes(response.status)) {
@@ -51,11 +69,9 @@ async function request(path, { body, token, signal, method, binary = false } = {
     } else if (path.startsWith('/api/conversations') && response.status === 400) {
       message = 'Choose another user to start a conversation.'
     } else if (response.status === 409) {
-      message = 'Username already exists'
-    } else if (path.endsWith('/messages/image') && [413, 422].includes(response.status)) {
-      message = response.status === 413 ? 'Choose an image of 8 MB or smaller.' : 'Choose a valid JPEG, PNG, or WEBP image with safe dimensions and a caption up to 2000 characters.'
+      message = path.startsWith('/api/conversations') ? 'This send ID belongs to a different message.' : 'Unable to create an account with these details. Try another username or sign in.'
     } else if (response.status === 422) {
-      const errors = Array.isArray(data.detail) ? data.detail : []
+      const errors = Array.isArray(data?.detail) ? data.detail : []
       if (path.includes('/reactions')) {
         message = 'Choose a supported reaction.'
       } else if (errors.some((error) => error.loc?.includes('reply_to_message_id'))) {
@@ -79,15 +95,15 @@ function safeUser(data) {
   if (!Number.isInteger(data?.id) || typeof data.username !== 'string' || typeof data.created_at !== 'string') {
     throw apiError(GENERIC_ERROR)
   }
-  return { id: data.id, username: data.username, created_at: data.created_at }
+  return { id: data.id, username: data.username, created_at: data.created_at, primary_photo_id: Number.isSafeInteger(data.primary_photo_id) ? data.primary_photo_id : null, profile_version: Number.isSafeInteger(data.profile_version) ? data.profile_version : 0 }
 }
 
-export async function register(username, password) {
-  return safeUser(await request('/api/auth/register', { body: { username, password } }))
+export async function register(username, password, altcha) {
+  return safeUser(await request('/api/auth/register', { body: { username, password, altcha } }))
 }
 
-export async function login(username, password) {
-  const data = await request('/api/auth/login', { body: { username, password } })
+export async function login(username, password, altcha) {
+  const data = await request('/api/auth/login', { body: { username, password, altcha } })
   if (typeof data?.access_token !== 'string' || !data.access_token || data.token_type !== 'bearer') {
     throw apiError(GENERIC_ERROR)
   }
@@ -112,7 +128,7 @@ export function safeMessage(data) {
   }
   const edited_at = data.edited_at ?? null
   if (edited_at !== null && (typeof edited_at !== 'string' || !Number.isFinite(Date.parse(edited_at)))) throw apiError(GENERIC_ERROR)
-  return { id: data.id, conversation_id: data.conversation_id, sender_id: data.sender_id, content: data.content, created_at: data.created_at, edited_at, attachment, reply_to: safeReply(data.reply_to), reactions: safeReactions(data.reactions ?? []), ...safeReceipt(data) }
+  return { id: data.id, client_message_id: typeof data.client_message_id === 'string' ? data.client_message_id : null, conversation_id: data.conversation_id, sender_id: data.sender_id, content: data.content, created_at: data.created_at, edited_at, attachment, reply_to: safeReply(data.reply_to), reactions: safeReactions(data.reactions ?? []), ...safeReceipt(data) }
 }
 
 export function safeReactions(data) {
@@ -167,14 +183,18 @@ export async function getConversations(token, signal) {
   })
 }
 
+export async function deleteConversation(token, conversationId, signal) {
+  return request(`/api/conversations/${conversationId}`, { token, signal, method: 'DELETE' })
+}
+
 export async function getMessages(token, conversationId, signal) {
   const data = await request(`/api/conversations/${conversationId}/messages`, { token, signal })
   if (!Array.isArray(data)) throw apiError(GENERIC_ERROR)
   return data.map(safeMessage)
 }
 
-export async function sendMessage(token, conversationId, content, signal, replyToMessageId = null) {
-  return safeMessage(await request(`/api/conversations/${conversationId}/messages`, { token, signal, body: { content, reply_to_message_id: replyToMessageId } }))
+export async function sendMessage(token, conversationId, content, signal, replyToMessageId = null, clientMessageId = null) {
+  return safeMessage(await request(`/api/conversations/${conversationId}/messages`, { token, signal, body: { content, reply_to_message_id: replyToMessageId, client_message_id: clientMessageId } }))
 }
 
 export async function editMessage(token, messageId, content, signal) {
@@ -185,12 +205,13 @@ export async function deleteMessage(token, messageId, signal) {
   await request(`/api/messages/${messageId}`, { token, signal, method: 'DELETE' })
 }
 
-export async function sendImage(token, conversationId, file, caption, signal, replyToMessageId = null) {
+export async function sendImage(token, conversationId, file, caption, signal, replyToMessageId = null, clientMessageId = null, options = {}) {
   const body = new FormData()
-  body.append('file', file)
+  body.append('file', file, options.filename || file.name || `photo.${file.type === 'image/jpeg' ? 'jpg' : file.type === 'image/webp' ? 'webp' : 'png'}`)
   body.append('caption', caption)
+  if (clientMessageId) body.append('client_message_id', clientMessageId)
   if (replyToMessageId !== null) body.append('reply_to_message_id', String(replyToMessageId))
-  return safeMessage(await request(`/api/conversations/${conversationId}/messages/image`, { token, signal, body }))
+  return safeMessage(await request(`/api/conversations/${conversationId}/messages/image`, { token, signal, body, upload: options }))
 }
 
 export async function getAttachmentBlob(token, attachmentId, signal) {
@@ -229,4 +250,10 @@ export async function synchronize(token, conversationId, after, messageIds, sign
 
 export async function markConversationRead(token, conversationId, through, signal, read = true) {
   return request(`/api/conversations/${conversationId}/receipts`, { token, signal, body: { through, read } })
+}
+
+export async function getPresence(token, signal) {
+  const data = await request('/api/users/presence', { token, signal })
+  if (!Array.isArray(data?.users) || !Number.isFinite(Date.parse(data.server_time)) || !data.users.every(item => Number.isSafeInteger(item.user_id) && typeof item.online === 'boolean' && (item.last_seen_at === null || Number.isFinite(Date.parse(item.last_seen_at))))) throw apiError(GENERIC_ERROR)
+  return data
 }

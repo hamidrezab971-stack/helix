@@ -1,0 +1,154 @@
+{
+  "scope": "isolated host qualification; public production cutover not approved",
+  "base_helix_commit": "78530d5031739eee409541001fe39b59b32d9b9c",
+  "sources": {
+    "node-exporter": {
+      "commit": "6044da783597cc3b57aef7580ddcdcff58a4ee99",
+      "patch_file": "node-exporter.patch",
+      "qualified_binary_selected": true
+    },
+    "prometheus": {
+      "commit": "007a9e9ba628f815ce83e1ba9f29b97981996c3c",
+      "patch_file": "prometheus.patch",
+      "qualified_binary_selected": false
+    },
+    "grafana": {
+      "commit": "af4a33e3786594ad72f72d97e6744010330c2977",
+      "patch_file": "grafana.patch",
+      "qualified_binary_selected": false
+    },
+    "grafana-prometheus": {
+      "commit": "6d21418acde6ce31c9f7a6418a88758842a881bb",
+      "patch_file": "grafana-prometheus.patch",
+      "qualified_binary_selected": false
+    }
+  },
+  "compiler_images": {
+    "go1.26.9": "golang:1.26.9@sha256:37cfcca63222ec499bec5e8ad7aad52dbf7529db36d5812b8eae2f0621aa92d6",
+    "go1.27.2": "golang:1.27.2@sha256:820153096fda4de6ac1b7194d12e416b7dd8f4e9a33d17e0345b111b945162d8"
+  },
+  "compiler_final_results": {
+    "grafana": {
+      "exit_code": 2,
+      "memory_limit_bytes": 2147483648
+    },
+    "prometheus": {
+      "exit_code": 1,
+      "memory_limit_bytes": 2147483648
+    }
+  },
+  "go_checksum_verification": true,
+  "module_proxy_fallback": "https://proxy.golang.org|https://goproxy.cn|direct",
+  "overlay_dockerfile": "monitoring-overlay.Dockerfile",
+  "grafana_main": "unmodified official binary; patched build failed at link",
+  "grafana_active_prometheus_plugin": "original publisher-signed 13.2.3 retained; local Mage build NOT installed",
+  "grafana_removed_disabled_datasources": [
+    "elasticsearch",
+    "grafana-postgresql-datasource",
+    "grafana-pyroscope-datasource",
+    "influxdb",
+    "jaeger",
+    "loki",
+    "mssql",
+    "mysql",
+    "opentsdb",
+    "stackdriver",
+    "tempo",
+    "zipkin"
+  ],
+  "prometheus": "official 3.13.4 retained; patched build failed at link",
+  "node_exporter": "same-release patched binary, Go1.26.10, full upstream tests passed; selected and scanned",
+  "selected_images": {
+    "app": {
+      "reference": "helix@sha256:6dd818b91b1de902c806a7f1ebbead3be46e1a7a3efca78fa4dfa3a9232e3271",
+      "docker_id": "sha256:6dd818b91b1de902c806a7f1ebbead3be46e1a7a3efca78fa4dfa3a9232e3271",
+      "reference_digest": "sha256:6dd818b91b1de902c806a7f1ebbead3be46e1a7a3efca78fa4dfa3a9232e3271",
+      "manifest_digest": "sha256:3c7dff50f3c384120eb081b37807da920fd3b0f4b9bb115dbde9d824b1ef6335",
+      "config_id": "sha256:df0b8766a1bc53560cecb04f3805ea79fdffe6a25b7b14fa0de0854664b1c5d3",
+      "archive_sha256": "5d4b2bb164b0fb1bd6fb1777de45ae50008230988d99efe0e969f844472cd93f"
+    },
+    "prometheus": {
+      "reference": "prom/prometheus:v3.13.4@sha256:87861b8cf91579109319ebc300f3f1060e6da9c05d6ae8ad15a20c879e84e32e",
+      "docker_id": "sha256:87861b8cf91579109319ebc300f3f1060e6da9c05d6ae8ad15a20c879e84e32e",
+      "reference_digest": "sha256:87861b8cf91579109319ebc300f3f1060e6da9c05d6ae8ad15a20c879e84e32e",
+      "manifest_digest": "sha256:2b23972d85f7f1350cde18fb61239d6fc8669a5b8fe162ab569373d3ad3463d2",
+      "config_id": "sha256:18c7f43a2e30f36002a693de304c7407a30edd4c41d5311c8fb4093d5da25cc8",
+      "archive_sha256": "8dd83acb88bcc68b65875ea2cfb89c8419bd1fdbe357774b3fc76820168c0b1d"
+    },
+    "grafana": {
+      "reference": "helix-grafana@sha256:0ba86c2c8d85e837751858ad99a0882757fec868208b6b01902887e2593442d9",
+      "docker_id": "sha256:0ba86c2c8d85e837751858ad99a0882757fec868208b6b01902887e2593442d9",
+      "reference_digest": "sha256:0ba86c2c8d85e837751858ad99a0882757fec868208b6b01902887e2593442d9",
+      "manifest_digest": "sha256:9a67e647a4151f42cbe852902ad93c31c7b7aa9eb7445e65d75097708de6a8c5",
+      "config_id": "sha256:cab75e486ff10b57fd72717f0f918136ba11290362837958475187a7a1e7b100",
+      "archive_sha256": "ab1e112db5c7d3a62526a2f6b3907bb2e16a80a907fc3bfe831382b86d8c3c06"
+    },
+    "node-exporter": {
+      "reference": "helix-node-exporter@sha256:c3f91da714ada22d873de8fb66a6c6fec8bc9bd34f6bbbfacebff5089c3246df",
+      "docker_id": "sha256:c3f91da714ada22d873de8fb66a6c6fec8bc9bd34f6bbbfacebff5089c3246df",
+      "reference_digest": "sha256:c3f91da714ada22d873de8fb66a6c6fec8bc9bd34f6bbbfacebff5089c3246df",
+      "manifest_digest": "sha256:4130782884af6f0f3ae88a6166db6890202d33a4392587520a1a2227428881ed",
+      "config_id": "sha256:e2e2b5b3665812d91f9fb99f7e8380661c06311def01b1acb53f68de34a6e481",
+      "archive_sha256": "1278056a13f134e4090b6e6a6800ec3c2b6ad5f648d6a3a04bee38bf923bf46a"
+    }
+  },
+  "pillow13_wheel": {
+    "package": "Pillow",
+    "version": "13.0.0",
+    "file": "pillow-13.0.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+    "sha256": "42d63be3af4f9b951b199b0a9d23365d37ab14687e6d77b74940432c8515c4ca",
+    "canonical_url": "https://files.pythonhosted.org/packages/e6/99/fdf65cc539e266ab93546c261bdf98411fe165c6e4e13f9dbf597097192b/pillow-13.0.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+    "download_url": "https://pypi.mirrors.ustc.edu.cn/packages/e6/99/fdf65cc539e266ab93546c261bdf98411fe165c6e4e13f9dbf597097192b/pillow-13.0.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+    "hash_source": "https://pypi.org/pypi/Pillow/13.0.0/json"
+  },
+  "security_after": {
+    "app": {
+      "LOW": 63,
+      "HIGH": 44,
+      "MEDIUM": 68,
+      "UNKNOWN": 1
+    },
+    "prometheus": {
+      "LOW": 6,
+      "MEDIUM": 30,
+      "UNKNOWN": 2,
+      "HIGH": 12
+    },
+    "grafana": {
+      "MEDIUM": 16,
+      "HIGH": 11,
+      "UNKNOWN": 1,
+      "LOW": 1
+    },
+    "node-exporter": {
+      "UNKNOWN": 1
+    }
+  },
+  "scanner": {
+    "image": "aquasec/trivy:0.76.0@sha256:2416d1f74045b57274df1a340eee6b510cacd73c66a6ccb8da092b117eb7d222",
+    "database": {
+      "Version": 2,
+      "NextUpdate": "2026-10-22T07:13:45.702546867Z",
+      "UpdatedAt": "2026-10-21T07:13:45.702547343Z",
+      "DownloadedAt": "2026-10-21T10:45:40.623919046Z"
+    },
+    "database_repository": "public.ecr.aws/aquasecurity/trivy-db:2"
+  },
+  "selected_node_exporter_compiler": {
+    "Path": "golang.org/toolchain",
+    "Version": "v0.0.1-go1.26.10.linux-amd64",
+    "Sum": "h1:5VAGHlY8yl8pTPVSNIez3SNMy6fWabs+QMR25f3oMT0=",
+    "GoModSum": "h1:8wlg68NqwW7eMnI1aABk/C2pDYXj8mrMY4TyRfiLeS0=",
+    "base_image": "golang:1.26.9@sha256:37cfcca63222ec499bec5e8ad7aad52dbf7529db36d5812b8eae2f0621aa92d6",
+    "checksum_verification": true
+  },
+  "stable_os_updates": {
+    "ca-certificates": "20250419+deb13u1",
+    "liblzma5": "5.8.1-1+deb13u2"
+  },
+  "runtime_build_input_sha256": {
+    "Dockerfile": "242ee05158224a345107593eea6fc43477466e5eeaf3a47d354fe81c275484ba",
+    "smooth/backend/requirements.lock": "4a0e77b761050dc3ded72c7f3f3f419f15eda46287256d19332498f3bf8a7090",
+    "infra/security/monitoring-overlay.Dockerfile": "560b7335eeeb748341f19189f48a091a54ae5d752eed37e40478d966f89426a3"
+  }
+}

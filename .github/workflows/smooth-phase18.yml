@@ -1,0 +1,54 @@
+name: Smooth regression checks
+on:
+  pull_request:
+    paths: ['smooth/**', '.github/workflows/smooth-phase18.yml']
+  push:
+    branches: [main, 'phase18-*', 'phase20.4-*', 'phase21.1-*']
+    paths: ['smooth/**', '.github/workflows/smooth-phase18.yml']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: smooth/frontend/package-lock.json
+      - name: Install backend and test dependencies
+        working-directory: smooth/backend
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -r requirements-test.txt
+      - name: Backend regressions
+        working-directory: smooth/backend
+        run: .venv/bin/python -m unittest discover -s tests -v
+      - name: Frontend unit checks and production build
+        working-directory: smooth/frontend
+        run: |
+          npm ci
+          npm test
+          npm run build
+      - name: Install browser tooling separately
+        run: |
+          npm install --prefix /tmp/smooth-browser-check playwright@1.64.1
+          /tmp/smooth-browser-check/node_modules/.bin/playwright install --with-deps chromium
+      - name: Complete browser regressions including Phase 21.1
+        working-directory: smooth/frontend
+        env:
+          NODE_PATH: /tmp/smooth-browser-check/node_modules
+          HELIX_BROWSER_ARTIFACTS: ${{ runner.temp }}/helix-browser-evidence
+        run: npm run test:browser
+      - name: Preserve sanitized browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: helix-browser-evidence
+          path: ${{ runner.temp }}/helix-browser-evidence
+          if-no-files-found: ignore

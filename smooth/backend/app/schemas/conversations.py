@@ -1,4 +1,5 @@
 from datetime import datetime
+from uuid import UUID
 from typing import Annotated
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
@@ -12,6 +13,7 @@ def trim_content(value: object) -> object:
 
 
 class MessageRequest(BaseModel):
+    client_message_id: UUID | None = None
     content: Annotated[str, BeforeValidator(trim_content)] = Field(
         min_length=1, max_length=2000
     )
@@ -41,6 +43,7 @@ class MessageResponse(BaseModel):
 
     id: int
     conversation_id: int
+    client_message_id: str | None = None
     sender_id: int
     content: str
     created_at: datetime

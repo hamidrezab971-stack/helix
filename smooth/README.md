@@ -1,9 +1,11 @@
+Phase 20 authentication requires a local ALTCHA solution on login and registration. See [PHASE20.md](PHASE20.md) for the API, migration and release gates.
+
 # Smooth
 
 Smooth is a lightweight web-based messaging application. Native FastAPI/browser
 WebSockets deliver persisted messages, presence, and typing indicators.
 HTTP remains responsible for creating messages. Delivered/Read receipts are
-persistent; presence and typing remain temporary state. Phase 17 adds bounded
+persistent; online and typing are temporary while last-seen timestamps persist. Phase 17 adds bounded
 message history, stable scroll navigation, and durable realtime recovery.
 
 ## Technology stack
@@ -15,6 +17,10 @@ message history, stable scroll navigation, and durable realtime recovery.
 
 The backend uses the existing SQLAlchemy and python-dotenv dependencies for
 database setup and environment configuration.
+
+For a production container, persistent storage, and an HTTPS app domain, see
+[Deploy Smooth](DEPLOYMENT.md). The deployment image serves the frontend, API,
+and WebSockets together on one origin.
 
 ## Project structure
 
@@ -221,7 +227,7 @@ the open chat shows typing only for its other member. Input renews typing at mos
 every two seconds, stops after two seconds of inactivity, and stops on clearing,
 successful sending, or switching chats. Received typing expires after four seconds
 without an update. Presence and typing are in-memory, single-process state and are
-not persisted; there are no presence/typing tables or last-seen timestamps.
+not persisted as online/typing state. Phase 18 separately persists server UTC last-seen timestamps; see [Phase 18](PHASE18.md) for scoped visibility and heartbeat semantics.
 
 ## Message receipts
 
@@ -265,7 +271,7 @@ restores statuses after refresh. No schema migration tool is required.
   committed deletions broadcast `message:deleted` with `message_id` and
   `conversation_id`, to all connected conversation-member tabs.
 
-Outgoing bubbles have Edit/Save/Cancel and a confirmed Delete action. Changes are
+Outgoing messages offer Edit/Delete in the context menu; Save/Cancel appear in the composer and deletion requires confirmation. Changes are
 server-confirmed, with retryable errors; edited bubbles show Edited. HTTP history
 remains authoritative for offline clients. New tables are created automatically
 without altering existing message columns. A tiny `message_id_sequence` table
@@ -349,7 +355,7 @@ summaries, preserving the correct selected state without a request per message.
 Shared edit events omit personalized reactions. Recovery refreshes loaded
 reactions; history restores them after refresh or offline login.
 
-The React button opens a six-emoji picker. Existing reactions show counts and
+The contextual message menu offers a six-emoji picker. Existing reactions show counts and
 selected state, support keyboard use, and display retryable errors. Requests
 are cancelled when switching chats, and older responses cannot overwrite newer
 summaries. Reactions do not change activity ordering, unread counts, receipts,
@@ -521,3 +527,12 @@ visibility, lazy images, mobile and keyboard navigation, retention/expiry resets
 deleted-window recovery, and dropped frames on a healthy socket. Backend tests
 also cover cursor authorization, failed-transaction rollback, retention floors,
 and idempotent migration without rewriting existing messages.
+
+## Phase 18: fluid messaging
+
+[Phase 18 implementation and validation](PHASE18.md) documents the full-height
+mobile/desktop shell, grouped bubbles, media viewer, contextual actions,
+UUID-keyed optimistic outbox, atomic send idempotency and durable scoped last seen.
+It includes migration/wire contracts, test commands, evidence and release gates.
+The local implementation is pending full runtime verification; see that record
+before deployment. The single-worker presence limitation still applies.

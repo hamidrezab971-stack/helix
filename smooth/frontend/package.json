@@ -9,7 +9,16 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node tests/phase18-unit.mjs && node tests/presence-unit.mjs && node tests/phase19-unit.mjs && node tests/phase191-unit.mjs && node tests/phase20-unit.mjs && node tests/phase204-unit.mjs && node tests/phase211-unit.mjs && node tests/browser-diagnostics-unit.cjs && node tests/run-components.mjs",
+    "test:interop": "node tests/phase20-interop.mjs",
+    "test:browser": "node tests/run-browser.cjs",
+    "test:browser:phase18": "node tests/run-browser.cjs phase18",
+    "test:browser:phase19": "node tests/run-browser.cjs phase19",
+    "dev:phase19": "node scripts/preview-phase19.mjs",
+    "dev:phase20": "node scripts/preview-phase19.mjs --phase20",
+    "test:browser:phase191": "node tests/run-browser.cjs phase191",
+    "test:browser:phase211": "node tests/run-browser.cjs phase211"
   },
   "dependencies": {
     "react": "19.3.0",

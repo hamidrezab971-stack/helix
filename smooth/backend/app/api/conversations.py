@@ -1,7 +1,8 @@
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Response, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, or_
+from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
@@ -9,7 +10,8 @@ from app.core.auth import get_current_user
 from app.database.database import get_db
 from app.models.conversation import Conversation
 from app.models.conversation_member import ConversationMember
-from app.models.message import Message
+from app.models.message import Message, MessageIdSequence
+from app.models.conversation_visibility import ConversationVisibility
 from app.models.message_edit import MessageEdit
 from app.models.message_receipt import MessageReceipt
 from app.models.message_attachment import MessageAttachment
@@ -20,6 +22,8 @@ from app.schemas.auth import UserResponse
 from app.services.messages import allocate_message_id, effective_message, reply_previews, validate_reply_target
 from app.services.reactions import reaction_summaries
 from app.services.sync import record_event
+from app.services.visibility import visible_message
+from app.services.idempotency import fingerprint, replay, remember
 from app.schemas.conversations import (
     ConversationResponse,
     MessageRequest,
@@ -44,13 +48,14 @@ def list_conversations(
             MessageReceipt.recipient_id == user.id,
             MessageReceipt.read_at.is_(None),
             Message.sender_id != user.id,
+            visible_message(user.id),
         )
         .group_by(Message.conversation_id)
         .subquery()
     )
     latest_message_id = (
         select(Message.id)
-        .where(Message.conversation_id == Conversation.id)
+        .where(Message.conversation_id == Conversation.id, visible_message(user.id))
         .order_by(Message.created_at.desc(), Message.id.desc())
         .limit(1)
         .correlate(Conversation)
@@ -72,6 +77,9 @@ def list_conversations(
         .outerjoin(MessageEdit, MessageEdit.message_id == Message.id)
         .outerjoin(MessageAttachment, MessageAttachment.message_id == Message.id)
         .outerjoin(unread, unread.c.conversation_id == Conversation.id)
+        .outerjoin(ConversationVisibility, (ConversationVisibility.conversation_id == Conversation.id)
+                   & (ConversationVisibility.user_id == user.id))
+        .where(or_(ConversationVisibility.hidden.is_(None), ConversationVisibility.hidden.is_(False), Message.id.is_not(None)))
         .order_by(
             Message.created_at.is_(None), Message.created_at.desc(),
             Message.id.desc(), Conversation.id.desc(),
@@ -126,6 +134,10 @@ def get_or_create_conversation(
             if conversation is None:
                 raise
 
+    visibility = db.get(ConversationVisibility, (conversation.id, user.id))
+    if visibility and visibility.hidden:
+        visibility.hidden = False
+        db.commit()
     return ConversationResponse(
         id=conversation.id,
         created_at=conversation.created_at,
@@ -145,6 +157,34 @@ def require_membership(conversation_id: int, user_id: int, db: Session) -> None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
 
+@router.delete('/{conversation_id}')
+def delete_conversation(
+    conversation_id: Annotated[int, Path(gt=0, lt=2**63)],
+    background_tasks: BackgroundTasks,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    # Lock before reading the head/boundary. A concurrent send is serialized
+    # either before this clear, or after it with a strictly greater message ID.
+    connection = db.connection()
+    if not connection.connection.driver_connection.in_transaction:
+        connection.exec_driver_sql('BEGIN IMMEDIATE')
+    require_membership(conversation_id, user.id, db)
+    from app.services.sync import state_bounds
+    cutoff = max(db.scalar(select(func.max(Message.id))) or 0,
+                 db.scalar(select(MessageIdSequence.last_value).where(MessageIdSequence.id == 1)) or 0)
+    head, _ = state_bounds(db, conversation_id)
+    statement = insert(ConversationVisibility).values(conversation_id=conversation_id, user_id=user.id,
+        cleared_through_id=cutoff, cleared_event_id=head, hidden=True)
+    db.execute(statement.on_conflict_do_update(index_elements=['conversation_id', 'user_id'], set_={
+        'cleared_through_id': func.max(ConversationVisibility.cleared_through_id, cutoff),
+        'cleared_event_id': func.max(ConversationVisibility.cleared_event_id, head), 'hidden': True}))
+    db.commit()
+    result = {'conversation_id': conversation_id, 'cleared_through_id': cutoff}
+    background_tasks.add_task(manager.send_to_user, user.id, {'type': 'conversation:cleared', 'data': result})
+    return result
+
+
 @router.get("/{conversation_id}/messages", response_model=list[MessageResponse])
 def get_messages(
     conversation_id: Annotated[int, Path(gt=0, lt=2**63)],
@@ -157,10 +197,10 @@ def get_messages(
             .outerjoin(MessageReceipt, MessageReceipt.message_id == Message.id)
             .outerjoin(MessageEdit, MessageEdit.message_id == Message.id)
             .outerjoin(MessageAttachment, MessageAttachment.message_id == Message.id)
-            .where(Message.conversation_id == conversation_id)
+            .where(Message.conversation_id == conversation_id, visible_message(user.id))
             .order_by(Message.created_at.asc(), Message.id.asc())
         ))
-    previews = reply_previews(db, [row[0] for row in rows])
+    previews = reply_previews(db, [row[0] for row in rows], user.id)
     reactions = reaction_summaries(db, [row[0].id for row in rows], user.id)
     return [effective_message(message, receipt, edit, attachment, previews.get(message.id), reactions.get(message.id)) for message, receipt, edit, attachment in rows]
 
@@ -184,23 +224,33 @@ def send_message(
     recipient_ids = [member_id for member_id in member_ids if member_id != user.id]
     if len(recipient_ids) != 1:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    validate_reply_target(db, conversation_id, data.reply_to_message_id)
+    user_id = user.id
+    client_id = str(data.client_message_id) if data.client_message_id else None
+    digest = fingerprint(conversation_id, data.content, data.reply_to_message_id)
+    duplicate = replay(db, user_id, client_id, digest)
+    if duplicate is not None:
+        return duplicate
+    validate_reply_target(db, conversation_id, data.reply_to_message_id, user_id)
     try:
-        message = Message(id=allocate_message_id(db), conversation_id=conversation_id, sender_id=user.id, content=data.content)
+        message = Message(id=allocate_message_id(db), conversation_id=conversation_id, sender_id=user_id, content=data.content, client_message_id=client_id)
         db.add(message)
         db.flush()
         db.add(MessageReceipt(message_id=message.id, recipient_id=recipient_ids[0]))
         if data.reply_to_message_id is not None:
             db.add(MessageReply(message_id=message.id, reply_to_message_id=data.reply_to_message_id))
+        remember(db, message, digest)
         record_event(db, conversation_id, 'new', message.id)
         db.commit()
     except IntegrityError:
         db.rollback()
+        duplicate = replay(db, user_id, client_id, digest)
+        if duplicate is not None:
+            return duplicate
         if data.reply_to_message_id is not None:
             raise HTTPException(status_code=404, detail="Reply target not found") from None
         raise
     db.refresh(message)
-    saved = effective_message(message, None, None, reply_to=reply_previews(db, [message]).get(message.id))
+    saved = effective_message(message, None, None, reply_to=reply_previews(db, [message], user_id).get(message.id))
     background_tasks.add_task(
         manager.broadcast, member_ids,
         {"type": "message:new", "data": saved.model_dump(mode="json")},

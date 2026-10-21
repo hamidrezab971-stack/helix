@@ -24,6 +24,7 @@ from app.services.messages import effective_message, reply_previews
 from app.services.images import remove_image
 from app.services.reactions import reaction_summaries
 from app.services.sync import record_event
+from app.services.visibility import require_visible
 from app.core.reactions import ALLOWED_REACTIONS
 from app.schemas.reactions import ReactionRequest, ReactionSummary
 
@@ -35,6 +36,7 @@ def require_sender(message_id: int, user_id: int, db: Session) -> Message:
     if message is None or message.sender_id != user_id:
         raise HTTPException(status_code=404, detail="Message not found")
     require_membership(message.conversation_id, user_id, db)
+    require_visible(db, message, user_id)
     return message
 
 
@@ -66,7 +68,7 @@ def edit_message(
         ))
         edit = db.scalar(select(MessageEdit).where(MessageEdit.message_id == message_id))
         receipt = db.scalar(select(MessageReceipt).where(MessageReceipt.message_id == message_id))
-        saved = effective_message(message, receipt, edit, reply_to=reply_previews(db, [message]).get(message.id), reactions=reaction_summaries(db, [message_id], user.id).get(message_id))
+        saved = effective_message(message, receipt, edit, reply_to=reply_previews(db, [message], user.id).get(message.id), reactions=reaction_summaries(db, [message_id], user.id).get(message_id))
         record_event(db, message.conversation_id, 'updated', message_id)
         db.commit()
     except IntegrityError:
@@ -112,6 +114,7 @@ def require_message_member(message_id: int, user_id: int, db: Session) -> Messag
     if message is None:
         raise HTTPException(status_code=404, detail="Message not found")
     require_membership(message.conversation_id, user_id, db)
+    require_visible(db, message, user_id)
     return message
 
 

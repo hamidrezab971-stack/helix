@@ -15,6 +15,7 @@ from app.models.message_edit import MessageEdit
 from app.models.message_receipt import MessageReceipt
 from app.services.messages import effective_message, reply_previews
 from app.services.reactions import reaction_summaries
+from app.services.visibility import visible_message
 
 CURSOR_LIFETIME = 7 * 24 * 60 * 60
 # SQLite's CURRENT_TIMESTAMP omits fractions; SQLAlchemy writes six digits.
@@ -110,7 +111,7 @@ def message_query():
 
 def serialize_rows(db, rows, user_id):
     messages = [row[0] for row in rows]
-    replies = reply_previews(db, messages)
+    replies = reply_previews(db, messages, user_id)
     reactions = reaction_summaries(db, [message.id for message in messages], user_id)
     return [effective_message(message, receipt, edit, attachment, replies.get(message.id), reactions.get(message.id)).model_dump(mode='json')
             for message, receipt, edit, attachment in rows]
@@ -118,15 +119,15 @@ def serialize_rows(db, rows, user_id):
 
 def snapshot_metadata(db, conversation_id, user_id):
     head, _ = state_bounds(db, conversation_id)
-    latest = db.scalar(select(Message).where(Message.conversation_id == conversation_id).order_by(timeline_timestamp.desc(), Message.id.desc()).limit(1))
+    latest = db.scalar(select(Message).where(Message.conversation_id == conversation_id, visible_message(user_id)).order_by(timeline_timestamp.desc(), Message.id.desc()).limit(1))
     return {'read_through_id': latest.id if latest else None, 'event_id': head, 'sync_cursor': cursor('sync', conversation_id, s=head),
             'read_cursor': cursor('read', conversation_id, u=user_id, t=latest.created_at.isoformat(), i=latest.id) if latest else None}
 
 
 def page_response(db, conversation_id, user_id, rows):
     messages = [row[0] for row in rows]
-    older = bool(messages and db.scalar(select(Message.id).where(Message.conversation_id == conversation_id, older_than(messages[0].created_at, messages[0].id)).limit(1)))
-    newer = bool(messages and db.scalar(select(Message.id).where(Message.conversation_id == conversation_id, newer_than(messages[-1].created_at, messages[-1].id)).limit(1)))
+    older = bool(messages and db.scalar(select(Message.id).where(Message.conversation_id == conversation_id, visible_message(user_id), older_than(messages[0].created_at, messages[0].id)).limit(1)))
+    newer = bool(messages and db.scalar(select(Message.id).where(Message.conversation_id == conversation_id, visible_message(user_id), newer_than(messages[-1].created_at, messages[-1].id)).limit(1)))
     return {'items': serialize_rows(db, rows, user_id), 'has_more': older,
             'has_older': older, 'has_newer': newer,
             'next_cursor': message_cursor(messages[0]) if older else None,

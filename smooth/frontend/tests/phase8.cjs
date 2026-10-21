@@ -1,10 +1,13 @@
-// Run with Playwright installed separately and available through NODE_PATH.
+// Legacy behavioral coverage, using Phase 18 menus and composer controls.
 const { chromium, expect } = require('playwright/test')
 const assert = require('node:assert/strict')
 const { spawn, execFileSync } = require('node:child_process')
 const path = require('node:path')
 const fs = require('node:fs')
 const os = require('node:os')
+const assertPortFree = require('./ports.cjs')
+const { observe, captureFailure } = require('./browser-diagnostics.cjs')
+const backend = require('./backend-origin.cjs')
 
 const backendDirectory = path.resolve(__dirname, '../../backend')
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'smooth-phase8-'))
@@ -14,31 +17,91 @@ const suffix = Date.now()
 const names = { alice: `alice_${suffix}`, bob: `bob_${suffix}`, charlie: `charlie_${suffix}` }
 
 async function startBackend() {
-  server = spawn(path.join(backendDirectory, '.venv/bin/python'), ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000'], {
+  await assertPortFree(backend.port)
+  server = spawn(process.env.HELIX_QA_PYTHON || path.join(backendDirectory, '.venv/bin/python'), ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(backend.port)], {
     cwd: backendDirectory,
-    env: { ...process.env, DATABASE_URL: `sqlite:///${temporary}/test.db`, SECRET_KEY: 'phase8-browser-test-only-secret-123456789', ACCESS_TOKEN_EXPIRE_MINUTES: '60', FRONTEND_ORIGIN: 'http://127.0.0.1:5173', UPLOAD_DIR: `${temporary}/uploads` },
-    stdio: 'ignore',
+    env: { ...process.env, DATABASE_URL: `sqlite:///${temporary}/test.db`, SECRET_KEY: 'phase8-browser-test-only-secret-123456789', ACCESS_TOKEN_EXPIRE_MINUTES: '60', FRONTEND_ORIGIN: 'http://127.0.0.1:5173', UPLOAD_DIR: `${temporary}/uploads`, FRONTEND_DIST_DIR: '', PYTHON_DOTENV_DISABLED: '1' },
+    stdio: backendLog(),
   })
   for (let attempt = 0; attempt < 100; attempt++) {
-    if (server.exitCode !== null) throw new Error('Test backend could not start; port 8000 must be free')
-    try { if ((await fetch('http://127.0.0.1:8000/')).ok) return } catch {}
+    if (server.exitCode !== null) throw new Error(`Test backend could not start on isolated port ${backend.port}`)
+    try { if ((await fetch(backend.origin + '/')).ok) return } catch {}
     await new Promise(resolve => setTimeout(resolve, 100))
   }
   throw new Error('Backend startup timed out')
 }
 
+function backendLog() {
+  if (!process.env.HELIX_BROWSER_ARTIFACTS) return 'ignore'
+  const directory = path.join(process.env.HELIX_BROWSER_ARTIFACTS, path.basename(process.argv[1], '.cjs'))
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 })
+  const log = fs.openSync(path.join(directory, 'backend.log'), 'a', 0o600)
+  // spawn duplicates these descriptors; close the parent's copy after spawn.
+  queueMicrotask(() => fs.closeSync(log))
+  console.log(`${new Date().toISOString()} backend start`)
+  return ['ignore', log, log]
+}
+
 async function stopBackend() {
   if (!server || server.exitCode !== null) return
+  console.log(`${new Date().toISOString()} backend stop`)
   const exited = new Promise(resolve => server.once('exit', resolve))
   server.kill('SIGTERM')
   await exited
 }
 
+async function presenceBody(page) {
+  // Read this dedicated real GET inside Fetch, while its document is alive.
+  // The hook aborts its initial refresh when the WS snapshot refreshes again;
+  // waitForResponse can select that cancelled request after its 200 headers.
+  const result = await page.evaluate(async () => {
+    const response = await fetch('/api/users/presence', {
+      headers: { Authorization: `Bearer ${localStorage.getItem('smooth_access_token')}` },
+      signal: AbortSignal.timeout(5000),
+    })
+    const headers = {}
+    for (const name of ['content-type', 'content-length', 'cache-control', 'date', 'server', 'connection', 'transfer-encoding']) {
+      const value = response.headers.get(name)
+      if (value !== null) headers[name] = value
+    }
+    return { status: response.status, headers, body: await response.text() }
+  })
+  // Never print tokens, bodies, peer identities or message contents.
+  console.log('Presence API ' + JSON.stringify({ method: 'GET', path: '/api/users/presence',
+    status: result.status, headers: result.headers, lifecycle: 'body consumed by browser Fetch' }))
+  assert.equal(result.status, 200)
+  assert.match(result.headers['content-type'], /^application\/json\b/)
+  const body = JSON.parse(result.body)
+  assert.ok(Array.isArray(body.users))
+  return body
+}
+
+async function withMissingLastSeen(userId, verify) {
+  // Seed the disposable DB, so the fallback uses a real API response too.
+  // Do not intercept/fulfill the request or change production data.
+  const python = path.join(backendDirectory, '.venv/bin/python')
+  const database = `${temporary}/test.db`
+  const previous = execFileSync(python, ['-c', `import sqlite3,sys,json
+db=sqlite3.connect(sys.argv[1])
+row=db.execute('SELECT last_seen_at FROM users WHERE id=?',(int(sys.argv[2]),)).fetchone()
+assert row is not None and row[0] is not None
+assert db.execute('UPDATE users SET last_seen_at=NULL WHERE id=?',(int(sys.argv[2]),)).rowcount==1
+db.commit()
+print(json.dumps(row[0]))`, database, String(userId)], { encoding: 'utf8' }).trim()
+  try { await verify() } finally {
+    execFileSync(python, ['-c', `import sqlite3,sys,json
+db=sqlite3.connect(sys.argv[1])
+assert db.execute('UPDATE users SET last_seen_at=? WHERE id=?',(json.loads(sys.argv[3]),int(sys.argv[2]))).rowcount==1
+db.commit()`, database, String(userId), previous])
+  }
+}
+
 async function newPage(context) {
   const page = await context.newPage()
+  observe(page)
   page.on('pageerror', error => errors.push(error.message))
   await page.addInitScript(() => {
-    window.realtimeTest = { authenticated: 0, closed: 0, events: [], received: [], sentTyping: [], statuses: [], mutations: [] }
+    window.realtimeTest = { authenticated: 0, closed: 0, events: [], received: [], sentTyping: [], statuses: [], mutations: [], cleared: [] }
     window.imageUrls = { created: [], revoked: [] }
     const originalCreate = URL.createObjectURL.bind(URL), originalRevoke = URL.revokeObjectURL.bind(URL)
     URL.createObjectURL = blob => { const url = originalCreate(blob); window.imageUrls.created.push(url); return url }
@@ -58,6 +121,7 @@ async function newPage(context) {
             if (data.type === 'message:new' && window.realtimeTest.dropNewMessage) event.stopImmediatePropagation()
             if (data.type === 'message:status') window.realtimeTest.statuses.push(data.data)
             if (data.type === 'message:updated') window.realtimeTest.mutations.push(data.data)
+            if (data.type === 'conversation:cleared') window.realtimeTest.cleared.push(data.data)
             if (data.type.startsWith('presence:') || data.type.startsWith('typing:')) window.realtimeTest.received.push(data)
           } catch {}
         })
@@ -81,19 +145,51 @@ async function registerAndLogin(page, name) {
   await page.locator('#register-username').fill(name)
   await page.locator('#register-password').fill('password123')
   await page.locator('#register-confirmation').fill('password123')
+  await require('./captcha.cjs').ready(page)
   await page.getByRole('button', { name: 'Create account', exact: true }).click()
   await page.locator('#login-password').fill('password123')
+  await require('./captcha.cjs').ready(page)
   await page.getByRole('button', { name: 'Log in', exact: true }).click()
   await page.waitForFunction(() => window.realtimeTest.authenticated === 1)
 }
 
+async function navigate(page, destination) {
+  const nav = page.getByRole('navigation', { name: 'Main navigation' })
+  const back = page.getByRole('button', { name: 'Back', exact: true })
+  // Login submits asynchronously. Wait for the authenticated layout before
+  // deciding whether mobile conversation navigation needs Back.
+  await expect.poll(async () => await nav.isVisible() || await back.isVisible(), {
+    message: 'Authenticated navigation or mobile conversation Back becomes visible',
+  }).toBe(true)
+  if (!await nav.isVisible()) {
+    await back.click()
+    await expect(nav).toBeVisible()
+  }
+  await nav.getByRole('button', { name: destination, exact: true }).click()
+  await expect(nav.getByRole('button', { name: destination, exact: true })).toHaveAttribute('aria-current', 'page')
+}
+
 async function select(page, name) {
-  // Search fetches the current directory, including users registered after
-  // this browser's initial directory request.
+  await navigate(page, 'Contacts')
   await page.locator('#user-search').fill(name)
   await directoryRow(page, name).click()
   await expect(page.locator('#message-content')).toBeEnabled()
-  await page.locator('#user-search').fill('')
+  if (!await page.evaluate(() => matchMedia('(max-width: 767px)').matches)) {
+    await expect(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Chats', exact: true })).toHaveAttribute('aria-current', 'page')
+  }
+}
+
+async function directoryPresence(page, name, state) {
+  await navigate(page, 'Contacts')
+  await page.locator('#user-search').fill(name)
+  await expect(directoryRow(page, name)).toContainText(state)
+  await navigate(page, 'Chats')
+  await recentPresence(page, name, state === 'online')
+}
+
+async function logout(page) {
+  await navigate(page, 'Profile')
+  await page.getByRole('button', { name: 'Log out', exact: true }).click()
 }
 
 function directoryRow(page, name) {
@@ -104,7 +200,24 @@ function recentRow(page, name) {
   return page.locator('.recent-row').filter({ hasText: `@${name}` })
 }
 
+async function recentPresence(page, name, online) {
+  const row = recentRow(page, name)
+  await expect(row).toHaveCount(1)
+  await expect(row.locator('.conversation-name')).toHaveText(`@${name}`)
+  // Profile and chat are separate sibling buttons; do not nest buttons to
+  // satisfy the legacy descendant locator. Scope the avatar to this list item.
+  const item = page.getByRole('listitem').filter({ has: row })
+  await expect(item).toHaveCount(1)
+  const profile = item.getByRole('button', { name: `View ${name}'s profile`, exact: true })
+  await expect(profile).toBeVisible()
+  const indicator = profile.locator('.avatar-presence')
+  await expect(indicator).toHaveCount(1)
+  await expect(indicator).toHaveAttribute('data-online', String(online))
+  await expect(indicator).toHaveCSS('opacity', online ? '1' : '0')
+}
+
 async function openRecent(page, name) {
+  await navigate(page, 'Chats')
   let creates = 0
   const observe = request => { if (request.method() === 'POST' && request.url().includes('/api/conversations/with/')) creates++ }
   page.on('request', observe)
@@ -145,11 +258,34 @@ async function unread(page, name, count) {
 }
 
 function messageRow(page, content) {
-  return page.locator('.chat-history li').filter({ has: page.locator('.message-bubble').filter({ hasText: content }) })
+  // Pending sends share the bubble text but have no message actions and are
+  // replaced during recovery. Resolve the persisted row before interacting.
+  return page.locator('.chat-history li[data-message-id]').filter({ has: page.locator('.message-bubble').filter({ hasText: content }) })
 }
 
+async function openMenu(page, row) {
+  const existing = page.getByRole('dialog')
+  if (await existing.count()) {
+    await page.keyboard.press('Escape')
+    await expect(existing).toHaveCount(0)
+  }
+  await row.scrollIntoViewIfNeeded()
+  // Scroll events intentionally dismiss message menus. Deliver the scroll and
+  // its layout frame before opening, and send Enter to the resolved bubble.
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  await row.locator('.message-bubble').press('Enter')
+  await expect(page.getByRole('dialog', { name: 'Message actions', exact: true })).toBeVisible()
+  return page.getByRole('dialog', { name: 'Message actions', exact: true })
+}
+async function action(page, row, name) {
+  const menu = await openMenu(page, row)
+  await menu.getByRole('button', { name, exact: true }).click()
+  if (name !== 'Delete') await expect(menu).toHaveCount(0)
+}
+async function reply(page, id) { await action(page, rowById(page, id), 'Reply') }
+
 async function edit(page, content, replacement) {
-  await messageRow(page, content).getByRole('button', { name: 'Edit', exact: true }).click()
+  await action(page, messageRow(page, content), 'Edit')
   await page.getByLabel('Edit message text', { exact: true }).fill(replacement)
   const response = page.waitForResponse(r => r.request().method() === 'PATCH' && r.url().includes('/api/messages/'))
   await page.getByRole('button', { name: 'Save', exact: true }).click()
@@ -158,10 +294,18 @@ async function edit(page, content, replacement) {
 }
 
 async function remove(page, content, expected = 204) {
-  page.once('dialog', dialog => dialog.accept())
-  const response = page.waitForResponse(r => r.request().method() === 'DELETE' && r.url().includes('/api/messages/'))
-  await messageRow(page, content).getByRole('button', { name: 'Delete', exact: true }).click()
-  assert.equal((await response).status(), expected)
+  const [response] = await Promise.all([
+    page.waitForResponse(r => r.request().method() === 'DELETE' && r.url().includes('/api/messages/')),
+    (async () => {
+      await action(page, messageRow(page, content), 'Delete')
+      await page.getByRole('dialog', { name: 'Delete this message?' }).getByRole('button', { name: 'Delete message', exact: true }).click()
+    })(),
+  ])
+  assert.equal(response.status(), expected)
+  // The HTTP response precedes React's removal/scroll commit. A following
+  // deletion must wait for the preceding row to leave the rendered list.
+  if (expected === 204) await expect(messageRow(page, content)).toHaveCount(0)
+  if (expected !== 204) { await expect(page.getByRole('dialog').getByRole('alert')).toContainText(/try again/i) }
 }
 
 function photo(page, id) {
@@ -196,7 +340,7 @@ function rowById(page, id) {
 }
 
 async function editById(page, id, content) {
-  await rowById(page, id).getByRole('button', { name: 'Edit', exact: true }).click()
+  await action(page, rowById(page, id), 'Edit')
   await page.getByLabel('Edit message text', { exact: true }).fill(content)
   const response = page.waitForResponse(r => r.request().method() === 'PATCH' && r.url().endsWith(`/api/messages/${id}`))
   await page.getByRole('button', { name: 'Save', exact: true }).click()
@@ -204,18 +348,18 @@ async function editById(page, id, content) {
 }
 
 async function removeById(page, id) {
-  page.once('dialog', dialog => dialog.accept())
   const response = page.waitForResponse(r => r.request().method() === 'DELETE' && r.url().endsWith(`/api/messages/${id}`))
-  await rowById(page, id).getByRole('button', { name: 'Delete', exact: true }).click()
+  await action(page, rowById(page, id), 'Delete')
+  await page.getByRole('dialog', { name: 'Delete this message?' }).getByRole('button', { name: 'Delete message', exact: true }).click()
   assert.equal((await response).status(), 204)
 }
 
 async function chooseReaction(page, id, name) {
-  await rowById(page, id).getByRole('button', { name: 'React', exact: true }).click()
+  await openMenu(page, rowById(page, id))
   const response = page.waitForResponse(r => r.url().includes(`/api/messages/${id}/reactions`) && ['POST', 'DELETE'].includes(r.request().method()))
-  await rowById(page, id).getByRole('group', { name: 'Choose reaction' }).getByRole('button', { name: new RegExp(`^(Add|Remove) ${name} reaction$`) }).click()
+  await page.getByRole('dialog').getByRole('group', { name: 'Choose reaction' }).getByRole('button', { name: new RegExp(`^(Add|Remove) ${name} reaction$`) }).click()
   assert.ok([200, 201].includes((await response).status()))
-  await expect(rowById(page, id).getByRole('group', { name: 'Choose reaction' })).toHaveCount(0)
+  await expect(page.getByRole('group', { name: 'Choose reaction' })).toHaveCount(0)
 }
 
 async function reaction(page, id, name, count, mine = false) {
@@ -238,6 +382,7 @@ async function main() {
   await expect(alice.getByText('No conversations yet.')).toBeVisible()
   await registerAndLogin(bob, names.bob)
   await registerAndLogin(charlie, names.charlie)
+  await navigate(alice, 'Contacts')
   await alice.locator('#user-search').fill(names.bob.toUpperCase())
   await expect(directoryRow(alice, names.bob)).toBeVisible()
   await alice.locator('#user-search').fill('')
@@ -247,9 +392,9 @@ async function main() {
   const bobTab = await newPage(bobContext)
   await bobTab.waitForFunction(() => window.realtimeTest.authenticated === 1)
   await select(bobTab, names.alice)
-  await expect(directoryRow(alice, names.bob)).toContainText('Online')
-  await expect(directoryRow(bob, names.alice)).toContainText('Online')
-  for (const page of [alice, bob]) await expect(page.getByLabel('Contact presence')).toHaveText('Online')
+  await directoryPresence(alice, names.bob, 'online')
+  await directoryPresence(bob, names.alice, 'online')
+  for (const page of [alice, bob]) await expect(page.getByLabel('Contact presence')).toHaveText('online')
   const aliceId = await bob.evaluate(() => window.realtimeTest.received.find(e => e.type === 'presence:snapshot').data.online_user_ids[0])
   assert.ok(aliceId > 0)
   const typing = bob.getByLabel('Typing indicator')
@@ -286,13 +431,13 @@ async function main() {
   await alice.locator('#message-content').fill('closing draft')
   await expect(typing).not.toHaveText('')
   await alice.close()
-  await expect(directoryRow(bob, names.alice)).toContainText('Offline')
+  await directoryPresence(bob, names.alice, 'offline')
   await expect(typing).toHaveText('', { timeout: 5500 })
   alice = await newPage(aliceContext)
   await alice.waitForFunction(() => window.realtimeTest.authenticated === 1)
   await select(alice, names.bob)
-  await expect(directoryRow(bob, names.alice)).toContainText('Online')
-  await expect(alice.getByLabel('Contact presence')).toHaveText('Online')
+  await directoryPresence(bob, names.alice, 'online')
+  await expect(alice.getByLabel('Contact presence')).toHaveText('online')
   console.log('PASS presence snapshot, typing start/stop, throttling, continued typing, clear input, switching, stale expiry, unexpected tab close/reconnect')
   await select(bob, names.charlie)
   await select(bobTab, names.charlie)
@@ -313,7 +458,7 @@ async function main() {
   await status(alice, 'hello bob', 'Delivered')
   await expect(recentRow(alice, names.bob).getByLabel('Last message preview')).toHaveText('You: hello bob')
   await expect(recentRow(alice, names.bob).locator('time')).toHaveText(/\S/)
-  await expect(recentRow(alice, names.bob)).toContainText('Online')
+  await recentPresence(alice, names.bob, true)
   await select(bob, names.alice)
   await status(alice, 'hello bob', 'Read')
   await select(bobTab, names.alice)
@@ -350,11 +495,51 @@ async function main() {
   await once(alice, 'other conversation')
   await status(bob, 'other conversation', 'Read')
   await bobTab.close()
-  await expect(alice.getByLabel('Contact presence')).toHaveText('Online')
+  await expect(alice.getByLabel('Contact presence')).toHaveText('online')
   assert.equal(await alice.evaluate(() => window.realtimeTest.received.filter(e => e.type === 'presence:update' && e.data.status === 'offline').length), 0)
-  await bob.getByRole('button', { name: 'Log out' }).click()
+  await logout(bob)
   await bob.waitForFunction(() => window.realtimeTest.closed >= 1)
-  await expect(alice.getByLabel('Contact presence')).toHaveText('Offline')
+  await expect(alice.getByLabel('Contact presence')).toHaveText(/last seen just now|last seen \d+ minutes? ago/)
+  await recentPresence(alice, names.bob, false)
+  const offlinePresence = await alice.evaluate(() => window.realtimeTest.received.findLast(e => e.type === 'presence:update' && e.data.status === 'offline').data)
+  assert.ok(Number.isSafeInteger(offlinePresence.revision))
+  assert.ok(Number.isFinite(Date.parse(offlinePresence.last_seen_at)))
+  assert.ok(Date.parse(offlinePresence.server_time) >= Date.parse(offlinePresence.last_seen_at))
+  // Exercise the real WebSocket parser with a delayed event from BEFORE logout.
+  await alice.evaluate(async data => {
+    window.realtimeTest.socket.dispatchEvent(new MessageEvent('message', {
+      data: JSON.stringify({ type: 'presence:update', data: { ...data, status: 'online', revision: data.revision - 1 } }),
+    }))
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  }, offlinePresence)
+  await expect(alice.getByLabel('Contact presence')).toHaveText(/last seen just now|last seen \d+ minutes? ago/)
+  // Refresh obtains the same persisted timestamp, without an offline WS event.
+  await alice.reload()
+  await alice.waitForFunction(() => window.realtimeTest.authenticated === 1)
+  const persistedPresenceBody = await presenceBody(alice)
+  assert.ok(persistedPresenceBody.users.some(peer => peer.user_id === offlinePresence.user_id && peer.last_seen_at === offlinePresence.last_seen_at))
+  await select(alice, names.bob)
+  await expect(alice.getByLabel('Contact presence')).toHaveText(/last seen just now|last seen \d+ minutes? ago/)
+  const beforePresenceReconnect = await alice.evaluate(() => window.realtimeTest.authenticated)
+  await alice.evaluate(() => window.realtimeTest.socket.close())
+  await alice.waitForFunction(previous => window.realtimeTest.authenticated > previous, beforePresenceReconnect)
+  await expect(alice.getByLabel('Contact presence')).toHaveText(/last seen just now|last seen \d+ minutes? ago/)
+  // A separate explicit missing-data fixture must render the honest fallback.
+  await withMissingLastSeen(offlinePresence.user_id, async () => {
+    await alice.reload()
+    await alice.waitForFunction(() => window.realtimeTest.authenticated === 1)
+    const missingPresenceBody = await presenceBody(alice)
+    assert.ok(missingPresenceBody.users.some(peer => peer.user_id === offlinePresence.user_id && peer.last_seen_at === null))
+    await select(alice, names.bob)
+    await expect(alice.getByLabel('Contact presence')).toHaveText('offline')
+  })
+  await alice.reload()
+  await alice.waitForFunction(() => window.realtimeTest.authenticated === 1)
+  const restoredPresenceBody = await presenceBody(alice)
+  assert.ok(restoredPresenceBody.users.some(peer => peer.user_id === offlinePresence.user_id && peer.last_seen_at === offlinePresence.last_seen_at))
+  await select(alice, names.bob)
+  await expect(alice.getByLabel('Contact presence')).toHaveText(/last seen just now|last seen \d+ minutes? ago/)
+  console.log('PASS immediate last seen, persisted refresh, observer reconnect, stale online event and missing-timestamp fallback')
   const logoutEvents = await bob.evaluate(() => window.realtimeTest.events.length)
   const offlineMessage = await send(alice, 'offline recipient')
   await status(alice, 'offline recipient', 'Sent')
@@ -366,8 +551,21 @@ async function main() {
   assert.equal(await bob.evaluate(() => window.realtimeTest.events.length), logoutEvents)
   await bob.locator('#login-username').fill(names.bob)
   await bob.locator('#login-password').fill('password123')
+  await require('./captcha.cjs').ready(bob)
+  // Keep login pending after click returns: navigation must wait for the real
+  // authenticated layout rather than commit to a nonexistent Back button.
+  await bob.route('**/api/auth/login', async route => {
+    await new Promise(resolve => setTimeout(resolve, 250))
+    await route.continue()
+  }, { times: 1 })
   await bob.getByRole('button', { name: 'Log in', exact: true }).click()
   await select(bob, names.alice)
+  await expect(alice.getByLabel('Contact presence')).toHaveText('online')
+  await alice.evaluate(async data => {
+    window.realtimeTest.socket.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ type: 'presence:update', data }) }))
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  }, offlinePresence)
+  await expect(alice.getByLabel('Contact presence')).toHaveText('online')
   await once(bob, 'offline recipient')
   await status(alice, 'offline recipient', 'Read')
   await alice.reload()
@@ -375,7 +573,7 @@ async function main() {
   await select(alice, names.bob)
   await status(alice, 'offline recipient', 'Read')
   await status(alice, 'hello bob', 'Read')
-  await expect(alice.getByLabel('Contact presence')).toHaveText('Online')
+  await expect(alice.getByLabel('Contact presence')).toHaveText('online')
   console.log('PASS conversation isolation, logout socket cleanup, offline recipient history')
 
   const beforeRestart = await Promise.all([alice, bob].map(page => page.evaluate(() => window.realtimeTest.authenticated)))
@@ -387,7 +585,8 @@ async function main() {
   for (const [index, page] of [alice, bob].entries()) {
     await page.waitForFunction(previous => window.realtimeTest.authenticated > previous, beforeRestart[index])
   }
-  for (const page of [alice, bob]) await expect(page.getByLabel('Contact presence')).toHaveText('Online')
+  for (const page of [alice, bob]) await expect(page.getByLabel('Contact presence')).toHaveText('online')
+  await recentPresence(alice, names.bob, true)
   await send(bob, 'after restart')
   await once(alice, 'after restart')
   await once(bob, 'after restart')
@@ -422,23 +621,26 @@ async function main() {
   // Mobile switches between full-width list and chat; rows remain keyboard buttons.
   await alice.setViewportSize({ width: 375, height: 812 })
   await expect(alice.getByLabel('Recent conversations')).toBeHidden()
-  await expect(alice.getByRole('button', { name: 'Back to chats' })).toBeVisible()
-  await alice.getByRole('button', { name: 'Back to chats' }).click()
+  await expect(alice.getByRole('button', { name: 'Back' })).toBeVisible()
+  await alice.getByRole('button', { name: 'Back' }).click()
   await expect(alice.getByLabel('Recent conversations')).toBeVisible()
-  await expect(alice.locator('#message-content')).toHaveCount(0)
+  await expect(alice.locator('#message-content')).toBeHidden()
   await recentRow(alice, names.bob).focus()
   await alice.keyboard.press('Enter')
   await expect(alice.locator('#chat-title')).toHaveText(`@${names.bob}`)
   assert.equal(await alice.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
-  await alice.getByRole('button', { name: 'Back to chats' }).click()
-  await alice.setViewportSize({ width: 1280, height: 800 })
+  await alice.getByRole('button', { name: 'Back' }).click()
+  await expect(alice.locator('#message-content')).toBeHidden()
 
-  // Unread counts while on the list, with replay protection and a second tab.
+  // Keep the mobile list visible: expanding to desktop exposes the retained
+  // conversation, which correctly marks incoming messages read.
+  // Unread counts on the list, with replay protection and a second tab.
   await unread(alice, names.bob, 0)
   let third
   for (let index = 1; index <= 3; index++) {
     third = await send(bob, `unread batch ${index}`)
     await unread(alice, names.bob, index)
+    await status(bob, `unread batch ${index}`, 'Delivered')
     await unread(bob, names.alice, 0)
   }
   await expect(alice.locator('.recent-row').first()).toContainText(names.bob)
@@ -447,6 +649,8 @@ async function main() {
   const aliceTab = await newPage(aliceContext)
   await unread(aliceTab, names.bob, 3)
   await openRecent(alice, names.bob)
+  await alice.setViewportSize({ width: 1280, height: 800 })
+  await expect(alice.locator('#message-content')).toBeVisible()
   await status(bob, 'unread batch 3', 'Read')
   await unread(alice, names.bob, 0)
   await unread(aliceTab, names.bob, 0)
@@ -485,11 +689,12 @@ async function main() {
   await status(bob, 'switched conversation unread', 'Read')
   await unread(aliceTab, names.bob, 0)
   await aliceTab.close()
-  await alice.getByRole('button', { name: 'Log out' }).click()
-  await expect(directoryRow(bob, names.alice)).toContainText('Offline')
+  await logout(alice)
+  await directoryPresence(bob, names.alice, 'offline')
   for (let index = 1; index <= 4; index++) await send(bob, `offline unread ${index}`)
   await alice.locator('#login-username').fill(names.alice)
   await alice.locator('#login-password').fill('password123')
+  await require('./captcha.cjs').ready(alice)
   await alice.getByRole('button', { name: 'Log in', exact: true }).click()
   await unread(alice, names.bob, 4)
   await alice.setViewportSize({ width: 375, height: 812 })
@@ -497,7 +702,7 @@ async function main() {
   assert.equal(await alice.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
   await openRecent(alice, names.bob)
   await status(bob, 'offline unread 4', 'Read')
-  await alice.getByRole('button', { name: 'Back to chats' }).click()
+  await alice.getByRole('button', { name: 'Back' }).click()
   await unread(alice, names.bob, 0)
   await alice.setViewportSize({ width: 1280, height: 800 })
   console.log('PASS unread 1/3, duplicate delivery, read clear across tabs, active/hidden chats, switching, refresh/restart, offline four-message recovery, mobile badges')
@@ -507,12 +712,12 @@ async function main() {
   await openRecent(mutationTab, names.bob)
   await send(alice, 'Hello Bbo mutation')
   await status(alice, 'Hello Bbo mutation', 'Read')
-  await messageRow(alice, 'Hello Bbo mutation').getByRole('button', { name: 'Edit', exact: true }).click()
+  await action(alice, messageRow(alice, 'Hello Bbo mutation'), 'Edit')
   await alice.getByLabel('Edit message text', { exact: true }).fill('Cancelled draft')
-  await alice.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await alice.getByRole('button', { name: 'Cancel edit', exact: true }).click()
   await once(alice, 'Hello Bbo mutation')
   await alice.route('**/api/messages/*', route => route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"test unavailable"}' }))
-  await messageRow(alice, 'Hello Bbo mutation').getByRole('button', { name: 'Edit', exact: true }).click()
+  await action(alice, messageRow(alice, 'Hello Bbo mutation'), 'Edit')
   await alice.getByLabel('Edit message text', { exact: true }).fill('Hello Bob mutation')
   await alice.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(alice.getByRole('alert')).toContainText(/try again/i)
@@ -524,15 +729,20 @@ async function main() {
     await expect(messageRow(page, 'Hello Bob mutation').getByLabel('Edited message')).toHaveText('Edited')
   }
   await status(alice, 'Hello Bob mutation', 'Read')
-  await expect(messageRow(bob, 'Hello Bob mutation').getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0)
+  await openMenu(bob, messageRow(bob, 'Hello Bob mutation'))
+  await expect(bob.getByRole('dialog').getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0)
+  await expect(bob.getByRole('dialog').getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0)
+  await bob.keyboard.press('Escape')
   await expect(recentRow(alice, names.bob).getByLabel('Last message preview')).toHaveText('You: Hello Bob mutation')
   await edit(alice, 'Hello Bob mutation', 'Repeated edit mutation')
   await once(bob, 'Repeated edit mutation')
   await alice.reload()
   await openRecent(alice, names.bob)
   await once(alice, 'Repeated edit mutation')
-  alice.once('dialog', dialog => dialog.dismiss())
-  await messageRow(alice, 'Repeated edit mutation').getByRole('button', { name: 'Delete', exact: true }).click()
+  await action(alice, messageRow(alice, 'Repeated edit mutation'), 'Delete')
+  await alice.getByRole('dialog', { name: 'Delete this message?' }).getByRole('button', { name: 'Cancel', exact: true }).click()
+  await alice.keyboard.press('Escape')
+  await expect(alice.getByRole('dialog')).toHaveCount(0)
   await once(alice, 'Repeated edit mutation')
   await alice.route('**/api/messages/*', route => route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"test unavailable"}' }))
   await remove(alice, 'Repeated edit mutation', 503)
@@ -546,12 +756,13 @@ async function main() {
   await select(bob, names.alice)
   await expect(bob.locator('.message-bubble').filter({ hasText: 'Repeated edit mutation' })).toHaveCount(0)
 
-  await bob.getByRole('button', { name: 'Log out' }).click()
+  await logout(bob)
   await edit(alice, 'offline recipient', 'Offline edit persists')
   await send(alice, 'Removed while offline')
   await remove(alice, 'Removed while offline')
   await bob.locator('#login-username').fill(names.bob)
   await bob.locator('#login-password').fill('password123')
+  await require('./captcha.cjs').ready(bob)
   await bob.getByRole('button', { name: 'Log in', exact: true }).click()
   await select(bob, names.alice)
   await once(bob, 'Offline edit persists')
@@ -601,16 +812,26 @@ async function main() {
   assert.ok(await alice.evaluate(url => window.imageUrls.revoked.includes(url), cancelledUrl))
   alice.off('request', countUpload)
 
-  // Failed upload retains the selection and shows a retryable error.
+  // Invalid local bytes are rejected before sending. Preserve the original
+  // server-rejection assertions below using a valid, readable selection.
   await alice.getByLabel('Choose image', { exact: true }).setInputFiles({ name: 'fake.jpg', mimeType: 'image/jpeg', buffer: Buffer.from('not an image') })
+  await expect(alice.getByRole('alert')).toContainText('valid JPEG')
+  await expect(alice.getByAltText('Selected image preview')).toHaveCount(0)
+  await expect(alice.getByRole('button', { name: 'Send', exact: true })).toBeDisabled()
+  await alice.route('**/api/conversations/*/messages/image', route => route.fulfill({ status: 422, contentType: 'application/json', body: '{"detail":"Synthetic image rejection"}' }))
+  await alice.getByLabel('Choose image', { exact: true }).setInputFiles(jpeg)
+  await expect(alice.getByAltText('Selected image preview')).toBeVisible()
   await alice.getByRole('button', { name: 'Send', exact: true }).click()
   await expect(alice.getByRole('alert')).toContainText('valid JPEG')
   await expect(alice.getByAltText('Selected image preview')).toBeVisible()
   await alice.getByRole('button', { name: 'Remove image' }).click()
+  await alice.unroute('**/api/conversations/*/messages/image')
   const firstPhoto = await sendPhoto(alice, jpeg, 'Vacation photo')
   for (const page of [alice, bob, imageTab]) await visiblePhoto(page, firstPhoto.attachment.id)
   await status(alice, 'Vacation photo', 'Read')
-  await expect(messageRow(alice, 'Vacation photo').getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0)
+  await openMenu(alice, messageRow(alice, 'Vacation photo'))
+  await expect(alice.getByRole('dialog').getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0)
+  await alice.keyboard.press('Escape')
   await expect(recentRow(alice, names.bob).getByLabel('Last message preview')).toHaveText('You: Photo · Vacation photo')
   const secondPhoto = await sendPhoto(alice, png)
   for (const page of [alice, bob, imageTab]) await visiblePhoto(page, secondPhoto.attachment.id)
@@ -644,11 +865,12 @@ async function main() {
   await remove(alice, 'Unread photo')
   await expect(recentRow(alice, names.bob).getByLabel('Last message preview')).toHaveText('You: Photo · WEBP photo')
   assert.equal(fs.readdirSync(path.join(temporary, 'uploads/images')).length, 2)
-  await bob.getByRole('button', { name: 'Log out' }).click()
+  await logout(bob)
   const offlinePhoto = await sendPhoto(alice, jpeg, 'Offline photo')
   await status(alice, 'Offline photo', 'Sent')
   await bob.locator('#login-username').fill(names.bob)
   await bob.locator('#login-password').fill('password123')
+  await require('./captcha.cjs').ready(bob)
   await bob.getByRole('button', { name: 'Log in', exact: true }).click()
   await unread(bob, names.alice, 1)
   await openRecent(bob, names.alice)
@@ -675,12 +897,12 @@ async function main() {
   console.log('PASS image picker/cancel, failed upload retry, JPEG/PNG/WEBP, empty/captioned images, authenticated blob rendering/revocation, receipts/unread/previews, multiple tabs, deletion/files, offline history, refresh/restart, mobile')
 
   const question = await send(bob, 'Are you coming tonight?')
-  await rowById(alice, question.id).getByRole('button', { name: 'Reply', exact: true }).click()
+  await action(alice, rowById(alice, question.id), 'Reply')
   await expect(alice.getByLabel('Reply composer')).toContainText(names.bob)
   await expect(alice.getByLabel('Reply composer')).toContainText('Are you coming tonight?')
   await alice.getByRole('button', { name: 'Cancel reply' }).click()
   await expect(alice.getByLabel('Reply composer')).toHaveCount(0)
-  await rowById(alice, question.id).getByRole('button', { name: 'Reply', exact: true }).click()
+  await action(alice, rowById(alice, question.id), 'Reply')
   // A failed send retains the selected reply for retry.
   await alice.route('**/api/conversations/*/messages', route => route.request().method() === 'POST'
     ? route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"test unavailable"}' }) : route.continue())
@@ -709,25 +931,25 @@ async function main() {
   await expect(rowById(alice, answer.id).getByLabel('Reply preview')).toContainText('Are you coming tonight?')
   await editById(bob, question.id, 'Updated question tonight?')
   for (const page of [alice, bob]) await expect(rowById(page, answer.id).getByLabel('Reply preview')).toContainText('Updated question tonight?')
-  await rowById(alice, question.id).getByRole('button', { name: 'Reply', exact: true }).click()
+  await action(alice, rowById(alice, question.id), 'Reply')
   await openRecent(alice, names.charlie)
   await expect(alice.getByLabel('Reply composer')).toHaveCount(0)
   await openRecent(alice, names.bob)
 
-  await rowById(alice, offlinePhoto.id).getByRole('button', { name: 'Reply', exact: true }).click()
+  await action(alice, rowById(alice, offlinePhoto.id), 'Reply')
   await expect(alice.getByLabel('Reply composer')).toContainText('Photo · Offline photo')
   const photoAnswer = await send(alice, 'Reply to photo')
   await expect(rowById(bob, photoAnswer.id).getByLabel('Reply preview')).toContainText('Photo · Offline photo')
-  await rowById(alice, question.id).getByRole('button', { name: 'Reply', exact: true }).click()
+  await action(alice, rowById(alice, question.id), 'Reply')
   const photoToText = await sendPhoto(alice, png, 'Photo reply to text')
   assert.equal(photoToText.reply_to.id, question.id)
   await expect(rowById(bob, photoToText.id).getByLabel('Reply preview')).toContainText('Updated question tonight?')
   await visiblePhoto(bob, photoToText.attachment.id)
-  await rowById(alice, secondPhoto.id).getByRole('button', { name: 'Reply', exact: true }).click()
+  await action(alice, rowById(alice, secondPhoto.id), 'Reply')
   await expect(alice.getByLabel('Reply composer')).toContainText('Photo')
   const photoToPhoto = await sendPhoto(alice, webp, 'Photo reply to photo')
   await expect(rowById(bob, photoToPhoto.id).getByLabel('Reply preview')).toContainText('Photo')
-  await rowById(alice, photoToPhoto.id).getByRole('button', { name: 'Reply', exact: true }).click()
+  await action(alice, rowById(alice, photoToPhoto.id), 'Reply')
   const ownAnswer = await send(alice, 'Own message reply')
   assert.equal(ownAnswer.reply_to.id, photoToPhoto.id)
   assert.equal(ownAnswer.reply_to.reply_to, undefined)
@@ -781,13 +1003,13 @@ async function main() {
   await reaction(bob, reactionTarget.id, 'thumbs up', 1, true)
   await alice.route(`**/api/messages/${reactionTarget.id}/reactions`, route => route.request().method() === 'POST'
     ? route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"test unavailable"}' }) : route.continue())
-  await rowById(alice, reactionTarget.id).getByRole('button', { name: 'React', exact: true }).click()
-  await expect(rowById(alice, reactionTarget.id).getByRole('group', { name: 'Choose reaction' }).getByRole('button')).toHaveCount(6)
-  await rowById(alice, reactionTarget.id).getByRole('button', { name: 'Add sad reaction', exact: true }).click()
-  await expect(rowById(alice, reactionTarget.id).getByRole('alert')).toContainText('Unable to change reaction')
+  await openMenu(alice, rowById(alice, reactionTarget.id))
+  await expect(alice.getByRole('dialog').getByRole('group', { name: 'Choose reaction' }).getByRole('button')).toHaveCount(6)
+  await alice.getByRole('dialog').getByRole('button', { name: 'Add sad reaction', exact: true }).click()
+  await expect(alice.getByRole('dialog').getByRole('alert')).toContainText('Unable to change reaction')
   await reaction(alice, reactionTarget.id, 'thumbs up', 1, false)
   await alice.unroute(`**/api/messages/${reactionTarget.id}/reactions`)
-  await rowById(alice, reactionTarget.id).getByRole('button', { name: 'Add sad reaction', exact: true }).click()
+  await alice.getByRole('dialog').getByRole('button', { name: 'Add sad reaction', exact: true }).click()
   await reaction(alice, reactionTarget.id, 'sad', 1, true)
 
   // Capture an old response and release it after a newer socket-driven fetch.
@@ -842,13 +1064,14 @@ async function main() {
   await expect(rowById(historyTab, reactionTarget.id)).toContainText('Reaction Hello edited while loading')
   await reaction(historyTab, reactionTarget.id, 'heart', 1, true)
   await historyTab.close()
-  await bob.getByRole('button', { name: 'Log out' }).click()
+  await logout(bob)
   await chooseReaction(alice, offlinePhoto.id, 'heart')
   await reaction(alice, offlinePhoto.id, 'heart', 1, true)
   await chooseReaction(alice, photoAnswer.id, 'laughing')
   await reaction(alice, photoAnswer.id, 'laughing', 1, true)
   await bob.locator('#login-username').fill(names.bob)
   await bob.locator('#login-password').fill('password123')
+  await require('./captcha.cjs').ready(bob)
   await bob.getByRole('button', { name: 'Log in', exact: true }).click()
   await openRecent(bob, names.alice)
   await reaction(bob, offlinePhoto.id, 'heart', 1, false)
@@ -869,21 +1092,39 @@ async function main() {
   await alice.waitForFunction(previous => window.realtimeTest.authenticated > previous, beforeReactionRestart)
   await reaction(alice, offlinePhoto.id, 'heart', 1, true)
   await alice.setViewportSize({ width: 375, height: 812 })
-  await rowById(alice, offlinePhoto.id).getByRole('button', { name: 'React', exact: true }).click()
-  await expect(rowById(alice, offlinePhoto.id).getByRole('group', { name: 'Choose reaction' }).getByRole('button')).toHaveCount(6)
+  await openMenu(alice, rowById(alice, offlinePhoto.id))
+  await expect(alice.getByRole('dialog').getByRole('group', { name: 'Choose reaction' }).getByRole('button')).toHaveCount(6)
   assert.equal(await alice.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
-  await rowById(alice, offlinePhoto.id).getByRole('button', { name: 'React', exact: true }).click()
+  await alice.keyboard.press('Escape')
+  await expect(alice.getByRole('dialog')).toHaveCount(0)
   await alice.setViewportSize({ width: 1280, height: 800 })
   await reactionTab.close()
   console.log('PASS reaction picker/toggle, per-user flags, multiple emoji/users/tabs, failure retry, duplicate/out-of-order refresh, offline persistence, image/reply reactions, edit preservation, delete cleanup, no activity/unread/typing effects, mobile/restart')
 
   // Explicit failure and retry; no timer-based polling is used by the app.
-  await alice.route('**/api/conversations', route => route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"test unavailable"}' }))
+  await alice.route('**/api/conversations', async route => {
+    const clicked = await alice.evaluate(() => window.realtimeTest.retryConversationsClicked === true)
+    if (clicked) await route.continue()
+    else await route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"test unavailable"}' })
+  })
   await alice.reload()
   await expect(alice.getByText('Unable to load conversations.')).toBeVisible()
-  await alice.unroute('**/api/conversations')
-  await alice.getByRole('button', { name: 'Retry conversations' }).click()
+  // A realtime snapshot may refresh the list too. Keep failures enabled until
+  // the actual Retry click, so background recovery cannot remove the button.
+  await alice.evaluate(() => {
+    document.addEventListener('click', event => {
+      if (event.target.closest('button')?.textContent === 'Retry conversations') {
+        window.realtimeTest.retryConversationsClicked = true
+      }
+    }, { capture: true })
+  })
+  const [retryResponse] = await Promise.all([
+    alice.waitForResponse(response => response.url().endsWith('/api/conversations') && response.status() === 200),
+    alice.getByRole('button', { name: 'Retry conversations' }).click(),
+  ])
+  assert.equal(retryResponse.request().method(), 'GET')
   await expect(recentRow(alice, names.bob)).toBeVisible()
+  await alice.unroute('**/api/conversations')
   await alice.route('**/api/conversations', route => route.fulfill({ status: 401, contentType: 'application/json', body: '{"detail":"test expired"}' }))
   await alice.reload()
   await expect(alice.locator('#login-username')).toBeVisible()
@@ -907,11 +1148,11 @@ async function main() {
   console.log('PASS inactive Delivered, active Read, receipt-before-HTTP race, multiple-tab receipts, offline Sent/history Read, refresh persistence, forged acknowledgements, 24 persisted receipts')
 }
 
-if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 }).finally(async () => {
+if (require.main === module) main().catch(async error => { console.error(error); process.exitCode = 1; await captureFailure(browser, error) }).finally(async () => {
   if (browser) await browser.close()
   await stopBackend()
   fs.rmSync(temporary, { recursive: true, force: true })
 })
 
 module.exports = { startBackend, stopBackend, newPage, registerAndLogin, select, openRecent,
-  send, status, rowById, chooseReaction, reaction, visiblePhoto, names, temporary, backendDirectory, errors }
+  send, status, rowById, openMenu, action, reply, chooseReaction, reaction, visiblePhoto, navigate, logout, names, temporary, backendDirectory, errors, captureFailure, recentPresence }

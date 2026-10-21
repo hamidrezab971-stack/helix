@@ -1,27 +1,38 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { sendMessage, sendImage, editMessage, deleteMessage } from '../services/api.js'
-import AttachmentImage from './AttachmentImage.jsx'
-import ReactionBar from './ReactionBar.jsx'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { editMessage, deleteMessage } from '../services/api.js'
+import MessageList from './chat/MessageList.jsx'
+import MessageActionMenu from './chat/MessageActionMenu.jsx'
+import ImageViewer from './chat/ImageViewer.jsx'
+import { replyPreview, replyText } from './chat/MessageBubble.jsx'
+import useMessageActions from '../hooks/useMessageActions.js'
+import ChatHeader from './chat/ChatHeader.jsx'
+import ChatComposer from './chat/ChatComposer.jsx'
+import EmptyState from './chat/EmptyState.jsx'
+import Icon from './ui/Icon.jsx'
+import { visiblePending } from '../utils/optimisticMessages.js'
 import useTimeline from '../hooks/useTimeline.js'
+import { prepareChatImage, chatImageError, activeSendStates } from '../utils/chatImage.js'
 
-function replyPreview(message) {
-  return { id: message.id, sender_id: message.sender_id, content: Array.from(message.content).slice(0, 200).join(''), attachment_kind: message.attachment?.kind || null }
-}
-
-function replyText(preview) {
-  return preview.attachment_kind === 'image' ? `Photo${preview.content ? ` · ${preview.content}` : ''}` : preview.content
-}
-
-export default function ChatPanel({ user, selectedUser, initialConversation, onConversationOpened, onMessageSent, onMessageMutated, subscribeToMutations, subscribeToSync, token, onUnauthorized, subscribeToMessages, subscribeToStatus, acknowledge, subscribeToTyping, sendTyping, isOnline }) {
+export default function ChatPanel({ user, selectedUser, initialConversation, onConversationOpened, onMessageSent, onMessageMutated, subscribeToMutations, subscribeToSync, token, onUnauthorized, subscribeToMessages, subscribeToTyping, sendTyping, isOnline, onBack, onProfile, optimistic, lastSeen, now, active = true }) {
   const [retryAttempt, setRetryAttempt] = useState(0)
   const [content, setContent] = useState('')
-  const [sending, setSending] = useState(false)
+  const [draftId, setDraftId] = useState(null)
+  const draft = optimistic.entries.find(entry => entry.localId === draftId)
+  const sending = activeSendStates.has(draft?.state)
+  useEffect(() => {
+    if (draftId && (!draft || draft.state === 'sent' || draft.state === 'cancelled')) { setDraftId(null); setContent(''); setSelectedImage(null); setReplyTarget(null) }
+  }, [draftId, draft])
+  function detachDraft() {
+    if (draft?.state === 'failed') optimistic.dismiss(draftId)
+    setDraftId(null)
+  }
   const [sendError, setSendError] = useState('')
   const [selectedImage, setSelectedImage] = useState(null)
-  const [imagePreview, setImagePreview] = useState('')
-  const imageInput = useRef(null)
-  const pending = useRef(false)
-  const sendController = useRef(null)
+  const [preparingImage, setPreparingImage] = useState(false)
+  const selection = useRef(null)
+  const submitLock = useRef(false)
+  useEffect(() => () => { selection.current?.abort(); selection.current = null }, [])
+  useEffect(() => { if (!sending) submitLock.current = false }, [sending, draft])
   const history = useRef(null)
   const conversationId = useRef(null)
   const [otherTyping, setOtherTyping] = useState(false)
@@ -35,37 +46,53 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
   const [actionBusy, setActionBusy] = useState(false)
   const actionPending = useRef(false)
   const actionController = useRef(null)
+  const reactionRequests = useRef(new Set())
   const [replyTarget, setReplyTarget] = useState(null)
+  const [photo, setPhoto] = useState(null)
+  const closePhoto = useCallback(() => setPhoto(null), [])
 
   function replyName(preview) {
     return preview.sender_id === user.id ? 'You' : selectedUser.username
   }
 
-  useEffect(() => {
-    if (!selectedImage) { setImagePreview(''); return }
-    const url = URL.createObjectURL(selectedImage)
-    setImagePreview(url)
-    return () => URL.revokeObjectURL(url)
-  }, [selectedImage])
-
-  function chooseImage(file) {
+  async function chooseImage(file, onRead) {
     if (!file) return
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 8 * 1024 * 1024) {
-      setSendError('Choose a JPEG, PNG, or WEBP image of 8 MB or smaller.')
-      return
-    }
-    setSelectedImage(file)
+    selection.current?.abort()
+    const controller = new AbortController()
+    selection.current = controller
+    detachDraft()
+    setSelectedImage(null)
+    setPreparingImage(true)
     setSendError('')
+    try {
+      const image = await prepareChatImage(file, { signal: controller.signal, onRead })
+      if (!controller.signal.aborted) setSelectedImage(image)
+    } catch (error) {
+      if (!controller.signal.aborted) setSendError(chatImageError(error))
+    } finally {
+      if (selection.current === controller) { selection.current = null; setPreparingImage(false); onRead?.() }
+    }
   }
 
+  function removeImage() {
+    selection.current?.abort(); selection.current = null
+    setPreparingImage(false); detachDraft(); setSelectedImage(null); setSendError('')
+  }
+
+  const isActive = useRef(active)
+  isActive.current = active
   const atBottom = useRef(true)
   const scrollAnchor = useRef(null)
   const navigationTimer = useRef(null)
   const positioned = useRef(false)
+  const rememberedScrollTop = useRef(0)
+  const [enterIds, setEnterIds] = useState(new Set())
+  const knownIds = useRef(new Set())
+  const animationTimers = useRef(new Set())
   const [highlightId, setHighlightId] = useState(null)
   const captureScroll = useCallback((reason) => {
     const element = history.current
-    if (!element) return null
+    if (!element || !isActive.current) return null
     const rect = element.getBoundingClientRect()
     const visible = [...element.querySelectorAll('[data-message-id]')].filter(row => row.getBoundingClientRect().bottom > rect.top)
     const anchors = visible.slice(0, 3).map(row => ({ id: Number(row.dataset.messageId), top: row.getBoundingClientRect().top - rect.top }))
@@ -73,6 +100,7 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
     return anchors[0]
   }, [])
   const reconcileComposer = useCallback((items, missing) => {
+    optimistic.reconcile(items, missing)
     setReplyTarget(current => {
       if (!current || missing.includes(current.id)) return null
       const updated = items.find(message => message.id === current.id)
@@ -81,17 +109,32 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
       return preview.content === current.content && preview.attachment_kind === current.attachment_kind ? current : preview
     })
     setEditingId(current => missing.includes(current) ? null : current)
-  }, [])
+  }, [optimistic.reconcile])
   const timeline = useTimeline({ token, selectedUser, initialConversation, onConversationOpened,
     onUnauthorized, subscribeToSync, beforeChange: captureScroll, atBottom,
-    onPersistedRead: onMessageSent, retryAttempt, onReconciled: reconcileComposer,
-    trackedIds: [replyTarget?.id, editingId].filter(id => id != null) })
-  const { messages, conversation, stage, loadError, addMessages } = timeline
+    visible: active, onPersistedRead: onMessageSent, retryAttempt, onReconciled: reconcileComposer,
+    trackedIds: [replyTarget?.id, editingId, ...optimistic.entries.filter(entry => entry.peer_id === selectedUser.id).map(entry => entry.serverId)].filter(id => id != null) })
+  const { messages, conversation, stage, loadError } = timeline
+  useEffect(() => {
+    for (const message of messages) knownIds.current.add(message.id)
+    while (knownIds.current.size > 400) knownIds.current.delete(knownIds.current.values().next().value)
+  }, [messages])
+  useEffect(() => subscribeToMessages(message => {
+    if (message.sender_id === user.id || message.conversation_id !== conversationId.current || knownIds.current.has(message.id) || !atBottom.current || !isActive.current || document.visibilityState !== 'visible') return
+    knownIds.current.add(message.id)
+    setEnterIds(previous => new Set(previous).add(message.id))
+    const timer = setTimeout(() => { setEnterIds(previous => { const next = new Set(previous); next.delete(message.id); return next }); animationTimers.current.delete(timer) }, 1500)
+    animationTimers.current.add(timer)
+  }), [subscribeToMessages, user.id])
+  const pendingMessages = visiblePending(optimistic.entries, messages, conversation?.id)
+  useEffect(() => optimistic.reconcile(messages), [messages, optimistic.reconcile])
+  useEffect(() => { if (photo && !messages.some(message => message.attachment?.id === photo.id)) closePhoto() }, [messages, photo, closePhoto])
+  const actions = useMessageActions(messages, history)
   conversationId.current = conversation?.id || null
 
   useLayoutEffect(() => {
     const element = history.current
-    if (!element) return
+    if (!element || !active) return
     const anchor = scrollAnchor.current
     if (timeline.navigationId) {
       const target = element.querySelector(`[data-message-id="${timeline.navigationId}"]`)
@@ -103,7 +146,7 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
         navigationTimer.current = setTimeout(() => setHighlightId(null), 1800)
         timeline.clearNavigation()
       }
-    } else if ((!anchor && !positioned.current) || anchor?.bottom) element.scrollTop = element.scrollHeight
+    } else if ((!anchor && (!positioned.current || atBottom.current)) || anchor?.bottom) element.scrollTop = element.scrollHeight
     else if (anchor) {
       const rect = element.getBoundingClientRect()
       const candidate = anchor.anchors.find(item => element.querySelector(`[data-message-id="${item.id}"]`))
@@ -111,20 +154,23 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
       if (row) element.scrollTop += row.getBoundingClientRect().top - rect.top - candidate.top
       else element.scrollTop = anchor.scrollTop
     }
+    else if (!atBottom.current) element.scrollTop = rememberedScrollTop.current
+    rememberedScrollTop.current = element.scrollTop
     positioned.current = true
     scrollAnchor.current = null
     atBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 64 && !timeline.hasNewer
-  }, [messages, stage, timeline.navigationId])
+  }, [messages, stage, timeline.navigationId, optimistic.entries, active])
 
   useEffect(() => {
     // Heights can change after image decoding, reaction updates, or a resize.
     const element = history.current
-    if (!element || stage !== 'ready') return
-    const observer = new ResizeObserver(() => { if (atBottom.current) element.scrollTop = element.scrollHeight })
+    if (!element || stage !== 'ready' || !active) return
+    const observer = new ResizeObserver(() => { if (isActive.current && atBottom.current) element.scrollTop = element.scrollHeight })
     const list = element.querySelector('ol')
     if (list) observer.observe(list)
+    observer.observe(element)
     return () => observer.disconnect()
-  }, [stage])
+  }, [stage, active, Boolean(messages.length || pendingMessages.length)])
 
   useEffect(() => subscribeToMutations((event) => {
     if (event.data.conversation_id !== conversationId.current) return
@@ -140,7 +186,13 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
     localTyping.current = false
   }, [sendTyping])
 
+  useEffect(() => {
+    if (!active) { stopTyping(); actions.close(); closePhoto() }
+    timeline.retrySync()
+  }, [active, stopTyping, actions.close, closePhoto])
+
   function handleContentChange(value) {
+    if (value !== content) detachDraft()
     setContent(value)
     if (!value.trim()) return stopTyping()
     if (stage !== 'ready') return
@@ -176,15 +228,15 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
   }, [subscribeToTyping, stopTyping, selectedUser.id, user.id])
 
   useEffect(() => () => {
-    sendController.current?.abort()
     actionController.current?.abort()
+    for (const request of reactionRequests.current) request.abort()
+    for (const timer of animationTimers.current) clearTimeout(timer)
     clearTimeout(navigationTimer.current)
   }, [])
 
   async function performAction(message, deleting, event) {
     event?.preventDefault()
     if (actionPending.current) return
-    if (deleting && !window.confirm('Delete this message?')) return
     const trimmed = editContent.trim()
     if (!deleting && (!trimmed || Array.from(trimmed).length > 2000)) {
       setActionError('Use a message between 1 and 2000 characters.')
@@ -203,166 +255,75 @@ export default function ChatPanel({ user, selectedUser, initialConversation, onC
         const saved = await editMessage(token, message.id, trimmed, controller.signal)
         if (!controller.signal.aborted) {
           onMessageMutated({ type: 'message:updated', data: saved })
-          setEditingId(null)
+          setEditingId(null); setActionError('')
         }
       }
     } catch (error) {
       if (controller.signal.aborted || error.name === 'AbortError') return
       if (error.status === 401) onUnauthorized()
-      else setActionError(error.displayMessage || `Unable to ${deleting ? 'delete' : 'edit'} your message. Please try again.`)
+      else { if (deleting) throw error; setActionError(error.displayMessage || 'Unable to edit your message. Please try again.') }
     } finally {
       actionPending.current = false
       if (!controller.signal.aborted) setActionBusy(false)
     }
   }
 
-  async function handleSend(event) {
+  function handleSend(event) {
     event.preventDefault()
-    if (pending.current || stage !== 'ready' || !conversation) return
+    if (sending || preparingImage || submitLock.current || stage !== 'ready' || !conversation) return
+    if (draft?.state === 'failed') { optimistic.retry(draftId); stopTyping(); return }
     const trimmed = content.trim()
     if (!trimmed && !selectedImage) return
-    if (Array.from(trimmed).length > 2000) {
-      setSendError('Use a message between 1 and 2000 characters.')
-      return
-    }
-
-    pending.current = true
-    setSending(true)
-    setSendError('')
-    const controller = new AbortController()
-    sendController.current = controller
+    if (Array.from(trimmed).length > 2000) { setSendError('Use a message between 1 and 2000 characters.'); return }
     try {
-      const message = selectedImage
-        ? await sendImage(token, conversation.id, selectedImage, trimmed, controller.signal, replyTarget?.id || null)
-        : await sendMessage(token, conversation.id, trimmed, controller.signal, replyTarget?.id || null)
-      if (controller.signal.aborted) return
+      captureScroll('pending')
+      submitLock.current = true
+      const dimensions = selectedImage ? { width: selectedImage.width, height: selectedImage.height } : null
+      const id = optimistic.enqueue({ peer_id: selectedUser.id, conversation_id: conversation.id, content: trimmed, file: selectedImage?.blob || null, filename: selectedImage?.name, dimensions, reply_to: replyTarget })
       stopTyping()
-      addMessages([message])
-      onMessageSent(message)
-      setContent('')
-      setSelectedImage(null)
-      setReplyTarget(null)
-    } catch (error) {
-      if (controller.signal.aborted || error.name === 'AbortError') return
-      if (error.status === 401) {
-        onUnauthorized()
-      } else {
-        setSendError([403, 404, 422].includes(error.status) ? error.displayMessage : 'Unable to send your message. Please try again.')
-      }
-    } finally {
-      pending.current = false
-      if (!controller.signal.aborted) setSending(false)
-    }
+      setDraftId(id); setSendError('')
+    } catch (error) { submitLock.current = false; setSendError(error.message) }
   }
 
   return (
-    <section aria-labelledby="chat-title" className="flex min-w-0 flex-col p-6 sm:p-8">
-      <header className="border-b border-stone-200/80 pb-5">
-        <h2 id="chat-title" className="break-all text-xl font-semibold tracking-tight text-stone-900">@{selectedUser.username}</h2>
-        <p className={`mt-1 text-xs ${isOnline ? 'text-emerald-700' : 'text-stone-500'}`} aria-label="Contact presence">{isOnline ? 'Online' : 'Offline'}</p>
-        <p role="status" aria-label="Typing indicator" className="mt-1 min-h-4 text-xs text-stone-500">{otherTyping ? `${selectedUser.username} is typing...` : ''}</p>
-      </header>
+    <section aria-labelledby="chat-title" className="chat-panel">
+      <ChatHeader lastSeen={lastSeen} now={now} selectedUser={selectedUser} isOnline={isOnline} otherTyping={otherTyping} onBack={onBack} onProfile={onProfile} />
       {stage === 'opening' || stage === 'loading' ? (
-        <p role="status" className="min-h-64 py-8 text-sm text-stone-500">{stage === 'opening' ? 'Opening conversation...' : 'Loading messages...'}</p>
+        <p role="status" className="chat-loading"><span className="loading-spinner" aria-hidden="true" />{stage === 'opening' ? 'Opening conversation…' : 'Loading messages…'}</p>
       ) : stage === 'error' ? (
-        <div className="min-h-64 space-y-4 py-8">
+        <div className="chat-load-error">
           <p role="alert" className="form-error">{loadError}</p>
           <button type="button" className="secondary-button" onClick={() => setRetryAttempt((attempt) => attempt + 1)}>Try again</button>
         </div>
       ) : (
         <>
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="timeline-toolbar">
             {timeline.hasOlder && <button type="button" className="text-button min-h-9 text-sm" disabled={timeline.busy} onClick={timeline.loadOlder}>Load older messages</button>}
-            {timeline.busy && <span role="status" className="text-xs text-stone-500">Updating messages...</span>}
+            {timeline.busy && <span role="status" className="sr-only">Updating messages...</span>}
           </div>
-          {timeline.syncError && <p role="alert" className="mb-2 text-sm text-stone-600">{timeline.syncError} <button type="button" className="text-button" onClick={timeline.retrySync}>Retry messages</button></p>}
+          {timeline.syncError && <p role="alert" className="timeline-error">{timeline.syncError} <button type="button" className="text-button" onClick={timeline.retrySync}>Retry messages</button></p>}
           <div ref={history} tabIndex={0} onScroll={() => {
             const element = history.current
+            if (!isActive.current) return
+            rememberedScrollTop.current = element.scrollTop
             atBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 64 && !timeline.hasNewer
             if (atBottom.current) timeline.clearNew()
           }} role="log" aria-label="Message history" className="chat-history">
-            {messages.length === 0 ? (
-              <p className="py-8 text-center text-sm leading-6 text-stone-500">No messages yet.<br />Start the conversation.</p>
+            {messages.length === 0 && pendingMessages.length === 0 ? (
+              <EmptyState compact title="A fresh conversation.">Send a hello to get started.</EmptyState>
             ) : (
-              <ol className="space-y-3">
-                {messages.map((message, index) => (
-                  <Fragment key={message.id}>
-                  {index > 0 && timeline.isGap(messages[index - 1], message) && <li className="text-center text-xs text-stone-500"><button type="button" disabled={timeline.busy} className="text-button min-h-9" onClick={() => timeline.loadGap(messages[index - 1])}>Load messages in this gap</button></li>}
-                  <li tabIndex={-1} data-highlighted={highlightId === message.id} data-message-id={message.id} className={`flex flex-col ${message.sender_id === user.id ? 'items-end' : 'items-start'}`}>
-                    <p className="message-bubble" data-own={message.sender_id === user.id}>
-                      <span className="sr-only">{message.sender_id === user.id ? 'You' : selectedUser.username}: </span>
-                      {message.reply_to && <button type="button" aria-label="Reply preview" className="mb-2 block max-w-full rounded border-l-2 border-current bg-black/5 px-2 py-1 text-left text-xs" onClick={() => timeline.navigate(message.reply_to.id)}>
-                        <span className="block font-semibold">{replyName(message.reply_to)}</span>
-                        <span className="block truncate">{replyText(message.reply_to)}</span>
-                      </button>}
-                      {message.attachment && <AttachmentImage attachment={message.attachment} token={token} onUnauthorized={onUnauthorized} />}
-                      {message.content}
-                      {message.edited_at && <span aria-label="Edited message" className="mt-1 block text-[10px] opacity-75">Edited</span>}
-                      {message.sender_id === user.id && (
-                        <span aria-label="Message status" className={`mt-1 block text-right text-[10px] ${message.read_at ? 'font-semibold' : 'opacity-75'}`}>
-                          {message.read_at ? 'Read' : message.delivered_at ? 'Delivered' : 'Sent'}
-                        </span>
-                      )}
-                    </p>
-                    <ReactionBar message={message} token={token} onChanged={timeline.retrySync} onUnauthorized={onUnauthorized} />
-                    <button type="button" className="text-button min-h-8 text-xs" disabled={sending} onClick={() => { setReplyTarget(replyPreview(message)); document.getElementById('message-content')?.focus() }}>Reply</button>
-                    {message.sender_id === user.id && (editingId === message.id ? (
-                      <form aria-label="Edit message" className="mt-2 w-full max-w-sm space-y-2" onSubmit={(event) => performAction(message, false, event)}>
-                        <label className="text-xs text-stone-600" htmlFor="edit-message-content">Edit message text</label>
-                        <textarea id="edit-message-content" className="auth-input" maxLength={2000} value={editContent} onChange={(event) => setEditContent(event.target.value)} disabled={actionBusy} autoFocus />
-                        <div className="flex gap-3">
-                          <button type="submit" className="secondary-button" disabled={actionBusy}>Save</button>
-                          <button type="button" className="secondary-button" disabled={actionBusy} onClick={() => { setEditingId(null); setActionError('') }}>Cancel</button>
-                        </div>
-                      </form>
-                    ) : (
-                      <div className="mt-1 flex gap-3">
-                        {!message.attachment && <button type="button" className="text-button min-h-8 text-xs" disabled={actionBusy} onClick={() => { setEditingId(message.id); setEditContent(message.content); setActionError('') }}>Edit</button>}
-                        <button type="button" className="text-button min-h-8 text-xs" disabled={actionBusy} onClick={() => performAction(message, true)}>Delete</button>
-                      </div>
-                    ))}
-                  </li>
-                  </Fragment>
-                ))}
-              </ol>
+              <MessageList actionId={actions.target?.id} reactionRequests={reactionRequests.current} enterIds={enterIds} pending={pendingMessages} onRetry={optimistic.retry} onDismiss={optimistic.dismiss} onCancel={optimistic.cancel} messages={messages} user={user} selectedUser={selectedUser} timeline={timeline} highlightId={highlightId} token={token} onUnauthorized={onUnauthorized} onOpen={actions.open} onPhoto={setPhoto} />
             )}
           </div>
-          <div className="my-2 flex flex-wrap items-center justify-end gap-3">
+          <div className="timeline-navigation"><div>
             {timeline.hasNewer && <button type="button" className="text-button min-h-9 text-sm" disabled={timeline.busy} onClick={timeline.loadNewer}>Load newer messages</button>}
-            {(timeline.newCount > 0 || timeline.hasNewer) && <button type="button" className="secondary-button text-sm" disabled={timeline.busy} onClick={timeline.jumpLatest}>{timeline.newCount > 0 ? `${timeline.newCount} new ${timeline.newCount === 1 ? 'message' : 'messages'} · ` : ''}Jump to latest</button>}
-          </div>
-          {actionError && <p role="alert" className="form-error mb-3">{actionError}</p>}
-          <form onSubmit={handleSend} aria-busy={sending} className="border-t border-stone-200/80 pt-5">
-            {replyTarget && <div aria-label="Reply composer" className="mb-3 flex min-w-0 items-start justify-between gap-3 rounded-lg border-l-2 border-[#b65339] bg-stone-100 p-3 text-xs text-stone-600">
-              <span className="min-w-0"><span className="block font-semibold">Replying to {replyName(replyTarget)}</span><span className="block truncate">{replyText(replyTarget)}</span></span>
-              <button type="button" aria-label="Cancel reply" className="text-button min-h-8 shrink-0" disabled={sending} onClick={() => setReplyTarget(null)}>Cancel</button>
-            </div>}
-            <input ref={imageInput} type="file" accept="image/jpeg,image/png,image/webp" aria-label="Choose image" className="hidden" onChange={(event) => { chooseImage(event.target.files?.[0]); event.target.value = '' }} />
-            <button type="button" className="secondary-button mb-3" disabled={sending} onClick={() => imageInput.current?.click()}>Image</button>
-            {imagePreview && <div className="mb-3 space-y-2">
-              <img src={imagePreview} alt="Selected image preview" className="max-h-40 max-w-full rounded-lg object-contain" />
-              <p className="break-all text-xs text-stone-500">{selectedImage?.name}</p>
-              <button type="button" className="secondary-button" disabled={sending} onClick={() => setSelectedImage(null)}>Remove image</button>
-            </div>}
-            <label htmlFor="message-content" className="text-sm font-medium text-stone-800">{selectedImage ? 'Caption (optional)' : 'Message'}</label>
-            <textarea
-              id="message-content" className="auth-input min-h-24 resize-y" rows={3}
-              placeholder="Write a message..." maxLength={2000} disabled={sending}
-              aria-describedby="message-hint" value={content}
-              onChange={(event) => handleContentChange(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                  event.preventDefault()
-                  event.currentTarget.form.requestSubmit()
-                }
-              }}
-            />
-            <p id="message-hint" className="mt-2 text-xs leading-5 text-stone-500">Up to 2000 characters. Enter to send; Shift+Enter for a new line.</p>
-            {sendError && <p role="alert" className="form-error mt-3">{sendError}</p>}
-            <button type="submit" className="primary-button mt-4 w-full" disabled={sending || (!content.trim() && !selectedImage)}>{sending ? (selectedImage ? 'Uploading...' : 'Sending...') : 'Send'}</button>
-          </form>
+            {(timeline.newCount > 0 || timeline.hasNewer) && <button type="button" className="jump-latest" disabled={timeline.busy} onClick={timeline.jumpLatest}><Icon name="down" size={16} />{timeline.newCount > 0 ? `${timeline.newCount} new ${timeline.newCount === 1 ? 'message' : 'messages'} · ` : ''}Jump to latest</button>}
+          </div></div>
+          <ChatComposer editing={editingId !== null} onCancelEdit={() => { setEditingId(null); setActionError('') }} content={editingId !== null ? editContent : content} onChange={editingId !== null ? setEditContent : handleContentChange} onSubmit={editingId !== null ? event => performAction(messages.find(message => message.id === editingId) || { id: editingId }, false, event) : handleSend} sending={sending || actionBusy} error={editingId !== null ? actionError : sendError} image={selectedImage} preparingImage={preparingImage} onPreviewError={() => { setSelectedImage(null); setSendError('Unable to display this photo. Please select it again.') }} onImage={chooseImage} onRemoveImage={removeImage} replyTarget={replyTarget} replyName={replyName} replyText={replyText} onCancelReply={() => { detachDraft(); setReplyTarget(null) }} />
         </>
       )}
+      {actions.target && messages.some(message => message.id === actions.target.id) && <MessageActionMenu reactionRequests={reactionRequests.current} target={actions.target} message={messages.find(message => message.id === actions.target.id)} own={messages.find(message => message.id === actions.target.id).sender_id === user.id} onClose={actions.close} token={token} onUnauthorized={onUnauthorized} onChanged={timeline.retrySync} onReply={message => { detachDraft(); setEditingId(null); setReplyTarget(replyPreview(message)); requestAnimationFrame(() => document.getElementById('message-content')?.focus()) }} onEdit={message => { detachDraft(); stopTyping(); setEditingId(message.id); setEditContent(message.content); setActionError(''); requestAnimationFrame(() => document.getElementById('message-content')?.focus()) }} onDelete={message => performAction(message, true)} />}
+      {photo && <ImageViewer attachment={photo} token={token} onUnauthorized={onUnauthorized} onClose={closePhoto} />}
     </section>
   )
 }
