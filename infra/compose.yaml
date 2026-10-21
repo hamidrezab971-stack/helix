@@ -113,7 +113,14 @@ services:
       GF_PLUGINS_DISABLE_PLUGINS: elasticsearch,grafana-postgresql-datasource,grafana-pyroscope-datasource,influxdb,jaeger,loki,mssql,mysql,opentsdb,stackdriver,tempo,zipkin
       GF_PLUGINS_PREINSTALL_DISABLED: 'true'
       GF_LOG_MODE: console
-      GF_SERVER_ROOT_URL: http://localhost:13000
+      GF_SERVER_DOMAIN: helix.localip.ir
+      GF_SERVER_PROTOCOL: http
+      GF_SERVER_ROOT_URL: https://helix.localip.ir/grafana/
+      GF_SERVER_SERVE_FROM_SUB_PATH: 'true'
+      GF_SERVER_ENFORCE_DOMAIN: 'true'
+      GF_SECURITY_COOKIE_SECURE: 'true'
+      GF_SECURITY_COOKIE_SAMESITE: lax
+      GF_LIVE_ALLOWED_ORIGINS: https://helix.localip.ir
     ports: ['127.0.0.1:${GRAFANA_PORT:-13000}:3000']
     volumes:
       - grafana_data:/var/lib/grafana

@@ -28,7 +28,25 @@ jobs:
           python infra/scripts/test-security.py
           python -m compileall -q infra/scripts
           node --check infra/scripts/smoke-browser.cjs
+          node --check infra/scripts/public-https-check.cjs
           cd smooth/backend
           python -m unittest discover -s tests -p test_phase212_metrics.py -v
       # Image build and full real-stack acceptance need the reviewed digest lock
       # and a verified private data copy. They are intentionally not claimed here.
+  public-https:
+    # Independent external browser; only anonymous GETs against authorized HELIX.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated browser tooling
+        run: |
+          npm install --ignore-scripts --prefix /tmp/helix-public-check playwright@1.64.1
+          /tmp/helix-public-check/node_modules/.bin/playwright install --with-deps chromium
+      - name: Check public HTTPS, assets and monitoring denial externally
+        env:
+          NODE_PATH: /tmp/helix-public-check/node_modules
+        run: node infra/scripts/public-https-check.cjs

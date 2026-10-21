@@ -30,12 +30,19 @@ async function main(){
  await alice.getByRole('button',{name:'Delete Chat',exact:true}).click()
  await expect(alice.getByText('Delete this conversation for you?',{exact:true})).toBeVisible()
  await alice.getByRole('button',{name:'Cancel',exact:true}).click();await expect(actions(alice)).toHaveCount(0)
+ // Dialog cleanup pops its mobile history entry asynchronously. Finish that
+ // transition before opening another dialog or invoking browser Back.
+ await expect.poll(()=>alice.evaluate(()=>history.state?.smoothOverlay || null)).toBe(null)
  await expect(row(alice,h.names.bob)).toBeVisible()
  // Explicit keyboard-accessible action and Android Back dismissal.
  await alice.getByRole('button',{name:`Chat actions for ${h.names.bob}`}).click()
- await expect(actions(alice)).toBeVisible();await alice.evaluate(()=>history.back());await expect(actions(alice)).toHaveCount(0)
+ await expect(actions(alice)).toBeVisible()
+ await expect.poll(()=>alice.evaluate(()=>Boolean(history.state?.smoothOverlay))).toBe(true)
+ await alice.evaluate(()=>history.back());await expect(actions(alice)).toHaveCount(0)
+ await expect.poll(()=>alice.evaluate(()=>history.state?.smoothOverlay || null)).toBe(null)
  await alice.getByRole('button',{name:`Chat actions for ${h.names.bob}`}).click()
  await alice.keyboard.press('Escape');await expect(actions(alice)).toHaveCount(0)
+ await expect.poll(()=>alice.evaluate(()=>history.state?.smoothOverlay || null)).toBe(null)
  // Backend failure leaves the row visible and the confirmation offers retry.
  await alice.route('**/api/conversations/*',route=>route.request().method()==='DELETE'?route.fulfill({status:503,contentType:'application/json',body:'{}'}):route.continue())
  await alice.getByRole('button',{name:`Chat actions for ${h.names.bob}`}).click()

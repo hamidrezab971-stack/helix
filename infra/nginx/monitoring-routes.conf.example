@@ -1,0 +1,52 @@
+# NOT INSTALLED. Replace the four deny locations in the TLS HELIX server only
+# after Grafana passes its own release gate and admin access is provisioned.
+# Grafana itself retains login, RBAC and plugin signature verification.
+# Redirects use error_page so Nginx access checks run before canonicalization.
+location = /grafana {
+    include /etc/nginx/snippets/helix-monitoring-access.conf;
+    error_page 404 =308 https://helix.localip.ir/grafana/;
+    try_files /__helix_no_such_monitoring_file__ =404;
+}
+location ^~ /grafana/ {
+    include /etc/nginx/snippets/helix-monitoring-access.conf;
+    # Keep the prefix: Grafana handles it with serve_from_sub_path=true.
+    proxy_pass http://127.0.0.1:13000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Prefix /grafana;
+    proxy_set_header Origin $http_origin;
+    # Also handles Grafana Live at /grafana/api/live/ws.
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $helix_monitoring_connection;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_buffering off;
+    # Edge Basic auth must not become Grafana's backend Basic auth identity.
+    # Grafana API tokens can be used over an authenticated session instead.
+    proxy_set_header Authorization "";
+    proxy_cookie_flags ~ secure httponly samesite=lax;
+}
+location = /prometheus {
+    include /etc/nginx/snippets/helix-monitoring-access.conf;
+    error_page 404 =308 https://helix.localip.ir/prometheus/;
+    try_files /__helix_no_such_monitoring_file__ =404;
+}
+location = /prometheus/metrics { return 404; }
+location ^~ /prometheus/api/v1/admin/ { return 404; }
+location ^~ /prometheus/-/ { return 404; }
+location ^~ /prometheus/ {
+    include /etc/nginx/snippets/helix-monitoring-access.conf;
+    # Strip the public prefix; private API and scrape paths stay unchanged.
+    proxy_pass http://127.0.0.1:19090/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-Prefix /prometheus;
+    proxy_set_header Authorization "";
+}
