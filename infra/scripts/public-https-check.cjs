@@ -9,11 +9,27 @@ async function main() {
     const context = await browser.newContext()
     const page = await context.newPage()
     const errors = []
+    const failedRequests = []
+    const failedAssets = []
     page.on('pageerror', error => errors.push(error.message))
+    page.on('requestfailed', request => failedRequests.push({
+      path: new URL(request.url()).pathname, error: request.failure()?.errorText,
+    }))
+    page.on('response', response => {
+      const url = new URL(response.url())
+      if (url.pathname.startsWith('/assets/') && response.status() !== 200) {
+        failedAssets.push({ path: url.pathname, status: response.status() })
+      }
+    })
     const response = await page.goto(origin + '/', { waitUntil: 'networkidle', timeout: 45000 })
     assert.equal(response.status(), 200)
-    await page.locator('#root').waitFor()
-    await page.locator('input[type="password"]').waitFor()
+    try {
+      await page.locator('#root').waitFor()
+      await page.locator('input[type="password"]').waitFor()
+    } catch (error) {
+      console.error(JSON.stringify({ browserErrors: errors, failedRequests, failedAssets }))
+      throw error
+    }
     assert.equal(new URL(page.url()).origin, origin)
     const scripts = await page.locator('script[src]').evaluateAll(nodes => nodes.map(n => n.src))
     const styles = await page.locator('link[rel="stylesheet"]').evaluateAll(nodes => nodes.map(n => n.href))
