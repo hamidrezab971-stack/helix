@@ -87,6 +87,9 @@ services:
 
   grafana:
     <<: *runtime
+    # Separate release gate: default production startup must not reactivate
+    # Grafana before a supported publisher artifact passes its own review.
+    profiles: [grafana-reviewed]
     networks:
       monitoring: {}
       ingress:

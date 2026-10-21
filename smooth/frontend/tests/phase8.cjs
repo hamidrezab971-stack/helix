@@ -302,6 +302,9 @@ async function remove(page, content, expected = 204) {
     })(),
   ])
   assert.equal(response.status(), expected)
+  // The HTTP response precedes React's removal/scroll commit. A following
+  // deletion must wait for the preceding row to leave the rendered list.
+  if (expected === 204) await expect(messageRow(page, content)).toHaveCount(0)
   if (expected !== 204) { await expect(page.getByRole('dialog').getByRole('alert')).toContainText(/try again/i) }
 }
 

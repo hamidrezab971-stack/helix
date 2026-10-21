@@ -22,6 +22,7 @@ def load(name, path):
 
 auth = load('retained_auth', ROOT / 'verify-retained-auth.py')
 oci = load('image_archive', ROOT / 'image_archive.py')
+application = load('application_gate', ROOT / 'application-security-gate.py')
 
 
 class SecurityTests(unittest.TestCase):
@@ -64,6 +65,46 @@ class SecurityTests(unittest.TestCase):
         self.report['Results'] = []
         self.assertNotEqual(self.run_gate().returncode, 0)
         self.assertFalse((self.root / 'summary.json').exists())
+
+    def application_fixture(self):
+        from datetime import datetime, timezone
+        self.report['Results'][0]['Vulnerabilities'] = [{
+            'Severity': 'HIGH', 'VulnerabilityID': 'CVE-2026-9538',
+            'PkgName': 'perl-base', 'InstalledVersion': '1'}]
+        path = self.root/'app.json'; path.write_text(json.dumps(self.report))
+        image = 'example@sha256:' + 'b'*64
+        review = {'image': image, 'config_id': self.report['Metadata']['ImageID'],
+                  'report_sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+                  'findings': [{'target': 'runtime', 'id': 'CVE-2026-9538',
+                    'package': 'perl-base', 'installed': '1', 'severity': 'HIGH',
+                    'disposition': 'not_affected_in_qualified_runtime',
+                    'rationale': 'Affected module absent', 'source': 'https://example.test/advisory'}]}
+        provenance = {'images': {'app': {'reference': image, 'config_id': review['config_id']}},
+                      'database': {'UpdatedAt': datetime.now(timezone.utc).isoformat()}}
+        return path, review, provenance
+
+    def test_application_gate_rejects_changed_scan(self):
+        path, review, provenance = self.application_fixture()
+        path.write_text(path.read_text()+'\n')
+        with self.assertRaisesRegex(RuntimeError, 'Scan changed'):
+            application.qualify(path, review, provenance, self.root)
+
+    def test_application_gate_rejects_missing_row_review(self):
+        path, review, provenance = self.application_fixture(); review['findings'] = []
+        with self.assertRaisesRegex(RuntimeError, 'Incomplete individual review'):
+            application.qualify(path, review, provenance, self.root)
+
+    def test_application_gate_rejects_risk_acceptance(self):
+        path, review, provenance = self.application_fixture()
+        review['findings'][0]['disposition'] = 'risk_accepted'
+        with self.assertRaisesRegex(RuntimeError, 'risk blocks release'):
+            application.qualify(path, review, provenance, self.root)
+
+    def test_application_gate_rejects_mismatched_image(self):
+        path, review, provenance = self.application_fixture()
+        provenance['images']['app']['config_id'] = 'sha256:'+'c'*64
+        with self.assertRaisesRegex(RuntimeError, 'Scan/artifact mismatch'):
+            application.qualify(path, review, provenance, self.root)
 
     def test_echoed_or_piped_credential_input_is_refused(self):
         if not sys.stdin.isatty():

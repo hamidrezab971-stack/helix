@@ -1,3 +1,13 @@
+# گیت‌های مستقل انتشار
+
+انتشار برنامه و رفع امنیت Grafana مستقل‌اند. شمارش خام همهٔ findingها در
+`security-gate.py` همچنان High/Critical را شکست می‌دهد و هیچ finding مخفی نمی‌شود.
+`application-security-gate.py` فقط image و گزارش دقیق دارای review تک‌تک ردیف‌ها
+را با کنترل‌های واقعی runtime ارزیابی می‌کند؛ ریسک پذیرفته‌شده، ناشناخته یا
+قابل دسترسی، گیت برنامه را عبور نمی‌دهد. ارزیابی این انتشار در
+`application-review-20261021.json` است. Grafana با profile جدا معلق می‌ماند تا
+artifact رسمی اصلاح‌شده از گیت مستقل خود عبور کند.
+
 # Reviewed monitoring security inputs
 
 The [real-host report](../docs/HOST-QUALIFICATION-21.2.1.fa.md) names the images

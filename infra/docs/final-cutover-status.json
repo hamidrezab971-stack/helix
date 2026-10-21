@@ -1,149 +1,46 @@
 {
-  "generated_at": "2026-10-21T13:24:48.065440+00:00",
-  "decision": "BLOCKED — SPECIFIC UNSAFE CUTOVER CONDITION",
-  "base_commit": "ca2a7ef864472242309372a222dbec25e291939e",
+  "generated_at": "2026-10-21T14:46:39.784037+00:00",
+  "application_status": "DEPLOYED — DOCKER PRODUCTION VERIFIED",
+  "observability_status": "PARTIAL — PROMETHEUS ACTIVE, GRAFANA ISOLATED/SUSPENDED",
   "authorization": {
     "fresh_database": true,
-    "historical_migration_required": false,
-    "historical_account_login_required": false,
-    "cutover_authorized_once_mandatory_gates_pass": true,
-    "additional_owner_approval_requested": false
+    "application_cutover": true,
+    "gates_independent": true,
+    "additional_approval_requested": false
   },
   "production": {
-    "at": "2026-10-21T13:18:50.174482+00:00",
-    "systemd_pid": 261758,
-    "cwd": "/opt/helix/releases/2aec7a584c18194a3e1c/smooth/backend",
-    "release": "/opt/helix/releases/2aec7a584c18194a3e1c",
-    "hashes": {
-      "/etc/systemd/system/helix.service": "bdd140e96bba30e416ba1a80069f7c91465a1517a0857f2382b0a40a706c2922",
-      "/etc/nginx/sites-available/helix.localip.ir.conf": "2b65ceb53b4c6c5efd945fa9fefe1f9baa30a192e2de30e6c343ec004caaab11",
-      "/opt/helix/current/.helix-build.json": "f88ae5532c960bba83892a6abaf3f2fd254a70671618c96bf7d800a647657956"
+    "url": "https://helix.localip.ir",
+    "hostname": "srv8467792069",
+    "runtime": "host Nginx HTTPS/WSS -> loopback Docker HELIX",
+    "project": "helix-production",
+    "application_fingerprint": "helix@sha256:4a1472f45e955cba7ea2bfefe4554e4d52e57ee8053214d2a4c3d03602618049",
+    "oci_config_id": "sha256:0bab97dec7835a90be631491cc9be015b7a505ac571be0346356e9ab14cb7772",
+    "public_index_sha256": "b933c9b7b8869dc9d46e67cf3ddd63a7316d2d08fd5908160c57c8fc0167fafa",
+    "public_asset_hashes": {
+      "/index.html": "b933c9b7b8869dc9d46e67cf3ddd63a7316d2d08fd5908160c57c8fc0167fafa",
+      "/assets/altcha-BMw4DzDC.js": "96d58556c49ff163af79cb81a2aa502e9caa5f718432a19a70bd24f01c8da81a",
+      "/assets/index-tj46M_V8.js": "422b5dac5ee45aeb593d4e0c84eb7c03c2793c8be7a3b280f8e5fcc986a0fa3d",
+      "/assets/index-COaRMGzW.css": "feee53c8e061e480fcdd75385aaf902a040d47399403bd15ea8d7b1a038df02c",
+      "/": "b933c9b7b8869dc9d46e67cf3ddd63a7316d2d08fd5908160c57c8fc0167fafa"
     },
-    "unchanged": true,
-    "public_https_health_200": true,
-    "public_index_matches_old_release": true,
-    "production_docker_activated": false,
-    "actual_runtime": "systemd helix.service behind host Nginx",
-    "active_fingerprint": "2aec7a584c18194a3e1c01acf7fd026a1e125e8b7c2811544c77ec77fe6c26c0",
-    "docker_production_project_active": false
-  },
-  "candidate_images": {
-    "app": {
-      "reference": "helix@sha256:4a1472f45e955cba7ea2bfefe4554e4d52e57ee8053214d2a4c3d03602618049",
-      "docker_id": "sha256:4a1472f45e955cba7ea2bfefe4554e4d52e57ee8053214d2a4c3d03602618049",
-      "reference_digest": "sha256:4a1472f45e955cba7ea2bfefe4554e4d52e57ee8053214d2a4c3d03602618049",
-      "manifest_digest": "sha256:2ff46fb0e39d21e746aac89021e9fe1e7478afb54c1c607a77fd79959618ec36",
-      "config_id": "sha256:0bab97dec7835a90be631491cc9be015b7a505ac571be0346356e9ab14cb7772",
-      "archive_sha256": "77adc2e8a814384da79dc49bea304e8e5c4f221fb3a7450f5316965762ea3b49"
-    },
-    "prometheus": {
-      "reference": "quay.io/prometheus/prometheus:v3.13.5@sha256:aafa9d694e6a883c02db516d9f6e5b84e14195f49a2a6456a4cca815edda72b9",
-      "docker_id": "sha256:aafa9d694e6a883c02db516d9f6e5b84e14195f49a2a6456a4cca815edda72b9",
-      "reference_digest": "sha256:aafa9d694e6a883c02db516d9f6e5b84e14195f49a2a6456a4cca815edda72b9",
-      "manifest_digest": "sha256:dc30314819e04a1a3d18d0b37eaa9c8e4e18f33f026e3e2d81bf127c7cddcd55",
-      "config_id": "sha256:1ba6092485e679637f4d2fb8f2e0d83706bec6b139908a1f9910d9b424e80941",
-      "archive_sha256": "49c340a563aec902f02a59273b28001c5cc4e96242d4990bda87a0ce9698e223"
-    },
-    "grafana": {
-      "reference": "helix-grafana@sha256:0ba86c2c8d85e837751858ad99a0882757fec868208b6b01902887e2593442d9",
-      "docker_id": "sha256:0ba86c2c8d85e837751858ad99a0882757fec868208b6b01902887e2593442d9",
-      "reference_digest": "sha256:0ba86c2c8d85e837751858ad99a0882757fec868208b6b01902887e2593442d9",
-      "manifest_digest": "sha256:9a67e647a4151f42cbe852902ad93c31c7b7aa9eb7445e65d75097708de6a8c5",
-      "config_id": "sha256:cab75e486ff10b57fd72717f0f918136ba11290362837958475187a7a1e7b100",
-      "archive_sha256": "ab1e112db5c7d3a62526a2f6b3907bb2e16a80a907fc3bfe831382b86d8c3c06"
-    },
-    "node-exporter": {
-      "reference": "helix-node-exporter@sha256:c3f91da714ada22d873de8fb66a6c6fec8bc9bd34f6bbbfacebff5089c3246df",
-      "docker_id": "sha256:c3f91da714ada22d873de8fb66a6c6fec8bc9bd34f6bbbfacebff5089c3246df",
-      "reference_digest": "sha256:c3f91da714ada22d873de8fb66a6c6fec8bc9bd34f6bbbfacebff5089c3246df",
-      "manifest_digest": "sha256:4130782884af6f0f3ae88a6166db6890202d33a4392587520a1a2227428881ed",
-      "config_id": "sha256:e2e2b5b3665812d91f9fb99f7e8380661c06311def01b1acb53f68de34a6e481",
-      "archive_sha256": "1278056a13f134e4090b6e6a6800ec3c2b6ad5f648d6a3a04bee38bf923bf46a"
-    }
-  },
-  "scanner": {
-    "image": "aquasec/trivy:0.76.0@sha256:2416d1f74045b57274df1a340eee6b510cacd73c66a6ccb8da092b117eb7d222",
-    "database": {
-      "Version": 2,
-      "NextUpdate": "2026-10-22T07:13:45.702546867Z",
-      "UpdatedAt": "2026-10-21T07:13:45.702547343Z",
-      "DownloadedAt": "2026-10-21T13:11:11.959377054Z"
-    },
-    "raw_summary_sha256": "42ba027d4ed34322ece25cf9d94e647dc1f46e9dabc8674d3ca71f4d3d35bbf1",
-    "gate": "NO-GO",
-    "threshold_or_ignore_policy_changed": false,
+    "source_application_matches_commit": "af22654b816ba6506a1e399fa780b2364ca5d1a0",
+    "legacy_systemd_active": false,
+    "legacy_start_guard_verified": true,
+    "sole_production_writer": true,
     "services": {
       "app": {
-        "counts": {
-          "LOW": 63,
-          "HIGH": 44,
-          "MEDIUM": 68,
-          "UNKNOWN": 1
-        },
-        "high_critical_unique_cves": 8,
-        "report_sha256": "59558e701f29956e95597c5350ec8e0c48ecd2c69115bbadc48674e9d88a67ca"
-      },
-      "prometheus": {
-        "counts": {
-          "UNKNOWN": 2,
-          "HIGH": 2
-        },
-        "high_critical_unique_cves": 1,
-        "report_sha256": "7656e996c1cd4740430c17d55e3bcfa2ed69ba35c7e64a80649ad6d099e295f2"
-      },
-      "grafana": {
-        "counts": {
-          "MEDIUM": 16,
-          "HIGH": 11,
-          "UNKNOWN": 1,
-          "LOW": 1
-        },
-        "high_critical_unique_cves": 9,
-        "report_sha256": "04c7e7b12b507ce6f157563587fd84de17cbf23c2cd9f693b52f178ed1a83ada"
-      },
-      "node-exporter": {
-        "counts": {
-          "UNKNOWN": 1
-        },
-        "high_critical_unique_cves": 0,
-        "report_sha256": "336297915179ef58d6954a5810288e9d5d44a33257990e18576ef09dca3b984b"
-      }
-    }
-  },
-  "blocking_condition": {
-    "service": "grafana",
-    "retained_main_kin_openapi": "v0.144.0",
-    "required_kin_openapi_fix_floor": "v0.149.0",
-    "unresolved_validation_cves": [
-      "CVE-2026-100349",
-      "CVE-2026-100351",
-      "CVE-2026-100352",
-      "CVE-2026-100353",
-      "CVE-2026-100354"
-    ],
-    "confirmed_public_exploit": false,
-    "complete_non_exploitability_proof": false,
-    "fixed_supported_publisher_artifact_selected": false,
-    "unsigned_plugin_override": false,
-    "risk_accepted": false
-  },
-  "private_runtime": {
-    "scope": "private qualification; not production Docker",
-    "services": {
-      "app": {
-        "image": "helix@sha256:6dd818b91b1de902c806a7f1ebbead3be46e1a7a3efca78fa4dfa3a9232e3271",
-        "healthy": true,
-        "user": "997:987",
+        "image": "helix@sha256:4a1472f45e955cba7ea2bfefe4554e4d52e57ee8053214d2a4c3d03602618049",
+        "docker_image_id": "sha256:4a1472f45e955cba7ea2bfefe4554e4d52e57ee8053214d2a4c3d03602618049",
+        "container_id": "7a6e29ad6ce4c61c0f0326e8b3870b81da52dac372e7a64314312a14fe6781d8",
+        "health": "healthy",
+        "user": "10001:10001",
         "read_only": true,
         "cap_drop": [
           "ALL"
         ],
-        "no_new_privileges": true,
-        "memory_limit_bytes": 805306368,
-        "nano_cpus": 1000000000,
-        "pids_limit": 128,
-        "restart_policy": "unless-stopped",
-        "restart_count": 0,
+        "security_opt": [
+          "no-new-privileges:true"
+        ],
         "ports": {
           "8000/tcp": [
             {
@@ -151,250 +48,248 @@
               "HostPort": "18000"
             }
           ]
-        }
-      },
-      "prometheus": {
-        "image": "quay.io/prometheus/prometheus:v3.13.5@sha256:aafa9d694e6a883c02db516d9f6e5b84e14195f49a2a6456a4cca815edda72b9",
-        "healthy": true,
-        "user": "65534:65534",
-        "read_only": true,
-        "cap_drop": [
-          "ALL"
-        ],
-        "no_new_privileges": true,
-        "memory_limit_bytes": 536870912,
-        "nano_cpus": 500000000,
+        },
+        "memory_bytes": 805306368,
+        "nano_cpus": 1000000000,
         "pids_limit": 128,
         "restart_policy": "unless-stopped",
         "restart_count": 0,
-        "ports": {}
-      },
-      "grafana": {
-        "image": "helix-grafana@sha256:0ba86c2c8d85e837751858ad99a0882757fec868208b6b01902887e2593442d9",
-        "healthy": true,
-        "user": "472:472",
-        "read_only": true,
-        "cap_drop": [
-          "ALL"
-        ],
-        "no_new_privileges": true,
-        "memory_limit_bytes": 805306368,
-        "nano_cpus": 500000000,
-        "pids_limit": 128,
-        "restart_policy": "unless-stopped",
-        "restart_count": 0,
-        "ports": {
-          "3000/tcp": [
-            {
-              "HostIp": "127.0.0.1",
-              "HostPort": "13000"
-            }
-          ]
-        }
+        "mounts": [
+          {
+            "type": "bind",
+            "source": "/var/lib/helix-docker/data",
+            "destination": "/data",
+            "writable": true
+          },
+          {
+            "type": "bind",
+            "source": "/etc/helix/docker-secrets/metrics_token",
+            "destination": "/run/secrets/metrics_token",
+            "writable": false
+          }
+        ]
       },
       "node-exporter": {
         "image": "helix-node-exporter@sha256:c3f91da714ada22d873de8fb66a6c6fec8bc9bd34f6bbbfacebff5089c3246df",
-        "healthy": true,
+        "docker_image_id": "sha256:c3f91da714ada22d873de8fb66a6c6fec8bc9bd34f6bbbfacebff5089c3246df",
+        "container_id": "da27bbe52b7859be3b36c9759d42d660e82e44f83b2bbadbb93ec2add1c9307b",
+        "health": "healthy",
         "user": "65534:65534",
         "read_only": true,
         "cap_drop": [
           "ALL"
         ],
-        "no_new_privileges": true,
-        "memory_limit_bytes": 100663296,
+        "security_opt": [
+          "no-new-privileges:true"
+        ],
+        "ports": {},
+        "memory_bytes": 100663296,
         "nano_cpus": 250000000,
         "pids_limit": 128,
         "restart_policy": "unless-stopped",
         "restart_count": 0,
-        "ports": {}
+        "mounts": [
+          {
+            "type": "bind",
+            "source": "/proc",
+            "destination": "/host/proc",
+            "writable": false
+          },
+          {
+            "type": "bind",
+            "source": "/",
+            "destination": "/host/root",
+            "writable": false
+          },
+          {
+            "type": "bind",
+            "source": "/sys",
+            "destination": "/host/sys",
+            "writable": false
+          },
+          {
+            "type": "bind",
+            "source": "/var/lib/helix-docker/textfile",
+            "destination": "/host/textfile",
+            "writable": false
+          }
+        ]
+      },
+      "prometheus": {
+        "image": "quay.io/prometheus/prometheus:v3.13.5@sha256:aafa9d694e6a883c02db516d9f6e5b84e14195f49a2a6456a4cca815edda72b9",
+        "docker_image_id": "sha256:aafa9d694e6a883c02db516d9f6e5b84e14195f49a2a6456a4cca815edda72b9",
+        "container_id": "19ff9a261a15d555ecf122458653a97dcb8b12f4f999745badeab6d43d2668a2",
+        "health": "healthy",
+        "user": "65534:65534",
+        "read_only": true,
+        "cap_drop": [
+          "ALL"
+        ],
+        "security_opt": [
+          "no-new-privileges:true"
+        ],
+        "ports": {},
+        "memory_bytes": 536870912,
+        "nano_cpus": 500000000,
+        "pids_limit": 128,
+        "restart_policy": "unless-stopped",
+        "restart_count": 0,
+        "mounts": [
+          {
+            "type": "volume",
+            "source": "/var/lib/docker/volumes/helix-production_prometheus_data/_data",
+            "destination": "/prometheus",
+            "writable": true
+          },
+          {
+            "type": "bind",
+            "source": "/opt/helix-docker-production/infra/prometheus",
+            "destination": "/etc/prometheus",
+            "writable": false
+          },
+          {
+            "type": "bind",
+            "source": "/etc/helix/docker-secrets/metrics_token",
+            "destination": "/run/secrets/metrics_token",
+            "writable": false
+          }
+        ]
       }
     }
   },
-  "fresh_database": {
-    "initialized": true,
-    "active": false,
-    "database": "/var/lib/helix-docker/data/smooth.db",
-    "integrity": "ok",
-    "foreign_keys": "ok",
-    "tables": 20,
-    "counts": {
-      "users": 0,
-      "messages": 0,
-      "conversations": 0,
-      "message_attachments": 0
-    },
-    "uploads_empty": true,
-    "independent_from_old_database": true,
-    "permissions": {
-      "/var/lib/helix-docker/data": {
-        "uid": 10001,
-        "gid": 10001,
-        "mode": "0o700"
-      },
-      "/var/lib/helix-docker/data/smooth.db": {
-        "uid": 10001,
-        "gid": 10001,
-        "mode": "0o600"
-      },
-      "/var/lib/helix-docker/data/uploads": {
-        "uid": 10001,
-        "gid": 10001,
-        "mode": "0o700"
-      },
-      "/var/lib/helix-docker/data/.helix-fresh-bootstrap-v1": {
-        "uid": 10001,
-        "gid": 10001,
-        "mode": "0o600"
-      }
-    },
-    "signing_and_captcha_keys_protected_and_persistent": true,
-    "default_accounts": 0,
-    "image": "helix@sha256:4a1472f45e955cba7ea2bfefe4554e4d52e57ee8053214d2a4c3d03602618049",
-    "lifecycle": {
-      "actual_prepared_production_storage_tested": true,
-      "network": "none",
-      "published_ports": [],
-      "startup_on_zero_users": true,
-      "container_restart": true,
-      "container_recreation": true,
-      "still_zero_users_conversations_messages": true,
-      "stable_signing_configuration": true,
-      "image_entrypoint_matches_reviewed_source_sha256": "261f994127fdfc5adff4d012edac70544ba9e76c6c292d38660e6f4ee0c64aa6",
-      "public_cutover": false
-    }
+  "application_security": {
+    "decision": "PASS — REVIEWED APPLICATION SECURITY",
+    "raw_high_findings": 44,
+    "unique_high_cves": 8,
+    "reviewed_individual_rows": 44,
+    "critical_findings": 0,
+    "material_application_risk_accepted": false,
+    "scanner_findings_suppressed": false,
+    "raw_all_service_severity_gate": "NO-GO (retained independently)",
+    "review_file": "infra/security/application-review-20261021.json",
+    "report_sha256": "59558e701f29956e95597c5350ec8e0c48ecd2c69115bbadc48674e9d88a67ca",
+    "scope": "Exact image, components and enforced runtime; any image/scan/runtime drift requires new review"
   },
-  "tests": {
-    "backend": {
-      "passed": 148,
-      "seconds": 635.904
-    },
-    "frontend_passed": 99,
-    "altcha_interop_passed": 1,
-    "frontend_production_build": true,
-    "safety_passed": 20,
-    "security_passed": 7,
-    "chromium_phases": [
-      "phase8",
-      "phase17",
-      "phase18",
-      "phase19",
-      "phase191",
-      "phase20",
-      "phase204",
-      "phase211"
-    ],
-    "chromium_complete_exit": 0,
-    "isolated_fresh_docker_acceptance": {
-      "scope": "isolated fresh Docker database and loopback Nginx; public routing untouched",
-      "ca_hostname_verified_tls": [
-        "TLSv1.2",
-        "TLSv1.3"
-      ],
-      "real_captcha_login": true,
-      "authenticated_wss": true,
-      "presence": true,
-      "typing_start_stop": true,
-      "text_delivery": true,
-      "image_retrieval": true,
-      "foreign_origin_rejected": true,
-      "concurrent_writer_rejected": true,
-      "rebootstrap_refused_without_modification": true,
-      "isolated_rollback_to_separate_old_database": true,
-      "stop_start_persistence": true,
-      "container_recreation_persistence": true,
-      "durable_data": {
-        "rows_sha256": "e11ecee0cda3556a1dc6d54532580ea2f2a0cbe4eb09d633ede519457c9a153a",
-        "counts": {
-          "users": 2,
-          "conversations": 1,
-          "messages": 3,
-          "message_attachments": 1
-        },
-        "uploads": {
-          "images/d5217b78c95148ceb75b2cfd554803b4.png": "6494ddeac23b1e78b1359da74cd16c59a434175d11237a92868a8f6f8f2fcf43"
-        }
-      }
-    },
-    "physical_android_tested": false,
-    "public_docker_acceptance_executed": false
-  },
-  "monitoring": {
-    "scope": "private qualification; not the public production application",
-    "panels": 26,
-    "queries": 30,
+  "observability": {
     "targets": {
       "helix": "up",
       "node": "up",
       "prometheus": "up"
     },
-    "grafana_datasource_queries": "OK",
-    "grafana_access": "SSH tunnel to 127.0.0.1:13000",
-    "public_monitoring_admin": false,
-    "grafana_plugin_trust": {
-      "active_prometheus_plugin": [
-        {
-          "id": "prometheus",
-          "name": "Prometheus",
-          "type": "datasource",
-          "enabled": true,
-          "signature": "valid",
-          "signatureType": "grafana"
-        }
-      ],
-      "unsigned_or_development_overrides": {},
-      "grafana_processes": [
-        "PID                 COMMAND",
-        "578846              grafana",
-        "578920              gpx_grafana-pro"
-      ]
+    "prometheus_private": true,
+    "node_exporter_private": true,
+    "application_metrics_authenticated_and_publicly_blocked": true,
+    "actual_message_upload_metrics_observed": true,
+    "grafana_running": false,
+    "grafana_public_route": false,
+    "grafana_port_13000_listening": false,
+    "grafana_default_compose_profile_disabled": true,
+    "grafana_kin_openapi_verified_in_official_binary": "v0.144.0",
+    "required_kin_openapi_floor": "v0.149.0",
+    "official_stable_version_checked": "13.2.4",
+    "supported_other_branch_modules": {
+      "13.1.8": "v0.144.0",
+      "13.0.11": "v0.147.0",
+      "12.4.13": "v0.147.0"
+    },
+    "suitable_signed_supported_fixed_image_found": false,
+    "grafana_image_signature_verified": false,
+    "unsigned_binary_or_plugin_override_used": false,
+    "grafana_dashboards_and_provisioning_preserved": true,
+    "grafana_preserved_volume": "helix212-rehearsal-2121-20261021_grafana_data",
+    "grafana_archive_sha256": "a1ff9c9bc026902e0b152f18fa1b64c606b771aa816226975f91e4bd38100a2c",
+    "unresolved_grafana_high_rows": 11,
+    "prometheus_high_rows": 2,
+    "prometheus_cve": "CVE-2026-84445 (requires xDS gRPC server; absent in qualified static HTTP deployment)"
+  },
+  "tests": {
+    "backend": 148,
+    "frontend": 99,
+    "interop": 1,
+    "chromium_phases": 8,
+    "security": 11,
+    "safety": 20,
+    "backend_seconds": 556.801,
+    "all_exit_codes": 0,
+    "initial_browser_failure": "Consecutive delete response/render race; added explicit row removal assertion; all eight phases rerun successfully",
+    "runtime_dependency_lock_matches_test_environment": true,
+    "shipping_frontend_js_byte_identical_to_browser_build": true,
+    "physical_android_tested": false,
+    "logs": {
+      "backend-tests.log": "7ff35a46e1bde9ab08927fc1d75d13d07ff53484bcffed7a45242ac8343bc510",
+      "frontend-chromium.log": "8db52b52ed19f06b68cf0791129213aaa1af1c60203088beab644a82ff4825c3",
+      "chromium-final.log": "41f1842c5501c17037a851e0624efb2c1190c3d040d105e2a77c0636a1acfd47",
+      "security-tests-final.log": "c6941b47a8e271eb81e8f56ab0244e850c137ed10cc87cb5fd732e15ec670b73",
+      "safety-tests-final.log": "e47775625f1c846f801d4d5aa5358552818350dc325e74799e8f5420b90c59fd",
+      "rollback-rehearsal.log": "247adadb4afe58e4f039ff706b3b18b54e6ea31322567846fd61338f5e5072d7"
     }
   },
+  "live_acceptance": {
+    "registration": true,
+    "captcha": true,
+    "login": true,
+    "https_tls_versions": [
+      "TLSv1.2",
+      "TLSv1.3"
+    ],
+    "authenticated_wss": true,
+    "foreign_origin_rejected": true,
+    "text_image_messaging": true,
+    "attachments": true,
+    "container_recreation_persistence": true,
+    "jwt_survived_recreation": true,
+    "public_frontend_image_hashes_match": true,
+    "https_health_200": true,
+    "http_redirect_308": true,
+    "external_web_probe_tool": "Could not access this domain; live tests used public DNS/TLS from VPS and Chromium runner"
+  },
+  "fresh_storage": {
+    "path": "/var/lib/helix-docker/data/smooth.db",
+    "initialized_empty": true,
+    "historical_data_imported": false,
+    "current_qa_counts": {
+      "users": 2,
+      "conversations": 1,
+      "messages": 4,
+      "message_attachments": 2
+    },
+    "no_default_admin_accounts": true,
+    "qa_credentials_private": true,
+    "integrity_and_foreign_keys": "ok",
+    "uid_gid": "10001:10001",
+    "database_mode": "0600",
+    "directory_mode": "0700",
+    "signing_secrets_persistent": true
+  },
   "old_archive": {
-    "archive": "/root/helix-cutover-20261021/old-production-online-archive.tar.gz",
-    "sha256": "2a03f9f50ce3e56c27619cc38f2e5915f15274340f79a68480bade5a70fbbb51",
-    "verified_regular_files": 44,
-    "upload_files": 8,
-    "table_count": 20,
-    "offline_archive_integrity": "ok",
-    "foreign_keys": "ok",
-    "source_writer_stopped": false,
-    "final_cutover_stopped_writer_backup": false,
-    "original_data_isolated_or_retired": false,
+    "archive": "/root/helix-decoupled-20261021/old-systemd-offline.tar.gz",
+    "sha256": "19d0b24e23f6649f1d449e2bc0602d640625e625d0e2e63d40b356c0cd030342",
+    "regular_files_verified": 4062,
+    "source_writer_stopped": true,
+    "archived_database_restored_and_integrity_checked": true,
+    "old_release_runtime_environment_uploads_nginx_unit_certificates_included": true,
+    "retired_original_data": "/var/lib/helix-retired-20261021",
+    "original_release_retained": "/opt/helix/releases/2aec7a584c18194a3e1c",
     "off_host_copy": false
   },
   "rollback": {
-    "isolated_fresh_to_old_database_route_drill": true,
-    "original_systemd_runtime_preserved": true,
-    "original_data_preserved": true,
-    "new_data_preserved": true,
-    "public_rollback_needed": false,
-    "production_guard_activated": false,
-    "final_stopped_writer_archive_created": false
+    "ready": true,
+    "script": "infra/scripts/production-cutover.py",
+    "manifest": "/root/helix-decoupled-20261021/release-manifest.json",
+    "isolated_two_database_drill_passed": true,
+    "real_guarded_rollbacks_completed": 3,
+    "fresh_database_never_overwritten": true,
+    "archive_verification_fixed_to_single_sequential_pass": true,
+    "rule_tests_moved_to_isolated_runner_before_maintenance": true,
+    "missing_transient_qualification_units_handled": true,
+    "original_systemd_restore_preserves_docker_data": true
   },
-  "build_source_sha256": {
-    "Dockerfile": "242ee05158224a345107593eea6fc43477466e5eeaf3a47d354fe81c275484ba",
-    "infra/scripts/container-entrypoint.py": "261f994127fdfc5adff4d012edac70544ba9e76c6c292d38660e6f4ee0c64aa6",
-    "smooth/backend/requirements.lock": "4a0e77b761050dc3ded72c7f3f3f419f15eda46287256d19332498f3bf8a7090"
+  "private_evidence": "/root/helix-decoupled-20261021",
+  "github": {
+    "connector_permission_push": false,
+    "connector_permission_pull": true,
+    "push_completed": false,
+    "reason": "Connected GitHub app reports push=false; host previously lacks GitHub credentials. No unauthorized push attempted."
   },
-  "private_evidence": "/root/helix-cutover-20261021",
-  "github_sync": "Reported separately after local commit and normal push attempt",
-  "image_security_checks": {
-    "uid": 10001,
-    "gid": 10001,
-    "suid_sgid_files": 0,
-    "infocmp_absent": true,
-    "homed_absent": true,
-    "perl_archive_tar_absent": true,
-    "no_new_production_secrets_in_tracked_source": true,
-    "no_new_production_secrets_in_exported_image": true,
-    "exported_image_bytes_scanned": 201703424
-  },
-  "production_secret_check": {
-    "known_old_and_new_production_and_monitoring_secrets_checked": true,
-    "no_matches_in_git_history_or_current_source": true,
-    "no_matches_in_fresh_image_export": true,
-    "git_history_bytes_checked": 2227596,
-    "image_export_bytes_checked": 201703424,
-    "secret_values_logged": false
-  }
+  "local_commit": "Recorded after committing this report"
 }

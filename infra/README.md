@@ -1,11 +1,12 @@
-# HELIX Phase 21.2 — controlled Docker transition
+# HELIX — verified Docker production
 
-[Current final cutover report](docs/FINAL-DOCKER-CUTOVER-20261021.fa.md):
-**BLOCKED — security gate remains NO-GO; public production still uses systemd**.
-The owner has authorized a fresh empty database and cutover once the mandatory
-technical and security gates pass. Historical account authentication and data
-migration are no longer release requirements. No additional authorization is
-needed for a cutover that satisfies those gates.
+[Current production report](docs/DECOUPLED-PRODUCTION-CUTOVER-20261021.fa.md):
+**APPLICATION: DEPLOYED — DOCKER PRODUCTION VERIFIED**.
+**OBSERVABILITY: PARTIAL — PROMETHEUS ACTIVE, GRAFANA ISOLATED/SUSPENDED**.
+The authorized cutover used a fresh persistent SQLite database and preserved an
+offline archive of the old systemd deployment. Grafana has its own incomplete
+security gate and is suspended. [Machine-readable status](docs/final-cutover-status.json).
+The qualification commands below describe the earlier isolated engineering work.
 
 Fresh production storage was initialized through the application's own lifespan
 and tested through container restart/recreation with zero accounts. Initialization
