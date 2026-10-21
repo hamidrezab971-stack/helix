@@ -121,8 +121,9 @@ Prometheus پورت host منتشر نمی‌کند.
 
 آزمون مرورگر Chromium از همین میزبان، HTTPS واقعی، دو asset، API سلامت و رد
 ناشناس/credential نامعتبر در ۱۳ مسیر حساس را تأیید کرد؛ خطای browser صفر بود.
-آزمون مستقل خارجی در job مربوط به public-https در PR اجرا می‌شود و نتیجهٔ آن
-باید در checks همان PR بررسی شود. آزمون محلی به‌تنهایی مدرک مبدأ خارجی نیست.
+آزمون مستقل خارجی در workflow مربوط به public-https آماده است، اما در این اجرا
+به‌علت مانع نوشتن GitHub، PR و اجرای تازهٔ آن ایجاد نشد. آزمون محلی به‌تنهایی
+مدرک مبدأ خارجی نیست و موفقیت CI قبلی به این commit نسبت داده نمی‌شود.
 ورود دو حساب QA موجود، WSS احراز‌شده و presence، رد Origin بیگانه و دریافت پیوست
 قبلی موفق بودند؛ هیچ پیام یا upload جدیدی در تولید ایجاد نشد.
 
@@ -150,6 +151,15 @@ SQLite integrity و foreign key check سالم بودند. cache و archiveها�
 3. پس از فعال‌سازی امن، مدیر باید URL واقعی تولید و هر سه داشبورد را باز کند؛
    assetها، redirect، login/session، کوکی و Live در مرورگر مجاز و رد کاربران
    غیرمجاز بررسی شوند. تنها پس از این پذیرش می‌توان تحویل Grafana را کامل نامید.
+
+همگام‌سازی GitHub نیز مانع مستقل دارد: اتصال فعلی `pull=true, push=false` گزارش
+کرد و درخواست ساخت blob با `403 Resource not accessible by integration` رد شد.
+Git روی میزبان نیز credential نوشتن نداشت؛ dry-run مربوط به push با پیام
+`could not read Username` متوقف شد. branch محلی
+`monitoring/final-security-verification` از main ادغام‌شده ساخته و تغییرات
+بازبینی‌شده commit شدند؛ هیچ force-push انجام نشد. PR ساخته یا merge نشده است.
+عنوان و متن PR، patch و bundle برای ادامه پس از فراهم‌شدن دسترسی نوشتن در
+دایرکتوری شواهد آماده می‌شوند. این مانع با نصب یا حدس‌زدن credential دور زده نشد.
 
 شواهد خصوصی این اجرا در
 `/root/helix-monitoring-final-20261021T195707Z` است: inventory کامل moduleها،
