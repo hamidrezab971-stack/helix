@@ -4,6 +4,10 @@ APPLICATION: **DEPLOYED — DOCKER PRODUCTION VERIFIED**
 
 OBSERVABILITY: **PARTIAL — PROMETHEUS ACTIVE, GRAFANA ISOLATED/SUSPENDED**
 
+بازتأیید ساعت ۱۵:۵۶ UTC با همان artifact و بدون تکرار cutover در
+[`PRODUCTION-REVERIFICATION-20261021.fa.md`](PRODUCTION-REVERIFICATION-20261021.fa.md)
+ثبت شده است. تعداد ردیف‌های داده در ادامه، snapshot پذیرش اولیهٔ ساعت ۱۴:۴۳ است.
+
 این گزارش جایگزین وضعیت تاریخی گزارش `FINAL-DOCKER-CUTOVER-20261021.fa.md`
 است. cutover برنامه با مجوز صریح مالک برای SQLite کاملاً تازه انجام شد. امنیت
 Grafana شرط انتشار HELIX قرار نگرفت؛ سرویس آسیب‌پذیر Grafana اجرا نمی‌شود.

@@ -291,5 +291,28 @@
     "push_completed": false,
     "reason": "Connected GitHub app reports push=false; host previously lacks GitHub credentials. No unauthorized push attempted."
   },
-  "local_commit": "Recorded after committing this report"
+  "local_commit": "Recorded after committing this report",
+  "latest_reverification": {
+    "at": "2026-10-21T15:56:13Z",
+    "application_status": "DEPLOYED — DOCKER PRODUCTION VERIFIED",
+    "observability_status": "PARTIAL — PROMETHEUS ACTIVE, GRAFANA ISOLATED/SUSPENDED",
+    "runtime_changed": false,
+    "cutover_repeated": false,
+    "database_reinitialized": false,
+    "runtime_checks_passed": 57,
+    "live_captcha_login_wss_text_image_metrics": "PASS",
+    "raw_severity_gate": "NO-GO preserved; individual application gate PASS",
+    "application_high_rows_reviewed": 44,
+    "production_counts": {
+      "users": 2,
+      "conversations": 1,
+      "messages": 6,
+      "message_attachments": 3
+    },
+    "old_archive_all_4062_regular_files_verified": true,
+    "rollback_inputs_unchanged": true,
+    "github_push_permitted": false,
+    "report": "infra/docs/PRODUCTION-REVERIFICATION-20261021.fa.md",
+    "evidence": "/root/helix-production-recheck-20261021T155014Z"
+  }
 }
