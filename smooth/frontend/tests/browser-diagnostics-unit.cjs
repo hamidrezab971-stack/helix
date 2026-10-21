@@ -3,7 +3,24 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
-const { observe, captureFailure, redact } = require('./browser-diagnostics.cjs')
+const { observe, captureFailure, redact, redactStream } = require('./browser-diagnostics.cjs')
+
+test('Subprocess diagnostics mask credentials even when a JWT crosses stream chunks', async () => {
+  const { PassThrough, Writable } = require('node:stream')
+  const { once } = require('node:events')
+  const input = new PassThrough()
+  let logged = ''
+  const output = new Writable({ write(chunk, encoding, done) { logged += chunk.toString(); done() } })
+  const lines = redactStream(input, output)
+  const closed = once(lines, 'close')
+  const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature'
+  input.write('proxy /sync?after=' + jwt.slice(0, 25))
+  input.write(jwt.slice(25) + '\nBearer private-token password123\n')
+  input.end()
+  await closed
+  assert.match(logged, /proxy \/sync\?after=\[redacted JWT\]/)
+  assert.ok(!logged.includes(jwt) && !logged.includes('private-token') && !logged.includes('password123'))
+})
 
 test('Failure diagnostics redact credentials and observe lifecycle without reading bodies or credentials', async () => {
   const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature'

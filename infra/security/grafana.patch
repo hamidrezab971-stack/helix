@@ -1,0 +1,26 @@
+diff --git a/go.mod b/go.mod
+index 27a7048d..2f161418 100644
+--- a/go.mod
++++ b/go.mod
+@@ -70 +70 @@ require (
+-	github.com/getkin/kin-openapi v0.144.0 // @grafana/grafana-app-platform-squad
++	github.com/getkin/kin-openapi v0.149.0 // @grafana/grafana-app-platform-squad
+@@ -607 +607 @@ require (
+-	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
++	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
+diff --git a/go.sum b/go.sum
+index 7d4b5f62..b4b28753 100644
+--- a/go.sum
++++ b/go.sum
+@@ -1188,0 +1189,2 @@ github.com/getkin/kin-openapi v0.144.0/go.mod h1:3BH9M9XDe/y9M5DSvEocVYAYq1w0qrh
++github.com/getkin/kin-openapi v0.149.0 h1:ZbhmVJ4yq5RZDUsyP8lcBcGMsjsaTqXEFt6isdtMDfA=
++github.com/getkin/kin-openapi v0.149.0/go.mod h1:1+BHDzstro+P5CKtPy1X4PfofnFgmRe6uvMy9+r9fKY=
+@@ -2332,0 +2335,2 @@ github.com/santhosh-tekuri/jsonschema/v6 v6.0.2/go.mod h1:JXeL+ps8p7/KNMjDQk3TCw
++github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 h1:1EYB5IzjZawrrnELUi78f9fPu57HuXjmddZPjrls/28=
++github.com/santhosh-tekuri/jsonschema/v6 v6.0.3/go.mod h1:JXeL+ps8p7/KNMjDQk3TCwPpBy0wYklyWTfbkIzdIFU=
+diff --git a/go.work.sum b/go.work.sum
+index 8cf09901..4bb1bfea 100644
+--- a/go.work.sum
++++ b/go.work.sum
+@@ -1024,0 +1025 @@ github.com/dimchansky/utfbom v1.1.1/go.mod h1:SxdoEBH5qIqFocHMyGOXVAybYJdr71b1Q/
++github.com/dlclark/regexp2 v1.11.0/go.mod h1:DHkYz0B9wPfa6wondMfaivmHpzrQ3v9q8cnmRbL6yW8=

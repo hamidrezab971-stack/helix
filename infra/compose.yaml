@@ -94,6 +94,9 @@ services:
     image: ${GRAFANA_IMAGE:?Resolve image digests first}
     user: '472:472'
     environment:
+      # Applied to Grafana and its Go datasource child; leave room for both
+      # runtimes, SQLite and buffers inside the shared container limit.
+      GOMEMLIMIT: 256MiB
       GF_SECURITY_ADMIN_USER: helix-admin
       GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_password
       GF_SECURITY_SECRET_KEY__FILE: /run/secrets/grafana_secret_key
@@ -119,7 +122,7 @@ services:
       prometheus:
         condition: service_healthy
     cpus: 0.5
-    mem_limit: 384m
+    mem_limit: 768m
     healthcheck:
       test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:3000/api/health']
       interval: 15s

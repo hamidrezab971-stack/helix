@@ -1,11 +1,20 @@
-// Start Vite once, then run the isolated backend/browser regressions serially.
+// Build once and serve the shipping assets for isolated browser regressions.
 const { spawn } = require('node:child_process')
 const path = require('node:path')
 const fs = require('node:fs')
 const os = require('node:os')
 const assertPortFree = require('./ports.cjs')
+const { redactStream } = require('./browser-diagnostics.cjs')
 const root = path.resolve(__dirname,'..')
 let vite, child
+function loggedSpawn(args, env) {
+  const processChild = spawn(process.execPath,args,{cwd:root,stdio:['ignore','pipe','pipe'],env})
+  // Buffer complete lines so tokens split across stream chunks are still masked.
+  for (const [stream, output] of [[processChild.stdout,process.stdout],[processChild.stderr,process.stderr]]) {
+    redactStream(stream, output)
+  }
+  return processChild
+}
 async function stop() {
   if(child && child.exitCode === null) child.kill('SIGTERM')
   if(vite && vite.exitCode === null) {
@@ -16,7 +25,14 @@ async function main() {
   process.env.HELIX_BROWSER_ARTIFACTS ||= fs.mkdtempSync(path.join(os.tmpdir(), 'smooth-browser-evidence-'))
   console.log(`Browser evidence directory: ${process.env.HELIX_BROWSER_ARTIFACTS}`)
   await assertPortFree(5173)
-  vite = spawn(process.execPath,[path.join(root,'node_modules/vite/bin/vite.js'),'--host','127.0.0.1'],{cwd:root,stdio:'inherit',env:{...process.env,VITE_API_URL:'',VITE_WS_URL:''}})
+  const viteCli = path.join(root,'node_modules/vite/bin/vite.js')
+  const frontendEnv = {...process.env,VITE_API_URL:'',VITE_WS_URL:''}
+  const buildCode = await new Promise((resolve,reject) => {
+    child = loggedSpawn([viteCli,'build'],frontendEnv)
+    child.once('error',reject); child.once('exit',resolve)
+  })
+  if (buildCode !== 0) throw new Error(`Browser production build failed (exit ${buildCode})`)
+  vite = loggedSpawn([viteCli,'preview','--host','127.0.0.1','--port','5173','--strictPort'],frontendEnv)
   let ready = false
   for(let i=0;i<100;i++) {
     if(vite.exitCode !== null) throw new Error('Vite failed to start; use Node >=22.12 and npm ci, with port 5173 free.')
@@ -28,7 +44,7 @@ async function main() {
   for(const phase of phases) {
     if(!['phase8','phase17','phase18','phase19','phase191','phase20','phase204','phase211'].includes(phase)) throw new Error('Unknown browser regression phase')
     const code = await new Promise((resolve,reject) => {
-      child=spawn(process.execPath,[path.join(__dirname,`${phase}.cjs`)],{cwd:root,stdio:'inherit',env:process.env})
+      child=loggedSpawn([path.join(__dirname,`${phase}.cjs`)],process.env)
       child.once('error',reject); child.once('exit',resolve)
     })
     if(code !== 0) throw new Error(`${phase} browser checks failed (exit ${code})`)

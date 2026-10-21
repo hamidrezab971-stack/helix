@@ -22,6 +22,8 @@ def main():
     p.add_argument('--env-file', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True,
                    help='New private evidence directory outside Git')
+    p.add_argument('--db-repository', default='public.ecr.aws/aquasecurity/trivy-db:2',
+                   help='Official Trivy database OCI source (default mirror can deny this host)')
     a = p.parse_args()
     env = dotenv_values(a.env_file)
     refs = {name: env.get(key, '') for name, key in KEYS.items()}
@@ -50,12 +52,14 @@ def main():
         subprocess.run(base + ['--version'], check=True, stdout=log, timeout=120)
     with (output / 'database-update.log').open('x') as log:
         subprocess.run(base + ['image', '--cache-dir', '/scan/cache', '--download-db-only',
+                               '--db-repository', a.db_repository,
                                '--timeout', '5m'], stdout=log, stderr=log, check=True, timeout=360)
     metadata = json.loads((work / 'cache/db/metadata.json').read_text())
     updated = datetime.fromisoformat(metadata['UpdatedAt'].replace('Z', '+00:00'))
     if not 0 <= (datetime.now(timezone.utc) - updated).total_seconds() <= 86400:
         raise RuntimeError('Vulnerability database is stale or has a future timestamp')
-    evidence = {'scanner': SCANNER, 'database': metadata, 'images': {}}
+    evidence = {'scanner': SCANNER, 'database_repository': a.db_repository,
+                'database': metadata, 'images': {}}
     for name, ref in refs.items():
         info = json.loads(subprocess.check_output(['docker', 'image', 'inspect', ref], timeout=20))[0]
         if info['Architecture'] != 'amd64' or info['Os'] != 'linux':

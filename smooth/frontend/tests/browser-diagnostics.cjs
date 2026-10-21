@@ -2,7 +2,9 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
+const { createInterface } = require('node:readline')
 const responses = new WeakMap()
+const bootstrap = new WeakMap()
 
 function redact(value) {
   return String(value).replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '[redacted JWT]')
@@ -11,10 +13,30 @@ function redact(value) {
     .replace(/password123/g, '[redacted fixture password]')
 }
 
+function redactStream(input, output) {
+  return createInterface({input}).on('line', line => output.write(redact(line) + '\n'))
+}
+
 function observe(page) {
   const recent = []
   const requests = new WeakMap()
   responses.set(page, recent)
+  const startup = []
+  bootstrap.set(page, startup)
+  const recordStartup = entry => { startup.push(entry); if (startup.length > 60) startup.shift() }
+  page.on('pageerror', error => recordStartup({event: 'pageerror', message: redact(error.message)}))
+  page.on('response', response => {
+    const url = new URL(response.url())
+    if (url.origin === 'http://127.0.0.1:5173' && !url.pathname.startsWith('/api/')) {
+      recordStartup({event: 'resource', path: url.pathname, status: response.status()})
+    }
+  })
+  page.on('requestfailed', request => {
+    const url = new URL(request.url())
+    if (url.origin === 'http://127.0.0.1:5173' && !url.pathname.startsWith('/api/')) {
+      recordStartup({event: 'resource-failed', path: url.pathname, failure: redact(request.failure()?.errorText)})
+    }
+  })
   page.on('response', response => {
     const url = new URL(response.url())
     if (!url.pathname.startsWith('/api/')) return
@@ -60,7 +82,7 @@ async function captureFailure(browser, error) {
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 })
   const report = { phase, error: redact(error?.stack || error), browser: browser?.version(), pages: [] }
   for (const [index, page] of (browser?.contexts().flatMap(context => context.pages()) || []).entries()) {
-    const result = { index, responses: responses.get(page) || [] }
+    const result = { index, responses: responses.get(page) || [], bootstrap: bootstrap.get(page) || [] }
     report.pages.push(result)
     try {
       const snapshot = await page.evaluate(() => {
@@ -104,4 +126,4 @@ async function captureFailure(browser, error) {
   return directory
 }
 
-module.exports = { observe, captureFailure, redact }
+module.exports = { observe, captureFailure, redact, redactStream }

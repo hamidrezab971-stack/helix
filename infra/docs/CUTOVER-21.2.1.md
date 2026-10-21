@@ -17,9 +17,9 @@ sealed approval does not cover Docker or the new source changes.
 - Fresh isolated online snapshot and real retained-account credential check;
   complete backend/frontend/Chromium/live stack/restart/rollback gates. Resolve
   the inventory discrepancy: files define 26 panels and 30 queries, not 30 panels.
-  `verify-stack.py` now defaults to expecting the requested 30 panels and fails
-  on that discrepancy. Changing the expected inventory requires an explicit
-  reviewed scope correction, not bypassing the gate in an unattended command.
+  The real-host Phase 21.2.1 request explicitly confirms this scope. The verifier
+  now independently enforces both counts by default, and all 30 expressions
+  have returned real observations through both Prometheus and Grafana.
 - New manifest and transaction integration under `/var/lib/helix-deploy/lock`.
   It must bind every image/config/script and expire on drift. Integration with
   the existing sealed guard remains unfinished; no replacement apply command
@@ -82,6 +82,14 @@ sealed approval does not cover Docker or the new source changes.
    preserving TLS and ACME. Stop `helix.service`; verify inactive, process exit,
    port 8000 release and no remaining writer handles. Do not disable/delete the
    service. Never start Docker against production while this writer is active.
+   A stopped but enabled service can start after a reboot. The reviewed future
+   transaction must first stage `infra/systemd/helix-docker-writer-guard.conf`
+   as a production unit drop-in and bind its hash in the manifest. Its persistent
+   root-owned `/var/lib/helix-deploy/docker-active` marker is created atomically
+   **after** the old writer exits and the final backup passes, and **before**
+   Docker activation. The marker prevents systemd writer startup while Docker
+   may restart. Neither this drop-in nor its production marker is installed by
+   qualification. Guard enforcement and recovery remain release prerequisites.
 4. Create the final consistent backup:
 
    ```bash
@@ -143,9 +151,23 @@ sealed approval does not cover Docker or the new source changes.
     auth, newest text/images/history, WS and private monitoring. If incompatible,
     remain in maintenance and perform reviewed forward repair. **Never overwrite
     production with the pre-cutover DB or media backup to force a rollback.**
+    Before removing the Docker-active marker, the transaction must explicitly
+    stop the exact Docker writer and set its restart policy to `no`, then prove
+    process/port exit. Only then remove the marker and start the retained
+    systemd writer. Keep the unit drop-in available: when the marker is absent,
+    normal systemd startup is allowed. Seal these state transitions under the
+    same deployment lock; the marker alone is not an authorization token.
 
-The earlier 2–5 minute interruption estimate is historical planning only.
-Re-measure the complete stopped-writer/final-copy/validation handoff on current
-isolated resources, agree the window and abort threshold, and keep full suites
-outside downtime. No current production downtime or memory/CPU measurement was
-possible. Disk observed in this session: 33 GiB free and about 6% inodes used.
+The 2026-10-21 isolated handoff measured 16.301 seconds from stopping its writer,
+through a quiesced snapshot, old-runtime validation on a second restored copy,
+and restarting the candidate until API readiness. This is not production
+downtime. Keep a provisional 2–5 minute maintenance window for final checks,
+retained-account login, Docker health and routing validation; agree the abort
+threshold before approval. Full regression suites stay outside downtime.
+
+`../nginx/helix-maintenance.conf` is a concrete unapproved maintenance candidate.
+Its loopback-only derivative passed Nginx syntax and CA-valid TLS tests and
+returned 503 with Retry-After: 60. It was never installed on the public site.
+The live-to-candidate site diff is preserved privately with the current host
+evidence. All old production fingerprints must be rechecked under the deploy
+lock before any future authorization can be bound to them.

@@ -1,5 +1,9 @@
 # Phase 21.2.1 security remediation — release remains NO-GO
 
+Historical review from 2026-10-20. The subsequent real-host builds, scans and
+runtime findings are recorded in [the current host report](HOST-QUALIFICATION-21.2.1.fa.md)
+and [current security assessment](SECURITY-HOST-21.2.1.fa.md).
+
 Review date: 2026-10-20 UTC. Findings are from the retained real image scans,
 not from a rebuild in this restricted session. **No High finding is accepted
 for production by this document.** The new security gate still returns 1.

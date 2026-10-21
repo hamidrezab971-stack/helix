@@ -1,9 +1,11 @@
 # HELIX Phase 21.2 — controlled Docker transition
 
-[Latest Phase 21.2.1 report](docs/PHASE21.2.1.fa.md): **NO-GO**. Security/storage
-guards and scan tooling changed in source; no new image has been built or
-qualified in the restricted follow-up session. Read the
-[risk assessment](docs/SECURITY-REMEDIATION.md) and
+[Latest real-host Phase 21.2.1 report](docs/HOST-QUALIFICATION-21.2.1.fa.md): **NO-GO**.
+The hardened application, rebuilt Node Exporter and pruned Grafana were tested
+on a fresh isolated production snapshot. Patched Prometheus and Grafana main
+builds failed at link; remaining High findings block release. The public systemd
+writer remains active. Read the
+[current risk assessment](docs/SECURITY-HOST-21.2.1.fa.md) and
 [current cutover plan](docs/CUTOVER-21.2.1.md) before using historical results.
 
 Status: **private stack qualified on the real VPS; public migration NO-GO**. Read
@@ -138,6 +140,10 @@ python3 infra/scripts/prepare-rehearsal.py --baseline /PRIVATE/baseline \
    the candidate sources, current dependency lock, and disposable test DBs. Set
    HELIX_QA_BACKEND_PORT=18080 for browser fixtures/Vite so tests never use the
    production port. Use the retained Node 22 toolchain and qualified Python venv.
+   Browser tooling is pinned separately to Playwright 1.64.1. The browser runner
+   builds once and serves the resulting production bundle on loopback 5173,
+   preserving HTTP/WebSocket proxying to the isolated fixture. All eight phases
+   retain their assertions. Subprocess log lines redact JWTs and credentials.
 6. Run the real integration harness from a venv with dotenv/Pillow. Supply a
    separately installed pinned Playwright through NODE_PATH:
 

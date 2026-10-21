@@ -31,6 +31,12 @@ COPY --from=python-deps /venv /venv
 COPY smooth/backend/app/ ./app/
 COPY --from=frontend /build/frontend/dist/ /app/frontend/dist/
 COPY infra/scripts/container-entrypoint.py /app/container-entrypoint.py
+# Reviewed Trixie security updates; keep the base and exact package versions
+# pinned and preserve dpkg metadata for unsuppressed scans.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates=20250419+deb13u1 liblzma5=5.8.1-1+deb13u2 \
+ && rm -rf /var/lib/apt/lists/*
 # No application path needs privileged CLI programs or the vulnerable infocmp tool.
 # Retain package metadata for unsuppressed vulnerability scanning.
 RUN groupadd --gid 10001 helix && useradd --uid 10001 --gid helix --no-create-home helix \

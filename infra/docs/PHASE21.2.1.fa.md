@@ -1,5 +1,8 @@
 # ارزیابی HELIX Phase 21.2.1 — ۲۰ اکتبر ۲۰۲۶
 
+> این گزارش نشست محدود تاریخی است. شواهد تازهٔ build، اسکن و آزمون واقعی VPS
+> در [qualification میزبان](HOST-QUALIFICATION-21.2.1.fa.md) ثبت می‌شوند.
+
 **NO-GO — VERIFIED REMAINING BLOCKERS**
 
 اصلاحات زیر در سورس پیاده‌سازی و آزمون شدند؛ image جدید ساخته یا جایگزین نشد.
