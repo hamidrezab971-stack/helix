@@ -1,18 +1,28 @@
 # HELIX Phase 21.2 — controlled Docker transition
 
-[Latest real-host Phase 21.2.1 report](docs/HOST-QUALIFICATION-21.2.1.fa.md): **NO-GO**.
-The hardened application, rebuilt Node Exporter and pruned Grafana were tested
-on a fresh isolated production snapshot. Patched Prometheus and Grafana main
-builds failed at link; remaining High findings block release. The public systemd
-writer remains active. Read the
-[current risk assessment](docs/SECURITY-HOST-21.2.1.fa.md) and
-[current cutover plan](docs/CUTOVER-21.2.1.md) before using historical results.
+[Current final cutover report](docs/FINAL-DOCKER-CUTOVER-20261021.fa.md):
+**BLOCKED — security gate remains NO-GO; public production still uses systemd**.
+The owner has authorized a fresh empty database and cutover once the mandatory
+technical and security gates pass. Historical account authentication and data
+migration are no longer release requirements. No additional authorization is
+needed for a cutover that satisfies those gates.
 
-Status: **private stack qualified on the real VPS; public migration NO-GO**. Read
-[INVENTORY.md](docs/INVENTORY.md) first and [RESULTS.md](docs/RESULTS.md) for
-executed checks and current security/auth/approval gates. The original systemd
-application still serves production. Production cutover requires explicit
-review and authorization after real-host evidence is complete.
+Fresh production storage was initialized through the application's own lifespan
+and tested through container restart/recreation with zero accounts. Initialization
+is an explicit `--initialize-empty` entrypoint command, requires dedicated empty
+storage, and never overwrites an existing database. Normal startup still refuses
+missing, zero-byte or uninitialized empty databases. Keep the private
+`.helix-fresh-bootstrap-v1` completion marker with database backups and restores;
+`data-safety.py` and `prepare-rehearsal.py` preserve it. An inherited file lock
+prevents two entrypoint writers from using the same storage.
+
+Official Prometheus 3.13.5 was pinned, scanned and installed in the **private
+qualification project only**, reducing its High findings from 12 to 2. Grafana's
+unresolved retained binary findings still block activation. All 26 dashboard
+panels and 30 queries passed against real private measurements after the upgrade.
+The [previous report](docs/HOST-QUALIFICATION-21.2.1.fa.md), retained-data drill
+instructions below and [previous migration plan](docs/CUTOVER-21.2.1.md) are
+historical evidence; the linked final report defines the current fresh-data scope.
 
 The proposed production topology below keeps port 80/443, domain, ACME webroot, certificates and renewal
 hook. The candidate proxies HTTP/static assets and upgraded WebSockets to
@@ -25,7 +35,7 @@ asset URLs requested by already-open tabs; the image supplies current HTML/asset
 ```
 Internet → existing Nginx/TLS → loopback:18000 → HELIX (single worker)
                                                 ↕ bind /data
-                                      existing SQLite + uploads
+                                      fresh SQLite + new uploads
 Private Docker bridge: Prometheus → HELIX token-protected /internal/metrics
                        Prometheus → node-exporter private bridge listener
 SSH tunnel → loopback:13000 Grafana → Prometheus

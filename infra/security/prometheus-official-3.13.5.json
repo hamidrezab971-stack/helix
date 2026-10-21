@@ -1,0 +1,23 @@
+{
+  "service": "prometheus",
+  "upstream_release": "https://github.com/prometheus/prometheus/releases/tag/v3.13.5",
+  "official_registry": "quay.io/prometheus/prometheus",
+  "version": "3.13.5",
+  "platform": "linux/amd64",
+  "reference": "quay.io/prometheus/prometheus:v3.13.5@sha256:aafa9d694e6a883c02db516d9f6e5b84e14195f49a2a6456a4cca815edda72b9",
+  "docker_id": "sha256:aafa9d694e6a883c02db516d9f6e5b84e14195f49a2a6456a4cca815edda72b9",
+  "reference_digest": "sha256:aafa9d694e6a883c02db516d9f6e5b84e14195f49a2a6456a4cca815edda72b9",
+  "manifest_digest": "sha256:dc30314819e04a1a3d18d0b37eaa9c8e4e18f33f026e3e2d81bf127c7cddcd55",
+  "config_id": "sha256:1ba6092485e679637f4d2fb8f2e0d83706bec6b139908a1f9910d9b424e80941",
+  "archive_sha256": "49c340a563aec902f02a59273b28001c5cc4e96242d4990bda87a0ce9698e223",
+  "high_package_findings": 2,
+  "unique_high_cves": [
+    "CVE-2026-84445"
+  ],
+  "critical_findings": 0,
+  "runtime_scope_verified": "private qualification only",
+  "all_26_panels_30_queries_verified": true,
+  "publisher_image_signature_verified": false,
+  "oci_digest_chain_verified": true,
+  "production_security_gate_passed": false
+}

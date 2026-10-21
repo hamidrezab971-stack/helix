@@ -47,12 +47,51 @@ class SafetyTests(unittest.TestCase):
         original.rename(self.root/'real.db'); original.symlink_to(self.root/'real.db')
         with self.assertRaises(RuntimeError): safety.snapshot(self.data,self.env,self.root/'baseline',None)
         self.assertFalse((self.root/'baseline').exists())
+    def test_fresh_marker_survives_backup_and_disposable_restore(self):
+        with sqlite3.connect(self.data/'smooth.db') as db: db.execute('DELETE FROM users')
+        marker=self.data/'.helix-fresh-bootstrap-v1';marker.write_bytes(b'HELIX fresh bootstrap v1\n');marker.chmod(0o600)
+        baseline=self.root/'fresh-backup';safety.snapshot(self.data,self.env,baseline,None)
+        work=self.root/'restored'
+        result=subprocess.run([sys.executable,str(ROOT/'scripts/prepare-rehearsal.py'),'--baseline',str(baseline),'--output',str(work)],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual((work/'data/.helix-fresh-bootstrap-v1').read_bytes(),marker.read_bytes())
+        self.assertEqual((work/'data/.helix-fresh-bootstrap-v1').stat().st_mode & 0o077,0)
+    def test_snapshot_refuses_a_symlink_bootstrap_marker(self):
+        (self.data/'.helix-fresh-bootstrap-v1').symlink_to(self.env)
+        with self.assertRaisesRegex(RuntimeError,'Invalid fresh bootstrap marker'):
+            safety.snapshot(self.data,self.env,self.root/'unsafe-marker',None)
+        self.assertFalse((self.root/'unsafe-marker').exists())
     def test_empty_account_table_is_rejected_without_migrations(self):
         with sqlite3.connect(self.data/'smooth.db') as db: db.execute('DELETE FROM users')
         before=(self.data/'smooth.db').read_bytes()
         r=self.entrypoint(self.data/'smooth.db')
         self.assertNotEqual(r.returncode,0);self.assertIn('refusing empty initialization',r.stderr)
         self.assertEqual((self.data/'smooth.db').read_bytes(),before)
+    def test_incomplete_bootstrap_marker_cannot_authorize_empty_storage(self):
+        with sqlite3.connect(self.data/'smooth.db') as db: db.execute('DELETE FROM users')
+        marker=self.data/'.helix-fresh-bootstrap-v1';marker.write_bytes(b'incomplete')
+        marker.chmod(0o600)
+        before=(self.data/'smooth.db').read_bytes()
+        r=self.entrypoint(self.data/'smooth.db')
+        self.assertIn('refusing empty initialization',r.stderr)
+        self.assertEqual((self.data/'smooth.db').read_bytes(),before)
+    def test_symlink_bootstrap_marker_cannot_authorize_empty_storage(self):
+        with sqlite3.connect(self.data/'smooth.db') as db: db.execute('DELETE FROM users')
+        source=self.root/'marker';source.write_bytes(b'HELIX fresh bootstrap v1\n');source.chmod(0o600)
+        (self.data/'.helix-fresh-bootstrap-v1').symlink_to(source)
+        self.assertIn('refusing empty initialization',self.entrypoint(self.data/'smooth.db').stderr)
+    def test_completed_marker_never_recreates_a_missing_database(self):
+        (self.data/'smooth.db').unlink()
+        marker=self.data/'.helix-fresh-bootstrap-v1';marker.write_bytes(b'HELIX fresh bootstrap v1\n')
+        marker.chmod(0o600)
+        self.assertIn('refusing empty initialization',self.entrypoint(self.data/'smooth.db').stderr)
+        self.assertFalse((self.data/'smooth.db').exists())
+    @unittest.skipUnless(os.geteuid()==0 or os.getegid()==0,'Root rejection applies only to a root test runner')
+    def test_explicit_fresh_bootstrap_refuses_root_without_creating_database(self):
+        (self.data/'smooth.db').unlink()
+        r=subprocess.run([sys.executable,str(ROOT/'scripts/container-entrypoint.py'),'--initialize-empty'],env={**os.environ,'DATABASE_URL':'sqlite:///'+str(self.data/'smooth.db'),'UPLOAD_DIR':str(self.data/'uploads')},capture_output=True,text=True)
+        self.assertIn('non-root runtime',r.stderr)
+        self.assertFalse((self.data/'smooth.db').exists())
     def entrypoint(self,path):
         return subprocess.run([sys.executable,str(ROOT/'scripts/container-entrypoint.py')],env={**os.environ,'DATABASE_URL':'sqlite:///'+str(path),'UPLOAD_DIR':str(self.data/'uploads')},capture_output=True,text=True)
     def test_zero_byte_database_is_rejected_unchanged(self):

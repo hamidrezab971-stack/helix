@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import sqlite3
+import stat
 import subprocess
 
 
@@ -35,6 +36,17 @@ def manifest(root):
 
 
 def quote(name): return '"'+name.replace('"','""')+'"'
+
+
+def fresh_marker(data):
+    path=data/'.helix-fresh-bootstrap-v1'
+    if not path.exists() and not path.is_symlink(): return None
+    info=path.lstat()
+    if (not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077
+            or info.st_uid != (data/'smooth.db').stat().st_uid
+            or path.read_bytes() != b'HELIX fresh bootstrap v1\n'):
+        raise RuntimeError('Invalid fresh bootstrap marker; snapshot refused')
+    return path.read_bytes()
 
 
 def compare(before, after):
@@ -66,6 +78,7 @@ def snapshot(data, env, output, unit, online_rehearsal=False):
     if unit:
         state=subprocess.check_output(['systemctl','show',unit,'-p','ActiveState','--value'],text=True).strip()
         if state != 'inactive': raise RuntimeError('Writer must be inactive before a cutover snapshot')
+    marker=fresh_marker(data)
     before=manifest(data/'uploads')
     if env.is_symlink() or not env.is_file(): raise RuntimeError('Regular private environment file required')
     with connect(data/'smooth.db') as source:
@@ -86,11 +99,15 @@ def snapshot(data, env, output, unit, online_rehearsal=False):
         raise RuntimeError('Persistent environment changed during snapshot; retry after review')
     (output/'uploads-manifest.json').write_text(json.dumps(before,indent=2)+'\n')
     rows=compare(data/'smooth.db',output/'smooth.db')
+    if fresh_marker(data) != marker:
+        raise RuntimeError('Fresh bootstrap marker changed during snapshot')
+    if marker is not None:
+        (output/'.helix-fresh-bootstrap-v1').write_bytes(marker)
     for path in output.rglob('*'):
         if path.is_file():
             with path.open('rb') as f: os.fsync(f.fileno())
     from datetime import datetime, timezone
-    report={'verified':True,'created_at':datetime.now(timezone.utc).isoformat(),'source':str(data),'inactive_unit':unit,'online_rehearsal':online_rehearsal,'cutover_backup':data == Path('/var/lib/helix') and unit == 'helix.service','tables':rows,'upload_files':len(before),'environment_sha256':env_digest}
+    report={'verified':True,'created_at':datetime.now(timezone.utc).isoformat(),'source':str(data),'inactive_unit':unit,'online_rehearsal':online_rehearsal,'cutover_backup':data == Path('/var/lib/helix') and unit == 'helix.service','tables':rows,'upload_files':len(before),'environment_sha256':env_digest,'fresh_bootstrap_marker_preserved':marker is not None}
     (output/'snapshot.json').write_text(json.dumps(report,indent=2)+'\n')
     with (output/'snapshot.json').open('rb') as f: os.fsync(f.fileno())
     for directory in sorted((x for x in output.rglob('*') if x.is_dir()),reverse=True):
