@@ -43,12 +43,17 @@ async function main() {
     const denied = ['/grafana', '/grafana/', '/grafana/login', '/grafana/api/live/ws',
       '/grafana/public/build/test.js', '/prometheus', '/prometheus/', '/prometheus/api/v1/query',
       '/internal/metrics', '/metrics', '/.env', '/docs', '/openapi.json']
+    const deniedStatuses = {}
     for (const path of denied) {
-      assert.equal((await context.request.get(origin + path)).status(), 404, path)
+      const status = (await context.request.get(origin + path)).status()
+      // Private administrator routes return 403 to external source addresses;
+      // suspended routes and all other protected application paths retain 404.
+      assert((path.startsWith('/grafana') ? [403, 404] : [404]).includes(status), path)
+      deniedStatuses[path] = status
       assert.equal((await context.request.get(origin + path, {
         headers: { Authorization: 'Basic ' + Buffer.from('unauthorized:invalid').toString('base64'),
           'X-Forwarded-For': '127.0.0.1' },
-      })).status(), 404, path + ' with untrusted credentials/forwarded header')
+      })).status(), status, path + ' with untrusted credentials/forwarded header')
     }
     const redirect = await context.request.get('http://helix.localip.ir/grafana/', { maxRedirects: 0 })
     assert.equal(redirect.status(), 308)
@@ -56,7 +61,8 @@ async function main() {
     assert.deepEqual(errors, [])
     console.log(JSON.stringify({ origin, chromium: browser.version(), application: 'PASS',
       assets: scripts.length + styles.length, deniedPaths: denied.length,
-      anonymousAndUnauthorizedDenied: true, monitoring: 'NOT ENABLED', browserErrors: errors }))
+      anonymousAndUnauthorizedDenied: true, deniedStatuses,
+      monitoring: deniedStatuses['/grafana/'] === 403 ? 'PRIVATE ACCESS ONLY' : 'NOT ENABLED', browserErrors: errors }))
   } finally {
     await browser.close()
   }
