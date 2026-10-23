@@ -44,7 +44,10 @@ class MetricsTests(unittest.TestCase):
                     assert result.headers['cache-control'] == 'no-store'
                     body=result.text
                     assert token not in body and 'never-export-this' not in body
-                    assert '100000' not in body and 'unknown-private-file' not in body
+                    # Numeric observations can legitimately contain "100000".
+                    # Check the private request paths in labels explicitly.
+                    assert all('route="/api/attachments/'+str(i+100000)+'/content"' not in body for i in range(30)), body
+                    assert 'unknown-private-file' not in body
                     assert 'route="/api/attachments/{attachment_id}/content",status="401"} 30' in body, body
                     assert 'helix_http_request_duration_seconds_bucket{method="GET",route="/api/health",le="+Inf"} 1' in body
                     assert 'helix_uploads_total{kind="attachment",outcome="failure"} 1' in body
