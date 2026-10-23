@@ -80,7 +80,9 @@ def main():
               'production_process_start_time': started, 'scraped_process_identity_matches': True,
               'prometheus_container_id': prometheus['Id'], 'targets': {t['labels']['job']: t['health'] for t in targets},
               'panel_count': 26, 'query_count': 30, 'panels': inventory,
-              'grafana_rendering_verified': False, 'grafana_blocker': 'Security gate; service stopped',
+              'grafana_rendering_verified': False,
+              'grafana_browser_acceptance_assessed': False,
+              'grafana_browser_check': 'verify-grafana-browser.cjs is required separately',
               'empty_active_alerts_is_expected': True}
     args.output.write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps({k: v for k, v in result.items() if k != 'panels'}, indent=2))
