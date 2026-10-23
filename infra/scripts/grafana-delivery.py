@@ -287,8 +287,10 @@ def reachability():
     results = []
     for name, binary in [('grafana', OUT / 'context/grafana'),
                          ('prometheus', OUT / 'context/prometheus/gpx_grafana-prometheus-datasource_linux_amd64')]:
-        with (OUT / ('govulncheck-' + name + '.json')).open('w') as output:
-            run([checker, '-mode=binary', '-json', binary], stdout=output)
+        # The JSON output mode always exits 0, even for detected vulnerabilities.
+        # Text mode preserves the tool's nonzero vulnerability exit status.
+        with (OUT / ('govulncheck-' + name + '.log')).open('w') as output:
+            run([checker, '-mode=binary', '-show=verbose', binary], stdout=output)
         results.append({'binary': name, 'sha256': sha(binary), 'vulnerable_symbols_found': False})
     write('reachability.json', {'checker_version': INPUTS['govulncheck_version'],
           'database': 'official Go vulnerability database', 'binaries': results,
