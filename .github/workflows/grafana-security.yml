@@ -1,0 +1,120 @@
+name: Grafana security build and verified OCI publication
+on:
+  push:
+    branches: ['monitoring/grafana-security-delivery']
+    paths: ['infra/scripts/grafana-delivery.py', 'infra/security/grafana*', '.github/workflows/grafana-security.yml', 'infra/scripts/inspect-grafana-runtime.py', 'infra/scripts/security-gate.py']
+permissions:
+  contents: read
+concurrency:
+  group: grafana-security-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      GOTOOLCHAIN: local
+      CGO_ENABLED: '0'
+      GOMAXPROCS: '3'
+      GOMEMLIMIT: 9GiB
+      GOFLAGS: -p=3
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: grafana/grafana
+          ref: af4a33e3786594ad72f72d97e6744010330c2977
+          path: upstream
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.26.10'
+          cache: false
+      - name: Verify upstream commit and complete publisher plugin signature
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 infra/scripts/grafana-delivery.py prepare
+      - name: Test upstream dependency and routing, build patched backend, inspect every ELF
+        run: python3 infra/scripts/grafana-delivery.py build
+      - name: Fresh complete image scan; no HIGH or CRITICAL exceptions
+        run: python3 infra/scripts/grafana-delivery.py scan
+      - name: Authenticated runtime and publisher signature acceptance
+        run: python3 infra/scripts/grafana-delivery.py smoke
+      - name: Retain qualification evidence and qualified image
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: grafana-qualification-${{ github.sha }}
+          path: |
+            out/*.json
+            out/*.log
+            out/go.*
+            out/grafana-image.tar
+          if-no-files-found: error
+          retention-days: 5
+  publish:
+    needs: qualify
+    if: github.event_name == 'push' && github.repository == 'hamidrezab971-stack/helix'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: grafana-qualification-${{ github.sha }}
+          path: out
+      - name: Verify qualified artifact before granting registry access
+        env:
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os
+          from pathlib import Path
+          out=Path('out')
+          digest=lambda p: hashlib.file_digest(p.open('rb'),'sha256').hexdigest()
+          release=json.loads((out/'release-qualified.json').read_text())
+          assert release['qualified'] is True and release['source_commit']==os.environ['EXPECTED_COMMIT']
+          assert digest(out/'provenance.json')==release['provenance_sha256']
+          provenance=json.loads((out/'provenance.json').read_text())
+          for name,expected in provenance['files'].items():
+              assert Path(name).name==name and digest(out/name)==expected,name
+          assert json.loads((out/'security-summary.json').read_text())['high_critical_package_findings']==0
+          PY
+          docker load -i out/grafana-image.tar
+          test "$(docker image inspect helix-grafana:qualified-candidate --format '{{.Id}}')" = "$(jq -r .image_id out/release-qualified.json)"
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+      - name: Publish qualified OCI image, sign and verify signature and provenance
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          GHCR_USER: ${{ github.actor }}
+          IMAGE: ghcr.io/hamidrezab971-stack/helix-grafana:13.2.4-security1-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+          docker tag helix-grafana:qualified-candidate "$IMAGE"
+          docker push "$IMAGE"
+          REFERENCE=$(docker image inspect "$IMAGE" --format '{{index .RepoDigests 0}}')
+          test -n "$REFERENCE"
+          cosign sign --yes "$REFERENCE"
+          cosign attest --yes --predicate out/provenance.json --type https://helix.localip.ir/attestations/grafana-build/v1 "$REFERENCE"
+          IDENTITY="https://github.com/${GITHUB_WORKFLOW_REF}"
+          cosign verify --certificate-identity "$IDENTITY" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$REFERENCE" > out/oci-signature.json
+          cosign verify-attestation --type https://helix.localip.ir/attestations/grafana-build/v1 --certificate-identity "$IDENTITY" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$REFERENCE" > out/oci-provenance.json
+          jq -n --arg image "$REFERENCE" --arg identity "$IDENTITY" --arg commit "$GITHUB_SHA" '{image:$image,signature_identity:$identity,source_commit:$commit,signature_verified:true,provenance_verified:true}' > out/published-image.json
+          cat out/published-image.json >> "$GITHUB_STEP_SUMMARY"
+          docker logout ghcr.io
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: grafana-publication-${{ github.sha }}
+          path: |
+            out/published-image.json
+            out/oci-signature.json
+            out/oci-provenance.json
+          if-no-files-found: warn
+          retention-days: 30

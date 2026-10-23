@@ -1,0 +1,11 @@
+{
+  "grafana_source": "af4a33e3786594ad72f72d97e6744010330c2977",
+  "grafana_version": "13.2.4",
+  "upstream_image": "grafana/grafana:13.2.4@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f",
+  "go_version": "1.26.10",
+  "kin_openapi": "v0.149.0",
+  "prometheus_plugin_version": "13.2.4",
+  "prometheus_plugin_archive_sha256": "117edd789f96f4dc6f2e79bef6be3ea10e9ffec775e81e05c16954bcc10cc3a0",
+  "scanner": "aquasec/trivy:0.76.0@sha256:2416d1f74045b57274df1a340eee6b510cacd73c66a6ccb8da092b117eb7d222",
+  "database_repository": "ghcr.io/aquasecurity/trivy-db:2"
+}
