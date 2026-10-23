@@ -44,3 +44,13 @@ and deploy only the Grafana service with its existing volume. The existing
 Production acceptance still requires the authenticated HTTPS browser, Grafana
 Live, all 26 panels / 30 queries and application/collection continuity. CI alone
 never authorizes a `DEPLOYED` claim.
+
+The first successful backend build is retained in run `40024360437`. Its full
+scan blocked on Alpine brotli-libs CVE-2026-111497 (1.2.0-r1; fixed 1.2.1-r0).
+The resume manifest pins that Actions artifact's ID, SHA256 and source commit.
+Resume requires the original successful test/build/inspection step, unchanged
+backend build function, source/compiler/dependency inputs and patch, exact image
+and binary identities. It reuses only that backend, rebuilds the OS layer with
+the fixed signed Alpine package and freshly verified publisher plugin, checks
+every Go binary again, and repeats the full fresh scan and runtime gates.
+Remove the resume manifest when changing backend inputs or its build procedure.

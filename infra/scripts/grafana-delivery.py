@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build and qualify Grafana on a disposable Actions runner, never on production."""
 import argparse
+import ast
 from datetime import datetime, timezone
 import hashlib
 import importlib.util
@@ -154,6 +155,91 @@ def build():
     write('image-identity.json', {'image_id': info['Id'], 'source_commit': os.environ['GITHUB_SHA']})
 
 
+def resume():
+    """Reuse only the exact successfully tested backend; requalify the new image."""
+    retained = json.loads((ROOT / 'infra/security/grafana-backend-resume.json').read_text())
+    prefix = 'repos/hamidrezab971-stack/helix/'
+    def api(path):
+        return json.loads(subprocess.check_output(['gh', 'api', prefix + path]))
+    def old_file(path):
+        response = api('contents/' + path + '?ref=' + retained['commit'])
+        return base64.b64decode(response['content'])
+    metadata = api('actions/runs/' + str(retained['run_id']))
+    if (metadata['head_sha'] != retained['commit'] or metadata['event'] != 'push'
+            or metadata['path'] != '.github/workflows/grafana-security.yml'):
+        raise RuntimeError('Retained build workflow identity mismatch')
+    jobs = api('actions/runs/' + str(retained['run_id']) + '/jobs')['jobs']
+    steps = next(j for j in jobs if j['name'] == 'qualify')['steps']
+    tested = next(s for s in steps if s['name'] == 'Test upstream dependency and routing, build patched backend, inspect every ELF')
+    if tested['conclusion'] != 'success':
+        raise RuntimeError('Retained backend did not pass upstream tests, compilation and ELF inspection')
+    old_inputs = json.loads(old_file('infra/security/grafana-build-inputs.json'))
+    for key in ['grafana_source', 'grafana_version', 'go_version', 'kin_openapi']:
+        if old_inputs[key] != INPUTS[key]:
+            raise RuntimeError('Backend input changed; remove resume manifest and compile again')
+    if old_file('infra/security/grafana.patch') != (ROOT / 'infra/security/grafana.patch').read_bytes():
+        raise RuntimeError('Backend patch changed; a fresh compilation is required')
+    def backend_ast(source):
+        return ast.dump(next(n for n in ast.parse(source).body
+                             if isinstance(n, ast.FunctionDef) and n.name == 'build'), include_attributes=False)
+    if backend_ast(old_file('infra/scripts/grafana-delivery.py')) != backend_ast(Path(__file__).read_bytes()):
+        raise RuntimeError('Backend build/test procedure changed; a fresh compilation is required')
+    artifact = api('actions/artifacts/' + str(retained['artifact_id']))
+    if (artifact['digest'] != 'sha256:' + retained['artifact_sha256'] or artifact['expired']
+            or artifact['workflow_run']['id'] != retained['run_id']):
+        raise RuntimeError('Retained Actions artifact identity mismatch')
+    cache = ROOT / 'resume-cache'; cache.mkdir(exist_ok=False)
+    archive = cache / 'source.zip'
+    with archive.open('wb') as stream:
+        run(['gh', 'api', prefix + 'actions/artifacts/' + str(retained['artifact_id']) + '/zip'], stdout=stream)
+    if sha(archive) != retained['artifact_sha256']:
+        raise RuntimeError('Retained Actions archive checksum mismatch')
+    with zipfile.ZipFile(archive) as z:
+        for name in ['grafana-image.tar', 'runtime-modules.json', 'image-identity.json',
+                     'go.mod', 'go.sum', 'go.work', 'go.work.sum', 'security-summary.json']:
+            with z.open(name) as source, (cache / name).open('wb') as target:
+                shutil.copyfileobj(source, target)
+    previous = json.loads((cache / 'runtime-modules.json').read_text())
+    previous_identity = json.loads((cache / 'image-identity.json').read_text())
+    if previous_identity['source_commit'] != retained['commit']:
+        raise RuntimeError('Retained image source identity mismatch')
+    run(['docker', 'load', '-i', cache / 'grafana-image.tar'])
+    loaded = json.loads(subprocess.check_output(['docker', 'image', 'inspect', IMAGE]))[0]
+    if loaded['Id'] != previous_identity['image_id']:
+        raise RuntimeError('Loaded retained image identity mismatch')
+    cid = subprocess.check_output(['docker', 'create', '--network', 'none', '--entrypoint',
+                                   '/__never_execute__', IMAGE], text=True).strip()
+    try:
+        run(['docker', 'cp', cid + ':/usr/share/grafana/bin/grafana', OUT / 'context/grafana'])
+    finally:
+        run(['docker', 'rm', cid], stdout=subprocess.DEVNULL)
+    main = next(b for b in previous['go_binaries'] if b['path'] == 'usr/share/grafana/bin/grafana')
+    if sha(OUT / 'context/grafana') != main['sha256']:
+        raise RuntimeError('Retained tested backend checksum mismatch')
+    for name in ['go.mod', 'go.sum', 'go.work', 'go.work.sum']:
+        shutil.copy2(cache / name, OUT / name)
+    write('backend-resume-verification.json', {**retained, 'upstream_tests_passed': True,
+        'backend_procedure_and_inputs_unchanged': True, 'backend_sha256': main['sha256'],
+        'prior_scan': json.loads((cache / 'security-summary.json').read_text()),
+        'new_complete_image_scan_required': True})
+    shutil.rmtree(cache)
+    run(['docker', 'build', '--platform', 'linux/amd64', '-f',
+         ROOT / 'infra/security/grafana-security.Dockerfile', '--build-arg',
+         'UPSTREAM_IMAGE=' + INPUTS['upstream_image'], '--build-arg',
+         'HELIX_COMMIT=' + os.environ['GITHUB_SHA'], '-t', IMAGE, OUT / 'context'])
+    spec = importlib.util.spec_from_file_location('runtime_inspector', ROOT / 'infra/scripts/inspect-grafana-runtime.py')
+    inspector = importlib.util.module_from_spec(spec); spec.loader.exec_module(inspector)
+    inventory = inspector.inspect(IMAGE, 'go', str(OUT))
+    expected = {b['path']: b['sha256'] for b in previous['go_binaries']}
+    actual = {b['path']: b['sha256'] for b in inventory['go_binaries']}
+    if actual != expected:
+        raise RuntimeError('Repackaging changed a previously inspected Go executable')
+    write('runtime-modules.json', inventory)
+    info = json.loads(subprocess.check_output(['docker', 'image', 'inspect', IMAGE]))[0]
+    write('image-identity.json', {'image_id': info['Id'], 'source_commit': os.environ['GITHUB_SHA'],
+                                'backend_build_commit': retained['commit']})
+
+
 def scan():
     cache = OUT / 'trivy-cache'; cache.mkdir(exist_ok=True)
     base = ['docker', 'run', '--rm', '--mount', f'type=bind,src={OUT},dst=/scan', INPUTS['scanner']]
@@ -175,6 +261,14 @@ def scan():
     if summary['image_id'] != json.loads((OUT / 'image-identity.json').read_text())['image_id']:
         raise RuntimeError('Scan identity does not match built image')
     write('security-summary.json', summary)
+    raw = json.loads((OUT / 'grafana-scan.json').read_text())
+    remaining = [{'target': row['Target'], 'id': v['VulnerabilityID'],
+                  'severity': v['Severity'], 'package': v['PkgName'],
+                  'installed': v['InstalledVersion'], 'fixed': v.get('FixedVersion'),
+                  'status': v.get('Status'), 'url': v.get('PrimaryURL')}
+                 for row in raw['Results'] for v in row.get('Vulnerabilities', [])]
+    write('remaining-findings.json', remaining)
+    print(json.dumps({'all_remaining_findings': remaining}, indent=2))
     print(json.dumps(summary, indent=2))
     if summary['high_critical_package_findings']:
         raise RuntimeError('Unsuppressed Grafana HIGH/CRITICAL security gate failed')
@@ -221,5 +315,5 @@ def smoke():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('stage', choices=['prepare', 'build', 'scan', 'smoke'])
+    parser.add_argument('stage', choices=['prepare', 'build', 'resume', 'scan', 'smoke'])
     globals()[parser.parse_args().stage]()

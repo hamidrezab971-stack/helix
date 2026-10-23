@@ -10,6 +10,9 @@ concurrency:
   cancel-in-progress: false
 jobs:
   qualify:
+    permissions:
+      contents: read
+      actions: read
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
@@ -36,8 +39,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 infra/scripts/grafana-delivery.py prepare
-      - name: Test upstream dependency and routing, build patched backend, inspect every ELF
-        run: python3 infra/scripts/grafana-delivery.py build
+      - name: Build or resume the verified backend and inspect every ELF
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if test -f infra/security/grafana-backend-resume.json; then
+            python3 infra/scripts/grafana-delivery.py resume
+          else
+            python3 infra/scripts/grafana-delivery.py build
+          fi
       - name: Fresh complete image scan; no HIGH or CRITICAL exceptions
         run: python3 infra/scripts/grafana-delivery.py scan
       - name: Authenticated runtime and publisher signature acceptance
