@@ -1,0 +1,116 @@
+{
+  "at": "2026-10-21T19:58:58.718601+00:00",
+  "decision": "BLOCKED — GRAFANA NOT DELIVERED",
+  "production_redeployed": false,
+  "application_nginx_changed": false,
+  "base_commit": "d8ad6213294986f6dd4c8b38f57118b62204ab9d",
+  "latest_release": {
+    "tag_name": "v13.2.4",
+    "published_at": "2026-10-13T11:41:03Z",
+    "html_url": "https://github.com/grafana/grafana/releases/tag/v13.2.4"
+  },
+  "grafana": {
+    "image": "grafana/grafana:13.2.4@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f",
+    "index_digest": "sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f",
+    "amd64_manifest_digest": "sha256:7b22f3edf947329d75eba7a62d9f6ea1ac1e786736813ef7a98cfb275a52e49b",
+    "config_id": "sha256:45900b2eda7da0cbda80b9025e446147d9085fee71675ba86a48a1cad34e4c8a",
+    "main_binary_sha256": "91040ca83733197346a586b79b102a408b269d0d63af72fb78f6f5055ea0df15",
+    "go_version": "go1.26.9",
+    "kin_openapi": [
+      {
+        "Path": "github.com/getkin/kin-openapi",
+        "Version": "v0.144.0",
+        "Sum": "h1:hIRcTH+KjLfkLpYU6bSSfdFpi0fZi1fp+hSPi4aQu9Y="
+      }
+    ],
+    "verified_fix_required": "v0.149.0 or later verified fix",
+    "go_binaries_inspected": 14,
+    "other_elf_inspected": 83,
+    "image_started": false,
+    "signature_verification": "NOT VERIFIED: conventional cosign signature/attestation tags 404; OCI referrer lists empty at index and amd64 manifest",
+    "build_provenance_verification": "NOT VERIFIED: no attached provenance; GitHub manifest attestation lookup 404; source label is not attestation",
+    "report_sha256": "b2bfc636cf4e43ee16ec04e5eb6ef67fa381d077e9118a7cffb2721a262ad54f",
+    "counts": {
+      "MEDIUM": 175,
+      "HIGH": 75,
+      "UNKNOWN": 5,
+      "LOW": 13
+    },
+    "distinct_high_cves": 13,
+    "critical_findings": 0,
+    "grafana_rendering_verified": false,
+    "administrator_production_dashboard_verified": false
+  },
+  "raw_security_gate": {
+    "decision": "NO-GO",
+    "services": {
+      "app": {
+        "counts": {
+          "LOW": 63,
+          "HIGH": 44,
+          "MEDIUM": 68,
+          "UNKNOWN": 1
+        },
+        "high_critical_package_findings": 44,
+        "high_critical_unique_cves": 8,
+        "report_sha256": "cbc220d62b199ecafcc4c39d5e13d0c4146b0c360648cdf1ffa10751ad2d78aa"
+      },
+      "prometheus": {
+        "counts": {
+          "UNKNOWN": 2,
+          "HIGH": 2
+        },
+        "high_critical_package_findings": 2,
+        "high_critical_unique_cves": 1,
+        "report_sha256": "413095ada674fc99968e899bea96b234a856ace639bb8cfe537a8658607943d2"
+      },
+      "grafana": {
+        "counts": {
+          "MEDIUM": 175,
+          "HIGH": 75,
+          "UNKNOWN": 5,
+          "LOW": 13
+        },
+        "high_critical_package_findings": 75,
+        "high_critical_unique_cves": 13,
+        "report_sha256": "b2bfc636cf4e43ee16ec04e5eb6ef67fa381d077e9118a7cffb2721a262ad54f"
+      },
+      "node-exporter": {
+        "counts": {
+          "UNKNOWN": 1
+        },
+        "high_critical_package_findings": 0,
+        "high_critical_unique_cves": 0,
+        "report_sha256": "47abd14acde7c760b7266c081e1d89fa1fe777921f711921d477c95d19b4c33c"
+      }
+    }
+  },
+  "application_security_gate": "PASS — REVIEWED APPLICATION SECURITY",
+  "production_metrics": {
+    "panels": 26,
+    "queries": 30,
+    "all_queries_pass": true,
+    "production_process_identity_matches": true
+  },
+  "protected_proxy_integration": {
+    "checks": 38,
+    "result": "PASS",
+    "real_grafana_upstream": false
+  },
+  "dashboards": {
+    "infra/grafana/dashboards/services.json": "41f167e5b06a6140b212013e5b240c6427e0d00b6b5bb1a0bfa4b94d337db680",
+    "infra/grafana/dashboards/infrastructure.json": "18b1e291ebca51842b24c64363c8ed8cdc75d46beaee960ead675197cbd72eb9",
+    "infra/grafana/dashboards/application.json": "b1134f09cac76bfd9e591151d0f98bdb0879302b7f166b58466d4982e6854feb"
+  },
+  "production_urls": {
+    "https://helix.localip.ir/": 200,
+    "https://helix.localip.ir/api/health": 200,
+    "https://helix.localip.ir/grafana/": 404,
+    "https://helix.localip.ir/prometheus/": 404
+  },
+  "remaining_blockers": [
+    "Supported publisher Grafana image with fixed actual runtime and plugins, verified publisher signature/provenance, and successful security gates",
+    "Provision and verify administrator VPN/IAP or approved SSH tunnel plus edge password, then Grafana login/RBAC",
+    "Successful real authorized production browser dashboard, assets, redirects, secure cookies and Live verification"
+  ]
+}

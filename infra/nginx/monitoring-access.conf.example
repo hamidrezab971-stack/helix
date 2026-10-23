@@ -2,6 +2,7 @@
 # Use a verified VPN administrator address range if remote access is required.
 # Default: SSH tunnel/loopback access with an additional administrator password.
 # Never trust X-Forwarded-For to authorize access or enable satisfy any.
+satisfy all;
 allow 127.0.0.1;
 allow ::1;
 deny all;

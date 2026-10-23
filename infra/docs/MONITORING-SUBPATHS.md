@@ -1,5 +1,14 @@
 # HELIX monitoring subpaths — 2026-10-21
 
+The final fresh review is [FINAL-MONITORING-20261021.fa.md](FINAL-MONITORING-20261021.fa.md)
+with machine-readable evidence in
+[`grafana-release-review-20261021.json`](../security/grafana-release-review-20261021.json).
+`inspect-grafana-runtime.py` now inventories every regular ELF, including all
+bundled datasource binaries, without starting Grafana. The real Nginx templates
+pass 38 isolated integration checks in `test-monitoring-routes.py`; this is not
+evidence of a working production Grafana dashboard. The access template explicitly
+requires `satisfy all` so both the source ACL and password must pass.
+
 Production explicitly returns 404 for `/grafana`, `/grafana/`, `/prometheus`
 and `/prometheus/`, including descendant paths. These requests cannot fall
 through to the application SPA. The active Nginx site was syntax checked,

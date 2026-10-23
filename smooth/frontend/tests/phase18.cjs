@@ -204,7 +204,10 @@ async function main() {
   await alice.setViewportSize({width:390,height:800})
   await alice.locator('#message-content').focus()
   await alice.setViewportSize({width:390,height:390})
-  assert.ok((await alice.locator('#message-content').boundingBox()).y + (await alice.locator('#message-content').boundingBox()).height <= 390)
+  await expect.poll(async () => {
+    const box = await alice.locator('#message-content').boundingBox()
+    return box.y + box.height
+  }).toBeLessThanOrEqual(390)
   await alice.setViewportSize({width:390,height:800})
   await h.openMenu(alice,h.rowById(alice,saved.id))
   await alice.evaluate(() => history.back())
