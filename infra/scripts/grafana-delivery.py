@@ -289,7 +289,7 @@ def smoke():
             try:
                 health = json.load(urllib.request.urlopen(url + '/api/health', timeout=2))
                 if health.get('database') == 'ok': break
-            except (urllib.error.URLError, TimeoutError): pass
+            except (urllib.error.URLError, TimeoutError, ConnectionError): pass
             time.sleep(1)
         else: raise RuntimeError('Grafana did not become healthy')
         request = urllib.request.Request(url + '/api/plugins/prometheus/settings',

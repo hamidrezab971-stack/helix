@@ -681,9 +681,17 @@ async function main() {
   await alice.reload()
   await unread(alice, names.bob, 1)
   const priorAuth = await alice.evaluate(() => window.realtimeTest.authenticated)
+  const switchedBobAuth = await bob.evaluate(() => window.realtimeTest.authenticated)
+  const switchedTabAuth = await aliceTab.evaluate(() => window.realtimeTest.authenticated)
   await stopBackend()
   await startBackend()
-  await alice.waitForFunction(previous => window.realtimeTest.authenticated > previous, priorAuth)
+  // Receipt and unread checks require every participant's subscription after
+  // restart, including the sender and the second receiver tab.
+  await Promise.all([
+    alice.waitForFunction(previous => window.realtimeTest.authenticated > previous, priorAuth),
+    bob.waitForFunction(previous => window.realtimeTest.authenticated > previous, switchedBobAuth),
+    aliceTab.waitForFunction(previous => window.realtimeTest.authenticated > previous, switchedTabAuth),
+  ])
   await unread(alice, names.bob, 1)
   await openRecent(alice, names.bob)
   await status(bob, 'switched conversation unread', 'Read')
