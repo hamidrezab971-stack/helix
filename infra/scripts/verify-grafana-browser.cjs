@@ -57,9 +57,10 @@ async function main() {
     const user = userResponse.data
     assert.equal(user.login, 'helix-admin')
     assert.equal(user.isGrafanaAdmin, true)
-    const cookies = await context.cookies(origin)
+    const cookies = await context.cookies(origin + '/grafana/')
     const session = cookies.find(cookie => cookie.name === 'grafana_session')
     assert(session && session.secure && session.httpOnly && session.sameSite === 'Lax')
+    assert(session.path.startsWith('/grafana'))
     report.session = { secure: session.secure, httpOnly: session.httpOnly,
       sameSite: session.sameSite, path: session.path, administrator: true }
     const pluginResponse = await get(origin + '/grafana/api/plugins/prometheus/settings')
