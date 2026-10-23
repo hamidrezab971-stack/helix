@@ -134,7 +134,8 @@ services:
     cpus: 0.5
     mem_limit: 768m
     healthcheck:
-      test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:3000/api/health']
+      # Domain enforcement and subpath handling apply to loopback checks too.
+      test: [CMD, wget, -q, -O, /dev/null, --header, 'Host: helix.localip.ir', 'http://127.0.0.1:3000/grafana/api/health']
       interval: 15s
       timeout: 5s
       retries: 5
