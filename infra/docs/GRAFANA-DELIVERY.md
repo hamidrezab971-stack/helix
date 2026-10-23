@@ -54,3 +54,6 @@ and binary identities. It reuses only that backend, rebuilds the OS layer with
 the fixed signed Alpine package and freshly verified publisher plugin, checks
 every Go binary again, and repeats the full fresh scan and runtime gates.
 Remove the resume manifest when changing backend inputs or its build procedure.
+Alpine's authoritative secdb also identifies musl 1.2.6-r3 as the fix for
+CVE-2026-107891, whose severity details were missing from the Trivy database.
+Both musl and musl-utils are updated rather than discarding that warning.
