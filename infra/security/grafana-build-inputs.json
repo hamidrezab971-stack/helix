@@ -6,6 +6,8 @@
   "kin_openapi": "v0.149.0",
   "alpine_brotli_version": "1.2.1-r0",
   "alpine_musl_version": "1.2.6-r3",
+  "alpine_zlib_version": "1.3.2-r1",
+  "govulncheck_version": "v1.9.0",
   "prometheus_plugin_version": "13.2.4",
   "prometheus_plugin_archive_sha256": "117edd789f96f4dc6f2e79bef6be3ea10e9ffec775e81e05c16954bcc10cc3a0",
   "scanner": "aquasec/trivy:0.76.0@sha256:2416d1f74045b57274df1a340eee6b510cacd73c66a6ccb8da092b117eb7d222",

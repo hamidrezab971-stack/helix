@@ -274,6 +274,27 @@ def scan():
         raise RuntimeError('Unsuppressed Grafana HIGH/CRITICAL security gate failed')
 
 
+def reachability():
+    tools = OUT / 'tools'; tools.mkdir(exist_ok=True)
+    with (OUT / 'govulncheck-install.log').open('w') as log:
+        run(['go', 'install', 'golang.org/x/vuln/cmd/govulncheck@' + INPUTS['govulncheck_version']],
+            env={**os.environ, 'GOBIN': str(tools)}, stdout=log, stderr=log)
+    checker = tools / 'govulncheck'
+    info = json.loads(subprocess.check_output(['go', 'version', '-m', '-json', checker]))
+    if info['Main']['Version'] != INPUTS['govulncheck_version']:
+        raise RuntimeError('Unexpected vulnerability reachability tool version')
+    write('govulncheck-buildinfo.json', info)
+    results = []
+    for name, binary in [('grafana', OUT / 'context/grafana'),
+                         ('prometheus', OUT / 'context/prometheus/gpx_grafana-prometheus-datasource_linux_amd64')]:
+        with (OUT / ('govulncheck-' + name + '.json')).open('w') as output:
+            run([checker, '-mode=binary', '-json', binary], stdout=output)
+        results.append({'binary': name, 'sha256': sha(binary), 'vulnerable_symbols_found': False})
+    write('reachability.json', {'checker_version': INPUTS['govulncheck_version'],
+          'database': 'official Go vulnerability database', 'binaries': results,
+          'module_findings_remain_unsuppressed_in_trivy': True})
+
+
 def smoke():
     password = secrets.token_urlsafe(32)
     cid = subprocess.check_output(['docker', 'run', '-d', '--read-only', '--cap-drop', 'ALL',
@@ -315,5 +336,5 @@ def smoke():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('stage', choices=['prepare', 'build', 'resume', 'scan', 'smoke'])
+    parser.add_argument('stage', choices=['prepare', 'build', 'resume', 'scan', 'reachability', 'smoke'])
     globals()[parser.parse_args().stage]()

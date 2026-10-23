@@ -1,7 +1,7 @@
 ARG UPSTREAM_IMAGE
 FROM ${UPSTREAM_IMAGE}
 USER 0:0
-RUN apk add --no-cache --upgrade brotli-libs=1.2.1-r0 musl=1.2.6-r3 musl-utils=1.2.6-r3
+RUN apk add --no-cache --upgrade brotli-libs=1.2.1-r0 musl=1.2.6-r3 musl-utils=1.2.6-r3 zlib=1.3.2-r1
 # Retain the digest-pinned publisher frontend and runtime files. Replace the
 # backend with the tested same-release build and the complete signed plugin.
 RUN rm -rf /usr/share/grafana/data/plugins-bundled/*

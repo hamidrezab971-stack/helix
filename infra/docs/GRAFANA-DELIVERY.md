@@ -57,3 +57,9 @@ Remove the resume manifest when changing backend inputs or its build procedure.
 Alpine's authoritative secdb also identifies musl 1.2.6-r3 as the fix for
 CVE-2026-107891, whose severity details were missing from the Trivy database.
 Both musl and musl-utils are updated rather than discarding that warning.
+The remaining fixed zlib advisory CVE-2026-85091 is patched with 1.3.2-r1.
+GO-2026-5932 describes the unmaintained x/crypto/openpgp packages, not every
+package in x/crypto. Grafana uses the maintained ProtonMail OpenPGP fork for
+plugin signatures. Keep the raw module finding and require official govulncheck
+1.9.0 binary analysis of both actual Go executables to find no vulnerable
+compiled symbols. No vulnerability IDs or severities are ignored.

@@ -50,6 +50,8 @@ jobs:
           fi
       - name: Fresh complete image scan; no HIGH or CRITICAL exceptions
         run: python3 infra/scripts/grafana-delivery.py scan
+      - name: Check actual compiled vulnerable symbols with the official Go database
+        run: python3 infra/scripts/grafana-delivery.py reachability
       - name: Authenticated runtime and publisher signature acceptance
         run: python3 infra/scripts/grafana-delivery.py smoke
       - name: Retain qualification evidence and qualified image
