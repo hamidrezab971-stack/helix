@@ -50,6 +50,7 @@ jobs:
           path: |
             out/*.json
             out/*.log
+            out/*.zip
             out/go.*
             out/grafana-image.tar
           if-no-files-found: error
