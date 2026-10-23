@@ -106,6 +106,12 @@ jobs:
           IDENTITY="https://github.com/${GITHUB_WORKFLOW_REF}"
           cosign verify --certificate-identity "$IDENTITY" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$REFERENCE" > out/oci-signature.json
           cosign verify-attestation --type https://helix.localip.ir/attestations/grafana-build/v1 --certificate-identity "$IDENTITY" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$REFERENCE" > out/oci-provenance.json
+          # Keep the complete signed OCI layout so a private VPS can verify the
+          # same registry signatures/provenance without exporting a CI token.
+          cosign save --dir out/signed-oci "$REFERENCE"
+          cosign verify --local-image --certificate-identity "$IDENTITY" --certificate-oidc-issuer https://token.actions.githubusercontent.com out/signed-oci > out/local-oci-signature.json
+          cosign verify-attestation --local-image --type https://helix.localip.ir/attestations/grafana-build/v1 --certificate-identity "$IDENTITY" --certificate-oidc-issuer https://token.actions.githubusercontent.com out/signed-oci > out/local-oci-provenance.json
+          tar -C out/signed-oci -cf out/grafana-signed-oci.tar .
           jq -n --arg image "$REFERENCE" --arg identity "$IDENTITY" --arg commit "$GITHUB_SHA" '{image:$image,signature_identity:$identity,source_commit:$commit,signature_verified:true,provenance_verified:true}' > out/published-image.json
           cat out/published-image.json >> "$GITHUB_STEP_SUMMARY"
           docker logout ghcr.io
@@ -117,5 +123,8 @@ jobs:
             out/published-image.json
             out/oci-signature.json
             out/oci-provenance.json
+            out/local-oci-signature.json
+            out/local-oci-provenance.json
+            out/grafana-signed-oci.tar
           if-no-files-found: warn
           retention-days: 30

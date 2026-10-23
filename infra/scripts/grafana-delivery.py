@@ -117,9 +117,16 @@ def build():
         ['go', 'list', '-m', '-json', 'github.com/getkin/kin-openapi'], cwd=SOURCE))
     if selected['Version'] != INPUTS['kin_openapi'] or 'Replace' in selected:
         raise RuntimeError('Patched kin-openapi was not selected in the complete workspace')
-    run(['go', 'test', 'github.com/getkin/kin-openapi/openapi3',
-         'github.com/getkin/kin-openapi/openapi3filter', './pkg/api/routing',
-         './pkg/plugins/manager/signature'], cwd=SOURCE)
+    # Upstream's APIs.guru test downloads a fixture into its own testdata tree.
+    # Keep Go's verified module cache immutable and run the complete affected
+    # package suites in a writable copy of that checksum-verified module.
+    dependency_tests = ROOT / 'kin-openapi-tests'
+    shutil.copytree(selected['Dir'], dependency_tests)
+    for path in [dependency_tests, *dependency_tests.rglob('*')]:
+        path.chmod(path.stat().st_mode | stat.S_IWUSR)
+    run(['go', 'test', './openapi3', './openapi3filter'], cwd=dependency_tests,
+        env={**os.environ, 'GOWORK': 'off'})
+    run(['go', 'test', './pkg/api/routing', './pkg/plugins/manager/signature'], cwd=SOURCE)
     run(['make', 'build-go', 'GO=go', 'OS=linux', 'ARCH=amd64'], cwd=SOURCE)
     run(['go', 'mod', 'verify'], cwd=SOURCE)
     shutil.copy2(SOURCE / 'bin/linux/amd64/grafana', OUT / 'context/grafana')

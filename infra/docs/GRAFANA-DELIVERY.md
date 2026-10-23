@@ -27,6 +27,10 @@ OIDC. That job verifies evidence hashes, source commit and Docker image identity
 pushes GHCR, then signs and attests the immutable image with Cosign. Both the
 signature and provenance must verify for the exact workflow identity and GitHub
 OIDC issuer. `published-image.json` is produced only after verification.
+The complete signed OCI layout is also exported and verified locally in CI.
+This permits independent host verification and deployment of the identical
+qualified image archive through authenticated GitHub artifacts, without passing
+a CI credential to the VPS or changing private GHCR package visibility.
 
 Trust is stated precisely: the upstream base image is pinned by digest, but no
 upstream OCI publisher signature is claimed. The final artifact is a tested HELIX
