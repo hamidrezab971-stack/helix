@@ -10,7 +10,18 @@ const root = path.resolve(__dirname, '../..')
 const output = process.env.HELIX_GRAFANA_EVIDENCE
 assert(output && path.isAbsolute(output), 'Private evidence directory is required')
 assert(!output.startsWith(root + '/'), 'Evidence must stay outside Git')
-const readSecret = name => fs.readFileSync(process.env[name], 'utf8').trim()
+const credentialValues = new Set()
+const readSecret = name => {
+  const value = fs.readFileSync(process.env[name], 'utf8').trim()
+  credentialValues.add(value)
+  return value
+}
+const redact = message => {
+  for (const value of credentialValues) {
+    if (value) message = message.split(value).join('[redacted]')
+  }
+  return message
+}
 
 async function main() {
   const browser = await chromium.launch({ headless: true,
@@ -144,4 +155,4 @@ async function main() {
   console.log(JSON.stringify({ result: report.result, dashboards: report.dashboards.length,
     panels: 26, queries: 30, live: report.live, secureSession: report.session }))
 }
-main().catch(error => { console.error(error.message); process.exitCode = 1 })
+main().catch(error => { console.error(redact(error.message)); process.exitCode = 1 })
