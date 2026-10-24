@@ -64,6 +64,27 @@ def recreate_prometheus(overlay):
         '--wait', '--wait-timeout', '120', 'prometheus'], check=True, timeout=150)
 
 
+def reload_nginx(expected_status):
+    subprocess.run(['nginx', '-t'], check=True)
+    subprocess.run(['systemctl', 'reload', 'nginx'], check=True)
+    # Reload acknowledgement precedes new workers accepting connections. Verify
+    # three fresh TLS connections before testing the new generation; 200 always
+    # fails immediately. Do not accept the previous ACL's 403 as public delivery.
+    stable = 0
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    for _ in range(75):
+        request = urllib.request.Request('https://helix.localip.ir/grafana/api/health',
+                                         headers={'Connection': 'close'})
+        try:
+            with opener.open(request, timeout=5) as response: status = response.status
+        except urllib.error.HTTPError as error: status = error.code
+        assert status in (401, 403), 'Unexpected anonymous monitoring response during reload'
+        stable = stable + 1 if status == expected_status else 0
+        if stable == 3: return
+        time.sleep(.2)
+    raise RuntimeError('Nginx worker generation did not converge to the protected policy')
+
+
 def save_rollback(paths):
     if BACK.exists():
         assert (Q / 'exposure-rolled-back.json').exists(), 'Existing activation must be reviewed first'
@@ -92,8 +113,7 @@ def rollback():
         if p == SITE: continue
         if row['exists']: atomic(p, Path(row['copy']).read_bytes(), row['mode'], row['gid'])
         elif p.exists(): p.unlink()
-    subprocess.run(['nginx', '-t'], check=True)
-    subprocess.run(['systemctl', 'reload', 'nginx'], check=True)
+    reload_nginx(403)
     recreate_prometheus(False)
     subprocess.run(['systemctl', 'restart', 'systemd-journald'], check=True)
     (Q / 'exposure-rolled-back.json').write_text(json.dumps({'at': time.time(), 'closed': True}) + '\n')
@@ -186,8 +206,7 @@ def main():
         public_dir.chmod(0o755)
         atomic(public_dir / 'index.html', (ROOT / 'infra/nginx/monitoring-index.html').read_bytes())
         atomic(SITE, new_site.encode())
-        subprocess.run(['nginx', '-t'], check=True)
-        subprocess.run(['systemctl', 'reload', 'nginx'], check=True)
+        reload_nginx(401)
         subprocess.run(['python3', str(ROOT / 'infra/scripts/verify-monitoring-access.py')], check=True, timeout=120)
         for name, original in [('helix-production-app', app), ('helix-production-node-exporter-1', node),
                                 ('helix-production-grafana-1', graf)]:

@@ -29,6 +29,8 @@ def main():
             conn.request(method, path, body, h)
             r = conn.getresponse(); data = r.read()
             assert r.status in expected, f'{method} {path}: {r.status}; expected {expected}'
+            assert not any(value['password'].encode() in data for account in credentials.values()
+                           for value in account.values()), 'A response exposed a protected credential; value withheld'
             checks.append({'path': path, 'role': role or 'anonymous', 'method': method, 'status': r.status})
             return r, data
         finally: conn.close()
@@ -42,6 +44,15 @@ def main():
         assert 'HELIX monitoring' in r.getheader('WWW-Authenticate', '')
         request(path, [401], headers={'Authorization': 'Basic aW52YWxpZDppbnZhbGlk',
             'X-Forwarded-For': '127.0.0.1', 'X-Real-IP': '127.0.0.1'})
+    for role, value in credentials.items():
+        invalid = 'Basic ' + base64.b64encode(
+            (value['edge']['username'] + ':deliberately-invalid-password').encode()).decode()
+        request('/grafana/login', [401], headers={'Authorization': invalid})
+        checks[-1]['role'] = role + ' with incorrect password'
+    value = credentials['administrator']['edge']
+    invalid = 'Basic ' + base64.b64encode((value['username'] + ':deliberately-invalid-password').encode()).decode()
+    request('/prometheus/', [401], headers={'Authorization': invalid})
+    checks[-1]['role'] = 'administrator with incorrect password'
     for path in ['/Grafana/api/user', '/grafana;bad/api/user', '/Prometheus/api/v1/query',
                  '/prometheus/metrics', '/prometheus/federate', '/prometheus/-/reload',
                  '/prometheus/api/v1/admin/tsdb/delete_series', '/internal/metrics', '/metrics', '/.env']:

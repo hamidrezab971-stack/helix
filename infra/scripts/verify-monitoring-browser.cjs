@@ -241,6 +241,9 @@ async function main() {
    await login(); assert.equal((await get('/grafana/api/user')).status, 200)
    result.revokedSessionDeniedAndReloginPassed = true
    if (role === 'stakeholder' && !mobile) {
+    // Stop the previous SPA's session poller before expiring the browser cookie;
+    // its own login redirect must not race a new explicit navigation.
+    await page.goto('about:blank')
     const expired = (await context.cookies(origin + '/grafana/')).find(x => x.name === 'grafana_session')
     await context.addCookies([{ ...expired, expires: Math.floor(Date.now() / 1000) - 10 }])
     assert(!(await context.cookies(origin + '/grafana/')).some(x => x.name === 'grafana_session'))
