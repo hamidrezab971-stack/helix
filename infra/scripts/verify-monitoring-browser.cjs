@@ -129,6 +129,18 @@ async function main() {
     }
     assert.equal((await context.request.get(origin + '/prometheus/')).status(), 401)
     assert.equal((await context.request.get(origin + '/prometheus/api/v1/query?query=up')).status(), 401)
+    for (const url of [
+     '/grafana/api/datasources/proxy/uid/helix-prometheus/api/v1/status/config',
+     '/grafana/api/datasources/proxy/uid/helix-prometheus/metrics',
+     '/grafana/api/datasources/uid/helix-prometheus/resources/api/v1/status/config',
+     '/grafana/api/datasources/uid/helix-prometheus/resources/api/v1/status/runtimeinfo',
+     '/grafana/api/datasources/uid/helix-prometheus/resources/metrics',
+     '/grafana/api/datasources/uid/helix-prometheus/resources/api/v1/targets',
+     '/grafana/api/datasources/uid/helix-prometheus/resources/%61pi/v1/status/config',
+     '/grafana/api/datasources/uid/helix-prometheus/resources/api/v1/../v1/status/config']) {
+     assert.equal((await context.request.get(origin + url)).status(), 404, url)
+    }
+    result.datasourceProxyCannotBypassPrometheusAdminBoundary = true
     result.forbiddenOperationsDenied = true
    } else {
     assert.equal((await get('/grafana/api/users')).status, 200)

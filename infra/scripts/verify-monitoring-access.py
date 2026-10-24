@@ -15,6 +15,10 @@ Q = Path('/root/helix-phase21.3')
 def main():
     credentials = {role: json.loads((Path('/etc/helix/monitoring-handoff') / (role + '.json')).read_text())
                    for role in ['administrator', 'stakeholder']}
+    sensitive_values = [value['password'].encode() for account in credentials.values()
+                        for value in account.values()]
+    sensitive_values += [Path('/etc/helix/docker-secrets', name).read_text().strip().encode()
+                         for name in ['metrics_token', 'grafana_secret_key']]
     checks = []
 
     def request(path, expected, role=None, method='GET', payload=None, headers=None):
@@ -29,8 +33,7 @@ def main():
             conn.request(method, path, body, h)
             r = conn.getresponse(); data = r.read()
             assert r.status in expected, f'{method} {path}: {r.status}; expected {expected}'
-            assert not any(value['password'].encode() in data for account in credentials.values()
-                           for value in account.values()), 'A response exposed a protected credential; value withheld'
+            assert not any(value in data for value in sensitive_values), 'A response exposed a protected credential; value withheld'
             checks.append({'path': path, 'role': role or 'anonymous', 'method': method, 'status': r.status})
             return r, data
         finally: conn.close()
@@ -57,6 +60,11 @@ def main():
                  '/prometheus/metrics', '/prometheus/federate', '/prometheus/-/reload',
                  '/prometheus/api/v1/admin/tsdb/delete_series', '/internal/metrics', '/metrics', '/.env']:
         request(path, [404])
+    for base in ['proxy/uid/helix-prometheus', 'uid/helix-prometheus/resources']:
+        for suffix in ['api/v1/status/config', 'api/v1/status/runtimeinfo', 'api/v1/targets', 'metrics']:
+            path = '/grafana/api/datasources/' + base + '/' + suffix
+            request(path, [404])
+            request(path, [404], 'stakeholder')
     for path in ['//grafana/api/user', '/%67rafana/api/user', '/grafana%2fapi/user',
                  '/grafana//api/user', '/%70rometheus/api/v1/query', '/prometheus%2fapi/v1/query']:
         request(path, [401])
@@ -68,6 +76,7 @@ def main():
     request('/prometheus/api/v1/query?query=up', [200], 'administrator')
     request('/prometheus/api/v1/targets', [200], 'administrator')
     request('/prometheus/api/v1/status/runtimeinfo', [200], 'administrator')
+    request('/prometheus/api/v1/status/config', [200], 'administrator')
     request('/prometheus/api/v1/query', [403], 'administrator', 'POST', {'query': 'up'})
     request('/grafana/api/user', [401], 'stakeholder')
     for role in credentials:

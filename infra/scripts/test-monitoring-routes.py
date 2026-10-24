@@ -183,6 +183,21 @@ http {{
                          '/prometheus/-/reload', '/prometheus/-/healthy'):
                 request(path, 404)
                 request(path, 404, auth=authorized)
+            for base in ('proxy/uid/helix-prometheus', 'uid/helix-prometheus/resources',
+                         'proxy/1', '1/resources'):
+                for suffix in ('api/v1/status/config', 'api/v1/status/runtimeinfo',
+                               'api/v1/targets', 'metrics', 'federate', '-/reload'):
+                    path = '/grafana/api/datasources/' + base + '/' + suffix
+                    request(path, 404)
+                    request(path, 404, auth=viewer)
+                    request(path, 404, auth=authorized)
+                for suffix in ('api/v1/query?query=up', 'api/v1/metadata'):
+                    request('/grafana/api/datasources/' + base + '/' + suffix, 200, auth=viewer)
+            for path in ('/grafana/api/datasources/uid/helix-prometheus/resources/%61pi/v1/status/config',
+                         '/grafana/api/datasources/uid/helix-prometheus/resources//api/v1/status/config',
+                         '/grafana/api/datasources/uid/helix-prometheus/resources/%61pi/v1/metadata',
+                         '/grafana/api/datasources/uid/helix-prometheus/resources/api/v1/status/config/../../query'):
+                request(path, 404, auth=viewer)
             rate_statuses = []
             for _ in range(16):
                 connection = http.client.HTTPConnection('127.0.0.1', port, timeout=5)

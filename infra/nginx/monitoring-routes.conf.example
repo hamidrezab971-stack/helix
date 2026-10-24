@@ -7,6 +7,9 @@ location = /grafana {
     try_files /__helix_no_such_monitoring_file__ =404;
 }
 location ^~ /grafana/ {
+    # Safe rewrite-phase return: no public path can tunnel privileged Prometheus
+    # endpoints through Grafana's authenticated datasource resource proxy.
+    if ($helix_monitoring_block_datasource) { return 404; }
     include /etc/nginx/snippets/helix-monitoring-access.conf;
     # Keep the prefix: Grafana handles it with serve_from_sub_path=true.
     proxy_pass http://127.0.0.1:13000;
