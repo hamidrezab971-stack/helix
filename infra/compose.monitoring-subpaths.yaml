@@ -1,5 +1,4 @@
-# Optional, NOT used by active production. Use only after administrator access
-# and the monitoring release gates pass. Recreate Prometheus alone, never app.
+# Phase 21.3 protected browser overlay. Recreate Prometheus alone, never app.
 # route-prefix=/ preserves the existing private datasource/scrape URLs.
 services:
   prometheus:

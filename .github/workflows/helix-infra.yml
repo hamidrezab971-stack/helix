@@ -29,6 +29,8 @@ jobs:
           python -m compileall -q infra/scripts
           node --check infra/scripts/smoke-browser.cjs
           node --check infra/scripts/public-https-check.cjs
+          node --check infra/scripts/verify-monitoring-browser.cjs
+          node --check infra/scripts/verify-production-existing-messaging.cjs
           cd smooth/backend
           python -m unittest discover -s tests -p test_phase212_metrics.py -v
       - name: Verify protected monitoring proxy with isolated upstreams
@@ -36,6 +38,9 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install --no-install-recommends -y nginx
           python infra/scripts/test-monitoring-routes.py
+      - name: Validate warning, critical and recovery disk alert thresholds
+        run: |
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=128m,mode=1777 --cap-drop ALL --security-opt no-new-privileges:true --user 65534:65534 -v "$PWD/infra/prometheus:/rules:ro" -w /rules --entrypoint promtool quay.io/prometheus/prometheus@sha256:aafa9d694e6a883c02db516d9f6e5b84e14195f49a2a6456a4cca815edda72b9 test rules alerts.test.yml
       # Image build and full real-stack acceptance need the reviewed digest lock
       # and a verified private data copy. They are intentionally not claimed here.
   public-https:

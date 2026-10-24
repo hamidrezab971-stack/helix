@@ -1,5 +1,20 @@
-# Install in the http context only when the reviewed routes are enabled.
+# Install in the http context. Keys use the socket peer, never forwarded input.
 map $http_upgrade $helix_monitoring_connection {
     default upgrade;
     '' close;
+}
+map "$request_method:$uri" $helix_monitoring_login_key {
+    default "";
+    "POST:/grafana/login" $binary_remote_addr;
+}
+limit_req_zone $binary_remote_addr zone=helix_monitoring_requests:10m rate=20r/s;
+limit_req_zone $helix_monitoring_login_key zone=helix_monitoring_login:1m rate=6r/m;
+# A Grafana Viewer may query metrics, but must not use datasource proxy/resource
+# APIs as a second route to the administrator-only Prometheus status/config UI.
+# Require a canonical raw path as well as the normalized URI. This prevents
+# a difference between Nginx and upstream URL decoding from escaping the list.
+map "$uri|$request_uri" $helix_monitoring_block_datasource {
+    default 0;
+    ~^(/grafana/api/datasources/(?:proxy/(?:uid/[A-Za-z0-9_-]+|[0-9]+)|(?:uid/[A-Za-z0-9_-]+|[0-9]+)/resources)/api/v1/(?:query|query_range|query_exemplars|labels|metadata|series|parse_query|label/[A-Za-z0-9_:]+/values|status/buildinfo)/?)\|\1(?:\?.*)?$ 0;
+    ~^/grafana/api/datasources/(?:proxy(?:/|$)|(?:uid/[^/]+|[0-9]+)/resources(?:/|$)) 1;
 }

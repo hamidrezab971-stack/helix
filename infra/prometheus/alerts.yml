@@ -14,6 +14,12 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: HELIX HTTP 5xx responses exceed 5 percent
+      - alert: HostDiskSpaceWarning
+        expr: node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs",mountpoint="/"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs",mountpoint="/"} < 0.20
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: Host root disk has less than 20 percent available
       - alert: HostLowDiskSpace
         expr: node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs",mountpoint="/"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs",mountpoint="/"} < 0.15
         for: 10m
