@@ -1,0 +1,6 @@
+# Only named monitoring administrators occur in this separate password file.
+satisfy all;
+auth_basic "HELIX monitoring";
+auth_basic_user_file /etc/nginx/helix-monitoring-admin.htpasswd;
+limit_req zone=helix_monitoring_requests burst=100 nodelay;
+limit_req_status 429;

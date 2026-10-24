@@ -1,6 +1,43 @@
 rule_files: [alerts.yml]
 evaluation_interval: 1m
 tests:
+  - name: disk warning precedes critical and excludes temporary filesystems
+    interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/"}'
+        values: '19x12'
+      - series: 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/"}'
+        values: '100x12'
+      - series: 'node_filesystem_avail_bytes{fstype="tmpfs",mountpoint="/"}'
+        values: '1x12'
+      - series: 'node_filesystem_size_bytes{fstype="tmpfs",mountpoint="/"}'
+        values: '100x12'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: HostDiskSpaceWarning
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: HostDiskSpaceWarning
+        exp_alerts:
+          - exp_labels: {fstype: ext4, mountpoint: /, severity: warning}
+            exp_annotations: {summary: Host root disk has less than 20 percent available}
+      - eval_time: 12m
+        alertname: HostLowDiskSpace
+        exp_alerts: []
+  - name: recovered disk does not alert at twenty percent
+    interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/"}'
+        values: '20x12'
+      - series: 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/"}'
+        values: '100x12'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: HostDiskSpaceWarning
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: HostLowDiskSpace
+        exp_alerts: []
   - name: real target and database health failure thresholds
     interval: 1m
     input_series:

@@ -1,5 +1,4 @@
-# NOT INSTALLED. Replace the four deny locations in the TLS HELIX server only
-# after Grafana passes its own release gate and admin access is provisioned.
+# Phase 21.3: installed in the existing TLS server by deploy-monitoring-browser.py.
 # Grafana itself retains login, RBAC and plugin signature verification.
 # Redirects use error_page so Nginx access checks run before canonicalization.
 location = /grafana {
@@ -31,15 +30,20 @@ location ^~ /grafana/ {
     proxy_cookie_flags ~ secure httponly samesite=lax;
 }
 location = /prometheus {
-    include /etc/nginx/snippets/helix-monitoring-access.conf;
+    include /etc/nginx/snippets/helix-monitoring-admin-access.conf;
     error_page 404 =308 https://helix.localip.ir/prometheus/;
     try_files /__helix_no_such_monitoring_file__ =404;
 }
 location = /prometheus/metrics { return 404; }
+location = /prometheus/federate { return 404; }
 location ^~ /prometheus/api/v1/admin/ { return 404; }
+location ^~ /prometheus/api/v1/write { return 404; }
+location ^~ /prometheus/api/v1/read { return 404; }
+location ^~ /prometheus/api/v1/otlp/ { return 404; }
 location ^~ /prometheus/-/ { return 404; }
 location ^~ /prometheus/ {
-    include /etc/nginx/snippets/helix-monitoring-access.conf;
+    include /etc/nginx/snippets/helix-monitoring-admin-access.conf;
+    limit_except GET HEAD { deny all; }
     # Strip the public prefix; private API and scrape paths stay unchanged.
     proxy_pass http://127.0.0.1:19090/;
     proxy_http_version 1.1;
@@ -47,6 +51,20 @@ location ^~ /prometheus/ {
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $remote_addr;
     proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-Host $host;
     proxy_set_header X-Forwarded-Prefix /prometheus;
     proxy_set_header Authorization "";
 }
+location = /monitoring {
+    include /etc/nginx/snippets/helix-monitoring-access.conf;
+    error_page 404 =308 https://helix.localip.ir/monitoring/;
+    try_files /__helix_no_such_monitoring_file__ =404;
+}
+location ^~ /monitoring/ {
+    include /etc/nginx/snippets/helix-monitoring-access.conf;
+    root /var/www/helix-monitoring;
+    try_files /index.html =404;
+}
+# Nginx normalizes escapes and repeated slashes before choosing locations.
+# Deny malformed/case-varied near-matches instead of the application's SPA.
+location ~* ^/(grafana|prometheus|monitoring)(?:[^a-z0-9_-]|$) { return 404; }

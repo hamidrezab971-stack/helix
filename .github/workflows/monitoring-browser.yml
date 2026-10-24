@@ -1,0 +1,60 @@
+name: Phase 21.3 external authenticated monitoring
+on:
+  push:
+    branches: ['phase21.3-browser-monitoring']
+    paths: ['infra/scripts/verify-monitoring-browser.cjs', 'infra/scripts/verify-production-existing-messaging.cjs', 'infra/scripts/public-https-check.cjs', 'infra/nginx/**', '.github/workflows/monitoring-browser.yml']
+permissions:
+  contents: read
+concurrency:
+  group: phase213-external-production-acceptance
+  cancel-in-progress: false
+jobs:
+  external-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated Chromium tooling
+        run: |
+          npm install --ignore-scripts --prefix /tmp/helix213-browser playwright@1.64.1
+          /tmp/helix213-browser/node_modules/.bin/playwright install --with-deps chromium
+      - name: External anonymous and authenticated browser acceptance
+        env:
+          HELIX_TEST_CREDS: ${{ secrets.HELIX_PHASE213_BROWSER_CREDS }}
+          HELIX_MESSAGING_CREDS: ${{ secrets.HELIX_PHASE213_MESSAGING_CREDS }}
+          NODE_PATH: /tmp/helix213-browser/node_modules
+          HELIX_MONITORING_EVIDENCE: ${{ runner.temp }}/helix213-evidence
+          HELIX_MONITORING_CREDENTIALS_FILE: ${{ runner.temp }}/helix213-credentials.json
+          HELIX_MESSAGING_CREDENTIALS_FILE: ${{ runner.temp }}/helix213-messaging.json
+        run: |
+          set -euo pipefail
+          umask 077
+          trap 'rm -f "$HELIX_MONITORING_CREDENTIALS_FILE" "$HELIX_MESSAGING_CREDENTIALS_FILE"' EXIT
+          python3 - <<'PY'
+          import os,json
+          from pathlib import Path
+          for source,target in [('HELIX_TEST_CREDS','HELIX_MONITORING_CREDENTIALS_FILE'),('HELIX_MESSAGING_CREDS','HELIX_MESSAGING_CREDENTIALS_FILE')]:
+              value=os.environ.pop(source)
+              assert value, 'Required temporary production acceptance secret is absent'
+              json.loads(value)
+              Path(os.environ[target]).write_text(value)
+          PY
+          unset HELIX_TEST_CREDS HELIX_MESSAGING_CREDS
+          node infra/scripts/public-https-check.cjs
+          node infra/scripts/verify-monitoring-browser.cjs
+          node infra/scripts/verify-production-existing-messaging.cjs
+      - name: Retain sanitized acceptance reports only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: phase213-external-browser-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/helix213-evidence/monitoring-browser.json
+            ${{ runner.temp }}/helix213-evidence/messaging-browser.json
+          if-no-files-found: error
+          retention-days: 30

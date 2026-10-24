@@ -44,6 +44,8 @@ class Upstream(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    do_POST = do_GET
+
 
 def main():
     if not shutil.which('nginx'):
@@ -59,12 +61,19 @@ def main():
             password = secrets.token_urlsafe(24)
             hashed = subprocess.check_output(['openssl', 'passwd', '-apr1', '-stdin'],
                                              input=(password + '\n').encode()).decode().strip()
-            (work / 'htpasswd').write_text('integration-admin:' + hashed + '\n')
+            (work / 'htpasswd').write_text('integration-admin:' + hashed + '\nintegration-viewer:' + hashed + '\n')
+            (work / 'admin.htpasswd').write_text('integration-admin:' + hashed + '\n')
+            (work / 'index.html').write_text('HELIX monitoring navigation')
             access = (ROOT / 'nginx/monitoring-access.conf.example').read_text().replace(
                 '/etc/nginx/helix-monitoring.htpasswd', str(work / 'htpasswd'))
             (work / 'access.conf').write_text(access)
+            admin_access = (ROOT / 'nginx/monitoring-admin-access.conf.example').read_text().replace(
+                '/etc/nginx/helix-monitoring-admin.htpasswd', str(work / 'admin.htpasswd'))
+            (work / 'admin-access.conf').write_text(admin_access)
             routes = (ROOT / 'nginx/monitoring-routes.conf.example').read_text().replace(
                 '/etc/nginx/snippets/helix-monitoring-access.conf', str(work / 'access.conf'))
+            routes = routes.replace('/etc/nginx/snippets/helix-monitoring-admin-access.conf',
+                                    str(work / 'admin-access.conf')).replace('/var/www/helix-monitoring', str(work))
             for port in (13000, 19090):
                 routes = routes.replace('127.0.0.1:' + str(port),
                                         '127.0.0.1:' + str(backend.server_port))
@@ -110,6 +119,8 @@ http {{
                 raise RuntimeError('Isolated Nginx failed to listen')
             authorized = 'Basic ' + base64.b64encode(
                 ('integration-admin:' + password).encode()).decode()
+            viewer = 'Basic ' + base64.b64encode(
+                ('integration-viewer:' + password).encode()).decode()
 
             def request(path, expected, *, auth=None, source='127.0.0.1', headers=None):
                 nonlocal checks
@@ -135,7 +146,7 @@ http {{
                 response, _ = request(path, 401)
                 assert 'HELIX monitoring' in response.getheader('WWW-Authenticate')
                 request(path, 401, auth='Basic aW52YWxpZDppbnZhbGlk')
-                request(path, 403, auth=authorized, source='127.0.0.2', headers={
+                request(path, 401, source='127.0.0.2', headers={
                     'X-Forwarded-For': '127.0.0.1', 'X-Real-IP': '127.0.0.1'})
             for prefix in ('grafana', 'prometheus'):
                 response, _ = request('/' + prefix, 308, auth=authorized)
@@ -157,13 +168,33 @@ http {{
                 'Upgrade': 'websocket', 'Connection': 'Upgrade', 'Sec-WebSocket-Version': '13',
                 'Sec-WebSocket-Key': base64.b64encode(secrets.token_bytes(16)).decode(),
                 'Origin': 'https://helix.localip.ir'})
+            request('/grafana/api/live/ws', 401, headers={'Upgrade': 'websocket', 'Connection': 'Upgrade'})
+            request('/grafana/public/build/example.js', 200, auth=viewer, source='127.0.0.2')
+            request('/prometheus/', 401, auth=viewer)
+            request('/prometheus/api/v1/query?query=up', 401, auth=viewer)
+            request('/monitoring/', 200, auth=viewer)
+            request('/monitoring', 401)
+            for path in ('/Grafana/api/user', '/grafana;bad/api/user', '/Prometheus/api/v1/query'):
+                request(path, 404)
+            for path in ('//grafana/api/user', '/%67rafana/api/user', '/grafana%2fapi/user',
+                         '/prometheus//api/v1/query', '/%70rometheus/api/v1/query'):
+                request(path, 401)
             for path in ('/prometheus/metrics', '/prometheus/api/v1/admin/tsdb/delete_series',
                          '/prometheus/-/reload', '/prometheus/-/healthy'):
                 request(path, 404)
                 request(path, 404, auth=authorized)
+            rate_statuses = []
+            for _ in range(16):
+                connection = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
+                connection.request('POST', '/grafana/login', headers={
+                    'Host': 'helix.localip.ir', 'Authorization': authorized})
+                response = connection.getresponse(); response.read()
+                rate_statuses.append(response.status); connection.close(); checks += 1
+            assert rate_statuses[0] == 200 and 429 in rate_statuses, rate_statuses
             print(json.dumps({'result': 'PASS', 'checks': checks,
-                              'acl_and_password_required': True, 'spoofed_forwarding_denied': True,
+                              'separate_viewer_and_admin_edge_access': True, 'spoofed_forwarding_denied': True,
                               'subpaths_cookies_and_live_proxy': True,
+                              'login_rate_limit_verified': True,
                               'production_modified': False, 'grafana_delivery_verified': False}))
     finally:
         if nginx is not None:

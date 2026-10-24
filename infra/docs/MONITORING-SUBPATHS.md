@@ -1,89 +1,70 @@
-# HELIX monitoring subpaths — 2026-10-21
+# HELIX Phase 21.3 — browser monitoring operations
 
-The final fresh review is [FINAL-MONITORING-20261021.fa.md](FINAL-MONITORING-20261021.fa.md)
-with machine-readable evidence in
-[`grafana-release-review-20261021.json`](../security/grafana-release-review-20261021.json).
-`inspect-grafana-runtime.py` now inventories every regular ELF, including all
-bundled datasource binaries, without starting Grafana. The real Nginx templates
-pass 38 isolated integration checks in `test-monitoring-routes.py`; this is not
-evidence of a working production Grafana dashboard. The access template explicitly
-requires `satisfy all` so both the source ACL and password must pass.
+The active production design replaces the historical localhost source ACL with
+HTTPS Basic authentication using separate named administrator and stakeholder
+credentials. Grafana also requires its native session. This is layered password
+authentication, **not MFA**. Anonymous access and sign-up remain disabled.
 
-Production explicitly returns 404 for `/grafana`, `/grafana/`, `/prometheus`
-and `/prometheus/`, including descendant paths. These requests cannot fall
-through to the application SPA. The active Nginx site was syntax checked,
-backed up and reloaded without restarting the application. The optional
-administrator Prometheus UI remains disabled.
+- `/grafana/`: both named edge users, followed by native Grafana login.
+- `/prometheus/`: a separate administrator-only password file; the Viewer is
+  rejected even with valid Grafana credentials. Only GET/HEAD are proxied.
+- `/monitoring/`: protected navigation, without public operational details.
+- Exporters, application metrics, Prometheus metrics/federation, lifecycle,
+  remote write/read and administrative mutation APIs remain unavailable publicly.
 
-Grafana remains stopped. The current official 13.2.4 binary contains
-`github.com/getkin/kin-openapi v0.144.0`; CVE-2026-100354 requires >=0.149.0.
-A fresh scan of the complete publisher image reports 75 High findings,
-13 distinct High CVEs and zero Critical. This includes CVE-2026-111943,
-requiring Go 1.26.10 or 1.27.3; the main binary embeds Go 1.26.9.
-The historical 11 High count describes a different, pruned local image.
-Neither artifact is qualified for public exposure.
+Grafana retains its qualified image, internal `http://prometheus:9090` datasource,
+secure/HttpOnly/SameSite=Lax session cookie and allowed Live origin. Nginx keeps
+`/grafana/`, strips `/prometheus/`, discards client Authorization before proxying,
+overwrites forwarding headers using the socket peer and supports Live upgrades.
+Prometheus uses external URL `https://helix.localip.ir/prometheus/` with route
+prefix `/`; collection and datasource paths stay private and unchanged.
 
-Official image identity:
+`infra/nginx/helix-docker.conf` records the complete active TLS site. The three
+monitoring snippets/templates are installed by `deploy-monitoring-browser.py`.
+Login POSTs have a 6/minute per-peer limit with a 12-request burst; other monitoring
+requests have a 20/second limit and 100-request burst, avoiding asset failures.
+The isolated real-Nginx integration test verifies a real 429 response as well.
 
-| Object | SHA256 |
-| --- | --- |
-| Reference | `dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f` |
-| amd64 manifest | `7b22f3edf947329d75eba7a62d9f6ea1ac1e786736813ef7a98cfb275a52e49b` |
-| OCI configuration | `45900b2eda7da0cbda80b9025e446147d9085fee71675ba86a48a1cad34e4c8a` |
-| Extracted main binary | `91040ca83733197346a586b79b102a408b269d0d63af72fb78f6f5055ea0df15` |
+Deployment and rollback:
 
-The manifest/config/layer chain and binary were independently inspected.
-Publisher image signature verification is **not claimed**. No custom binary
-was deployed; no plugin signature setting was relaxed.
+```sh
+python3 infra/scripts/deploy-monitoring-browser.py
+python3 infra/scripts/deploy-monitoring-browser.py --rollback
+```
 
-The checked-in Grafana configuration prepares HTTPS root URL
-`https://helix.localip.ir/grafana/`, subpath handling, secure session cookies
-and the permitted Live origin. It is not applied to a running Grafana service.
-The existing `grafana-reviewed` Compose profile remains mandatory.
+Activation checks the exact Grafana runtime image and security environment,
+backs up configuration, provisions independent strong random credentials,
+recreates **only Prometheus** to change its web flags, validates Nginx and reloads
+it, then runs the production security contract. A failed activation restores the
+previous private routes. The application, Node Exporter and Grafana containers
+are neither recreated nor rebuilt. Existing rollback directories are preserved.
 
-`nginx/monitoring-routes.conf.example`, `monitoring-http.conf.example` and
-`monitoring-access.conf.example` are uninstalled templates. The access template
-requires both a loopback connection and an administrator password. Remote
-administrators must use an approved SSH tunnel or replace the loopback ACL
-with a verified VPN administrator range. Do not trust client-supplied
-forwarded headers for access control. Keep `satisfy all`, the Nginx default.
-Provision the password file outside Git, with only root/Nginx access.
-Grafana keeps its own login and RBAC; edge Basic credentials are stripped
-before proxying, so Grafana uses its authenticated session cookie.
+The immutable original rollback is `/root/helix-phase21.3/rollback/`; its manifest
+covers Nginx, authentication files, Prometheus rules/overlay, landing page and
+journald retention. Keep it protected. Native Viewer provisioning is additive;
+closing the edge is sufficient to revoke browser exposure during rollback.
 
-The Grafana proxy retains `/grafana/`, forwards the real HTTPS/host headers
-and supports `/grafana/api/live/ws`. The optional Prometheus overlay sets
-`--web.external-url=https://helix.localip.ir/prometheus/` and
-`--web.route-prefix=/`. Its proxy removes the external prefix, preserving
-private API, health and scrape URLs. The overlay publishes only
-`127.0.0.1:19090`; it is not used by active production. No lifecycle/admin
-API flags are enabled; Nginx additionally denies these endpoints and metrics.
+Credential handoff: `/etc/helix/monitoring-handoff/stakeholder.json` is root-only
+(0600 under a 0700 directory). It contains the independent edge and Viewer login.
+The operator delivers **only this file's contents**, using an approved private
+channel or password manager; the stakeholder subsequently uses a normal browser
+and needs no SSH or tunnel. The administrator file must never be delivered to
+the stakeholder. Handoff to the person is a human operational step; do not put
+credentials in issues, PRs, CI logs, screenshots or chat.
 
-To enable in a future reviewed release:
+External acceptance uses temporary encrypted GitHub repository secrets, read
+into mode-0600 files in a GitHub-hosted runner. Only reviewed acceptance scripts
+receive them; browser sessions, HAR, traces, login screenshots and secrets are
+never uploaded. Delete these temporary repository secrets after acceptance.
+The authenticated workflow is restricted to this delivery branch and relevant
+configuration/test paths; ordinary anonymous external regression runs remain.
 
-1. Qualify a supported publisher image with fixed embedded dependencies,
-   verify the immutable artifact/signature using the publisher's documented
-   signing identity, rescan all binaries/plugins and pass its release gates.
-2. Provision the approved administrator access mechanism. Validate anonymous,
-   wrong-password and non-VPN clients are denied, including Live connections.
-3. Install the HTTP map and protected access snippet, then replace the four
-   monitoring deny locations with the reviewed route template. Do not keep
-   duplicate locations. Back up the current site and run `nginx -t` first.
-4. If the optional Prometheus UI is approved, use its Compose overlay and
-   recreate **only Prometheus**, preserving its existing volume. Do not run
-   a broad Compose recreation or restart the application.
-5. Start Grafana only after its own gate passes. Test authenticated redirects,
-   static assets, cookie scope/security, Live upgrades, all 26 rendered panels
-   and all 30 queries from an external administrator browser. Restore explicit
-   deny locations if any access/security test fails.
+Storage: Prometheus retains 15 days or 2GB, whichever threshold is reached first
+(with normal WAL/head overhead). Existing per-container local log rotation is
+10MB x 3. Journald is capped at 256MB/30 days with 2GB keep-free; no historical
+journals were vacuumed. Root-filesystem available/size metrics drive a warning
+below 20% and critical below 15%, sustained for ten minutes.
 
-The current read-only `public-https-check.cjs` tests public denial and HELIX
-assets, not an enabled Grafana interface. `verify-production-metrics.py`
-matches the actual production process start time against its Prometheus
-series and checks all dashboard expressions for fresh finite observations.
-An empty Active alerts result is valid; Grafana rendering remains unverified.
-
-Primary references: [Grafana releases](https://github.com/grafana/grafana/releases),
-[kin-openapi advisory](https://github.com/getkin/kin-openapi/security/advisories/GHSA-g8cf-rcjf-c8cf),
-[Grafana proxy configuration](https://grafana.com/tutorials/run-grafana-behind-a-proxy/),
-[Prometheus command-line flags](https://prometheus.io/docs/prometheus/latest/command-line/prometheus/).
+The October 21 and 23 reports are historical evidence. Current results and the
+full panel/query inventory are in `PHASE21.3.fa.md`; never infer current service
+health from those earlier reports.

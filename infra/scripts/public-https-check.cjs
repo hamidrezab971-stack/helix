@@ -46,9 +46,8 @@ async function main() {
     const deniedStatuses = {}
     for (const path of denied) {
       const status = (await context.request.get(origin + path)).status()
-      // Private administrator routes return 403 to external source addresses;
-      // suspended routes and all other protected application paths retain 404.
-      assert((path.startsWith('/grafana') ? [403, 404] : [404]).includes(status), path)
+      const monitoring = path.startsWith('/grafana') || path.startsWith('/prometheus')
+      assert.equal(status, monitoring ? 401 : 404, path)
       deniedStatuses[path] = status
       assert.equal((await context.request.get(origin + path, {
         headers: { Authorization: 'Basic ' + Buffer.from('unauthorized:invalid').toString('base64'),
@@ -62,7 +61,7 @@ async function main() {
     console.log(JSON.stringify({ origin, chromium: browser.version(), application: 'PASS',
       assets: scripts.length + styles.length, deniedPaths: denied.length,
       anonymousAndUnauthorizedDenied: true, deniedStatuses,
-      monitoring: deniedStatuses['/grafana/'] === 403 ? 'PRIVATE ACCESS ONLY' : 'NOT ENABLED', browserErrors: errors }))
+      monitoring: 'AUTHENTICATED BROWSER ACCESS; separate role tests required', browserErrors: errors }))
   } finally {
     await browser.close()
   }

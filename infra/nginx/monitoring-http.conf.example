@@ -1,5 +1,11 @@
-# Install in the http context only when the reviewed routes are enabled.
+# Install in the http context. Keys use the socket peer, never forwarded input.
 map $http_upgrade $helix_monitoring_connection {
     default upgrade;
     '' close;
 }
+map "$request_method:$uri" $helix_monitoring_login_key {
+    default "";
+    "POST:/grafana/login" $binary_remote_addr;
+}
+limit_req_zone $binary_remote_addr zone=helix_monitoring_requests:10m rate=20r/s;
+limit_req_zone $helix_monitoring_login_key zone=helix_monitoring_login:1m rate=6r/m;
