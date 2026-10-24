@@ -1,0 +1,99 @@
+{
+  "phase": "21.3",
+  "status": "DEPLOYED_VERIFIED",
+  "at": 1792806306.6274786,
+  "verified_configuration_commit": "b34f53197dff8f49bf141414817a0962c19b8a5d",
+  "external_browser_run": "https://github.com/hamidrezab971-stack/helix/actions/runs/40050603850",
+  "external_browser_result": "PASS",
+  "roles": [
+    {
+      "role": "stakeholder",
+      "android_emulation": false,
+      "dashboards": 3,
+      "panels": 26,
+      "queries": 30,
+      "live": {
+        "websocketConnected": true,
+        "protocolConnected": true
+      },
+      "session": {
+        "secure": true,
+        "httpOnly": true,
+        "sameSite": "Lax",
+        "path": "/grafana"
+      },
+      "prometheus_datasource_boundary_protected": true
+    },
+    {
+      "role": "administrator",
+      "android_emulation": false,
+      "dashboards": 3,
+      "panels": 26,
+      "queries": 30,
+      "live": {
+        "websocketConnected": true,
+        "protocolConnected": true
+      },
+      "session": {
+        "secure": true,
+        "httpOnly": true,
+        "sameSite": "Lax",
+        "path": "/grafana"
+      },
+      "prometheus_datasource_boundary_protected": null
+    },
+    {
+      "role": "stakeholder",
+      "android_emulation": true,
+      "dashboards": 3,
+      "panels": 26,
+      "queries": 30,
+      "live": {
+        "websocketConnected": true,
+        "protocolConnected": true
+      },
+      "session": {
+        "secure": true,
+        "httpOnly": true,
+        "sameSite": "Lax",
+        "path": "/grafana"
+      },
+      "prometheus_datasource_boundary_protected": true
+    }
+  ],
+  "production_health": "ok",
+  "all_four_containers_healthy": true,
+  "original_app_node_grafana_containers_unchanged": true,
+  "original_images_and_data_mounts_unchanged": true,
+  "original_dashboards_byte_for_byte_preserved": true,
+  "disk": {
+    "before": {
+      "total": 61285326848,
+      "available": 7158636544,
+      "used": 54109913088
+    },
+    "after": {
+      "total": 61285326848,
+      "used": 48443781120,
+      "available": 12824768512,
+      "available_percent": 20.926327999862053,
+      "inode_total": 7733248,
+      "inode_used": 849646
+    },
+    "net_available_bytes_reclaimed": 5666131968
+  },
+  "database_and_existing_uploads_preserved": true,
+  "temporary_ci_secrets_deleted": true,
+  "credential_handoff": "root-only stakeholder.json ready; authorized operator must deliver privately",
+  "pr": "https://github.com/hamidrezab971-stack/helix/pull/4",
+  "merged": false,
+  "remaining_human_actions": [
+    "Deliver stakeholder credentials over an approved private channel",
+    "Repository owner reviews and approves PR before any merge"
+  ],
+  "limitations": [
+    "Android is Chromium device emulation, not a physical handset",
+    "Full server session lifetime was not waited; cookie expiry and server revocation were tested",
+    "No new image vulnerability scan is claimed; approved image was retained"
+  ]
+}

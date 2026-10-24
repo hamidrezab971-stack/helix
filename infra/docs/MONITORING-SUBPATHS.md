@@ -24,6 +24,9 @@ monitoring snippets/templates are installed by `deploy-monitoring-browser.py`.
 Login POSTs have a 6/minute per-peer limit with a 12-request burst; other monitoring
 requests have a 20/second limit and 100-request burst, avoiding asset failures.
 The isolated real-Nginx integration test verifies a real 429 response as well.
+Datasource proxy/resource paths additionally allow only metric-query/metadata APIs;
+config, runtime, targets, federation and raw metrics cannot bypass the admin edge.
+Encoded or noncanonical proxy paths are rejected before reaching the upstream.
 
 Deployment and rollback:
 

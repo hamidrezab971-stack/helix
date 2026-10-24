@@ -1,0 +1,82 @@
+{
+  "at": 1792806306.483179,
+  "files": [
+    {
+      "path": "/etc/nginx/sites-available/helix.localip.ir.conf",
+      "source": "infra/nginx/helix-docker.conf",
+      "sha256": "89d290b9af396622ed9cc64cdc631b9360e266b55b250684b8faa9e7b0b595dc"
+    },
+    {
+      "path": "/etc/nginx/conf.d/helix-monitoring-http.conf",
+      "source": "infra/nginx/monitoring-http.conf.example",
+      "sha256": "ab032334850dae24c3428ad99509956d2072717c0a9c3c9f34784ecd11fedd69"
+    },
+    {
+      "path": "/etc/nginx/snippets/helix-monitoring-access.conf",
+      "source": "infra/nginx/monitoring-access.conf.example",
+      "sha256": "7c840acf63964fd2b9e7498f274bb0b65e6edb3c9cedcb575b96cb40285bc3d9"
+    },
+    {
+      "path": "/etc/nginx/snippets/helix-monitoring-admin-access.conf",
+      "source": "infra/nginx/monitoring-admin-access.conf.example",
+      "sha256": "1493b95de1dea2fa730ae6f0cb8fcde0440ec8d2ed3234563f3e666cf7d29b0b"
+    },
+    {
+      "path": "/var/www/helix-monitoring/index.html",
+      "source": "infra/nginx/monitoring-index.html",
+      "sha256": "72959dd3f197fc5758656827b0838aa2be6f2960218fbcd8731ed812d23244fe"
+    },
+    {
+      "path": "/opt/helix-docker-production/infra/compose.yaml",
+      "source": "infra/compose.yaml",
+      "sha256": "a059c2da15304f496f9b839b79ab16e17fbf186def8fd5191c9130b8ee3251b1"
+    },
+    {
+      "path": "/opt/helix-docker-production/infra/compose.monitoring-subpaths.yaml",
+      "source": "infra/compose.monitoring-subpaths.yaml",
+      "sha256": "b951e7660f097e11a4a85cf9881cd176a5efeb09ea503e64a36f27f3d0e86345"
+    },
+    {
+      "path": "/opt/helix-docker-production/infra/prometheus/alerts.yml",
+      "source": "infra/prometheus/alerts.yml",
+      "sha256": "cc25607bf5f393f8202d6a322000530b930780d4f0d5eb1591e93898a9b97977"
+    },
+    {
+      "path": "/etc/systemd/journald.conf.d/helix-retention.conf",
+      "source": "infra/systemd/helix-journald-retention.conf",
+      "sha256": "6110fb94a92fc913128b4ac59c523b01e33fdd615b795eff8dcea211f19bf2aa"
+    },
+    {
+      "path": "/opt/helix-docker-production/infra/grafana/dashboards/services.json",
+      "source": "infra/grafana/dashboards/services.json",
+      "sha256": "41f167e5b06a6140b212013e5b240c6427e0d00b6b5bb1a0bfa4b94d337db680"
+    },
+    {
+      "path": "/opt/helix-docker-production/infra/grafana/dashboards/infrastructure.json",
+      "source": "infra/grafana/dashboards/infrastructure.json",
+      "sha256": "18b1e291ebca51842b24c64363c8ed8cdc75d46beaee960ead675197cbd72eb9"
+    },
+    {
+      "path": "/opt/helix-docker-production/infra/grafana/dashboards/application.json",
+      "source": "infra/grafana/dashboards/application.json",
+      "sha256": "b1134f09cac76bfd9e591151d0f98bdb0879302b7f166b58466d4982e6854feb"
+    },
+    {
+      "path": "/opt/helix-docker-production/infra/grafana/provisioning/datasources/prometheus.yml",
+      "source": "infra/grafana/provisioning/datasources/prometheus.yml",
+      "sha256": "4b07bc1efeed0a1084762deaa9f1fbce60fb781b81eb58cd4f37f48a642a5557"
+    },
+    {
+      "path": "/opt/helix-docker-production/infra/grafana/provisioning/dashboards/helix.yml",
+      "source": "infra/grafana/provisioning/dashboards/helix.yml",
+      "sha256": "36b7131d80873e5b26b28a766b4fe998b058962906fd792849185aea8b064b7a"
+    },
+    {
+      "path": "/opt/helix-docker-production/infra/prometheus/prometheus.yml",
+      "source": "infra/prometheus/prometheus.yml",
+      "sha256": "ed2e22782d17d668a4d6284d775adaa967130df9ecca3789fb96f4db68d18e93"
+    }
+  ],
+  "all_match_repository": true,
+  "matches_commit": "b34f53197dff8f49bf141414817a0962c19b8a5d"
+}
