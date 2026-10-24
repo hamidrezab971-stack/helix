@@ -95,6 +95,7 @@ def rollback():
     subprocess.run(['nginx', '-t'], check=True)
     subprocess.run(['systemctl', 'reload', 'nginx'], check=True)
     recreate_prometheus(False)
+    subprocess.run(['systemctl', 'restart', 'systemd-journald'], check=True)
     (Q / 'exposure-rolled-back.json').write_text(json.dumps({'at': time.time(), 'closed': True}) + '\n')
 
 

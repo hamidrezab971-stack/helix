@@ -147,11 +147,13 @@ async function main() {
      await p.waitForTimeout(1000)
      assert((await p.locator('body').innerText()).includes('Prometheus'))
      if (route === 'targets') {
+      assert((await p.locator('body').innerText()).includes('Target health'))
       const targets = await context.request.get(origin + '/prometheus/api/v1/targets')
       const data = await targets.json()
       assert.equal(data.data.activeTargets.length, 3)
       assert(data.data.activeTargets.every(x => x.health === 'up' && !x.lastError))
      }
+     if (route === 'status') assert((await p.locator('body').innerText()).includes('Runtime & build information'))
     }
     await p.goto(origin + '/prometheus/query')
     const editor = p.locator('.cm-content[contenteditable="true"]')
@@ -167,7 +169,7 @@ async function main() {
     result.prometheus = { queryBrowserExecuted: true, targets: 3, pagesRendered: ['query', 'targets', 'status'] }
     await p.close()
    }
-   const names = mobile ? ['services'] : ['services', 'infrastructure', 'application']
+   const names = ['services', 'infrastructure', 'application']
    for (const name of names) {
     const d = JSON.parse(fs.readFileSync(root + '/infra/grafana/dashboards/' + name + '.json'))
     const expected = d.panels.flatMap(p => p.targets.map(t => ({ expression: t.expr, allowEmpty: p.title === 'Active alerts' })))
@@ -238,13 +240,23 @@ async function main() {
    await page.waitForURL(u => u.pathname.endsWith('/login'))
    await login(); assert.equal((await get('/grafana/api/user')).status, 200)
    result.revokedSessionDeniedAndReloginPassed = true
+   if (role === 'stakeholder' && !mobile) {
+    const expired = (await context.cookies(origin + '/grafana/')).find(x => x.name === 'grafana_session')
+    await context.addCookies([{ ...expired, expires: Math.floor(Date.now() / 1000) - 10 }])
+    assert(!(await context.cookies(origin + '/grafana/')).some(x => x.name === 'grafana_session'))
+    assert.equal((await context.request.get(origin + '/grafana/api/user')).status(), 401)
+    await page.goto(origin + '/grafana/d/helix-services')
+    await page.waitForURL(u => u.pathname.endsWith('/login'))
+    await login(); assert.equal((await get('/grafana/api/user')).status, 200)
+    result.browserCookieExpiryDeniedAndReloginPassed = true
+   }
    assert(result.assetResponses > 0)
    report.roles.push(result); await context.close()
   }
   await verifyRole('stakeholder')
   await verifyRole('administrator')
   await verifyRole('stakeholder', true)
-  for (const role of report.roles.filter(x => !x.mobile)) {
+  for (const role of report.roles) {
    assert.equal(role.dashboards.reduce((n, d) => n + d.panels, 0), 26)
    assert.equal(role.dashboards.reduce((n, d) => n + d.queries, 0), 30)
   }
